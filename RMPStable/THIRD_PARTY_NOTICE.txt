@@ -1,0 +1,9 @@
+RMP Stable is an independent community mod for Slay the Spire 2.
+
+It expands multiplayer capacity, adapts multiplayer room layouts, prevents
+duplicate remote treasure rewards, and supports the current random-seed API.
+
+RMPStable.pck, its icon, and its English and Simplified Chinese localization
+resources are maintained as part of this project.
+
+This package is not an official Mega Crit release.

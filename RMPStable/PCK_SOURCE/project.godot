@@ -1,0 +1,18 @@
+; RMP Stable resource-pack source project.
+; Open or import this project with Godot 4.5.x.
+
+config_version=5
+
+[application]
+
+config/name="RMP Stable Assets"
+
+[display]
+
+window/size/viewport_width=512
+window/size/viewport_height=512
+
+[rendering]
+
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"

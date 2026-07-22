@@ -1,0 +1,12 @@
+{
+  "id": "RMPStable",
+  "name": "RMP Stable - 16 Player Multiplayer",
+  "version": "0.2.0",
+  "author": "RMP Stable Contributors",
+  "description": "Standalone 16-player multiplayer mod for STS2 v0.107.1 with treasure-room Reward ID desync fixed.",
+  "dependencies": [],
+  "has_pck": true,
+  "has_dll": true,
+  "affects_gameplay": true,
+  "min_game_version": "0.107.1"
+}
