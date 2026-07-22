@@ -1,4 +1,4 @@
-RMP Stable v0.2.0
+RMP Stable v0.2.1
 =================
 
 适用游戏版本：Slay the Spire 2 v0.107.1
@@ -32,7 +32,7 @@ DLL 中的本地化路径也已改为 res://RMPStable/localization/。
 触发“多人游戏数据不同步”。本模组不会注册该重复奖励处理器。
 
 启动日志应出现：
-[RMP Stable] Initializing standalone v0.2.0 for STS2 v0.107.1...
+[RMP Stable] Initializing standalone v0.2.1 for STS2 v0.107.1...
 
 验证建议：
 使用 5～6 人新局，经过至少一个宝箱房后连续切换若干楼层。如果仍然发生不同步，
