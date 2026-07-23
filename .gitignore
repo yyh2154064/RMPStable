@@ -1,0 +1,18 @@
+# One-time migration tools and scratch data
+/.migration/
+/.tools/
+
+# C# build outputs
+**/bin/
+**/obj/
+
+# Godot import cache and generated packages
+RMPStable/assets/.godot/
+RMPStable/**/*.dll
+RMPStable/**/*.pck
+
+# Packager outputs
+RMPStable-Packager/.work/
+RMPStable-Packager/tools/
+RMPStable-Packager/output/*
+!RMPStable-Packager/output/.gitkeep

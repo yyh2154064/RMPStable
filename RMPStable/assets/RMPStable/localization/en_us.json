@@ -1,0 +1,17 @@
+{
+  "SETTINGS_TAB_LABEL": "RMP Stable",
+  "SETTINGS_PLAYER_LIMIT_LABEL": "Max Players",
+  "SETTINGS_DIFFICULTY_SCALING_LABEL": "Difficulty Scaling",
+  "QUICK_SL_BUTTON": "Quick SL",
+  "QUICK_SL_INPUT_LABEL": "Quick SL",
+  "QUICK_SL_CONFIRM_TITLE": "Quick SL",
+  "QUICK_SL_CONFIRM_SINGLE": "Return to the latest checkpoint in the game's native save?",
+  "QUICK_SL_CONFIRM_CLIENT": "Send a Quick SL request to the host?",
+  "QUICK_SL_CONFIRM_HOST": "Reload the current multiplayer save for every player?",
+  "QUICK_SL_REQUEST_TITLE": "Quick SL Request",
+  "QUICK_SL_REQUEST_BODY": "{0} requests a Quick SL. Accept?",
+  "QUICK_SL_REJECTED_TITLE": "Quick SL",
+  "QUICK_SL_REJECTED_BODY": "The host rejected the Quick SL request.",
+  "QUICK_SL_YES": "Confirm",
+  "QUICK_SL_NO": "Cancel"
+}

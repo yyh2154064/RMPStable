@@ -1,0 +1,17 @@
+{
+  "SETTINGS_TAB_LABEL": "RMP Stable 设置",
+  "SETTINGS_PLAYER_LIMIT_LABEL": "联机人数上限",
+  "SETTINGS_DIFFICULTY_SCALING_LABEL": "难度缩放",
+  "QUICK_SL_BUTTON": "快速SL",
+  "QUICK_SL_INPUT_LABEL": "快速SL",
+  "QUICK_SL_CONFIRM_TITLE": "快速SL",
+  "QUICK_SL_CONFIRM_SINGLE": "确定要返回到游戏原生存档的最近检查点吗？",
+  "QUICK_SL_CONFIRM_CLIENT": "确定要向房主发送快速SL请求吗？",
+  "QUICK_SL_CONFIRM_HOST": "确定要让所有玩家重新载入当前联机存档吗？",
+  "QUICK_SL_REQUEST_TITLE": "快速SL请求",
+  "QUICK_SL_REQUEST_BODY": "{0} 请求快速SL，是否同意？",
+  "QUICK_SL_REJECTED_TITLE": "快速SL",
+  "QUICK_SL_REJECTED_BODY": "房主拒绝了快速SL请求。",
+  "QUICK_SL_YES": "确认",
+  "QUICK_SL_NO": "取消"
+}

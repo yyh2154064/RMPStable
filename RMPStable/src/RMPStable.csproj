@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>RMPStable</AssemblyName>
+    <TargetFramework>net7.0</TargetFramework>
+    <LangVersion>11.0</LangVersion>
+    <Nullable>annotations</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <DisableImplicitFrameworkReferences>true</DisableImplicitFrameworkReferences>
+    <NoStdLib>true</NoStdLib>
+    <NoWarn>$(NoWarn);CA1416;SYSLIB0003</NoWarn>
+    <DefaultItemExcludes>$(DefaultItemExcludes);bin/**;obj/**</DefaultItemExcludes>
+  </PropertyGroup>
+
+  <!--
+    STS2 v0.107.1 ships the .NET 9 reference surface used by the mod. The
+    project intentionally disables SDK framework references and compiles
+    against the assemblies beside sts2.dll, allowing an installed .NET 7+
+    SDK to build the mod without copying game binaries into this repository.
+  -->
+  <ItemGroup Condition="Exists('$(GameManagedDir)')">
+    <Reference Include="$(GameManagedDir)\*.dll"
+               Exclude="$(GameManagedDir)\cl*.dll;$(GameManagedDir)\coreclr.dll;$(GameManagedDir)\host*.dll;$(GameManagedDir)\Microsoft.DiaSymReader.Native*.dll;$(GameManagedDir)\mscordac*.dll;$(GameManagedDir)\mscordbi.dll;$(GameManagedDir)\mscorrc.dll;$(GameManagedDir)\msquic.dll;$(GameManagedDir)\System.IO.Compression.Native.dll;$(GameManagedDir)\steam_api64.dll">
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <Target Name="ValidateGameManagedDirectory" BeforeTargets="ResolveAssemblyReferences">
+    <Error Condition="'$(GameManagedDir)' == ''"
+           Text="GameManagedDir was not supplied. Use RMPStable-Packager/Build-Mod.ps1 or pass -p:GameManagedDir=&quot;...\data_sts2_windows_x86_64&quot;." />
+    <Error Condition="!Exists('$(GameManagedDir)\sts2.dll')"
+           Text="sts2.dll was not found under GameManagedDir: $(GameManagedDir)" />
+    <Error Condition="!Exists('$(GameManagedDir)\GodotSharp.dll')"
+           Text="GodotSharp.dll was not found under GameManagedDir: $(GameManagedDir)" />
+    <Error Condition="!Exists('$(GameManagedDir)\Steamworks.NET.dll')"
+           Text="Steamworks.NET.dll was not found under GameManagedDir: $(GameManagedDir)" />
+  </Target>
+</Project>
