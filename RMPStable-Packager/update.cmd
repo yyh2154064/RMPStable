@@ -40,28 +40,47 @@ try {
     Write-Step 'Checking the latest published GitHub release'
     $headers = @{
         'User-Agent' = 'RMPStable-Updater'
-        'Accept' = 'application/vnd.github+json'
-        'X-GitHub-Api-Version' = '2022-11-28'
+        'Accept' = 'text/html,application/xhtml+xml,application/octet-stream'
     }
-    $releaseUrl = "https://api.github.com/repos/$repository/releases/latest"
-    $release = Invoke-RestMethod -Uri $releaseUrl -Headers $headers -Method Get
-    $releaseVersion = ([string]$release.tag_name).TrimStart('v', 'V')
-    $preferredAssetName = "RMPStable-v$releaseVersion.zip"
-    $asset = @($release.assets | Where-Object { $_.name -eq $preferredAssetName }) | Select-Object -First 1
-    if ($null -eq $asset) {
-        $asset = @($release.assets | Where-Object { $_.name -match '^RMPStable-v[0-9A-Za-z._-]+\.zip$' }) | Select-Object -First 1
+
+    # Do not use api.github.com here. Anonymous API requests are limited to
+    # 60 per hour per public IP, which is commonly exhausted by shared VPNs.
+    # GitHub's ordinary /releases/latest redirect provides the same tag
+    # without consuming that API quota.
+    $latestUrl = "https://github.com/$repository/releases/latest"
+    $request = [Net.HttpWebRequest]::Create($latestUrl)
+    $request.Method = 'GET'
+    $request.AllowAutoRedirect = $true
+    $request.MaximumAutomaticRedirections = 10
+    $request.UserAgent = $headers['User-Agent']
+    $request.Accept = $headers['Accept']
+    $request.Timeout = 30000
+    $request.ReadWriteTimeout = 30000
+    if ($null -ne [Net.WebRequest]::DefaultWebProxy) {
+        $request.Proxy = [Net.WebRequest]::DefaultWebProxy
+        $request.Proxy.Credentials = [Net.CredentialCache]::DefaultNetworkCredentials
     }
-    if ($null -eq $asset) {
-        throw "Release $($release.tag_name) does not contain an RMPStable-v*.zip asset."
+    $response = $null
+    try {
+        $response = [Net.HttpWebResponse]$request.GetResponse()
+        $releaseUri = $response.ResponseUri
     }
-    $downloadUrl = [string]$asset.browser_download_url
-    if (-not $downloadUrl.StartsWith('https://github.com/', [StringComparison]::OrdinalIgnoreCase)) {
-        throw 'GitHub returned an unexpected download URL.'
+    finally {
+        if ($null -ne $response) {
+            $response.Dispose()
+        }
     }
+    if ($null -eq $releaseUri -or $releaseUri.AbsolutePath -notmatch '/releases/tag/([^/]+)$') {
+        throw "GitHub did not redirect to a release tag: $releaseUri"
+    }
+    $releaseTag = [Uri]::UnescapeDataString($Matches[1])
+    $releaseVersion = $releaseTag.TrimStart('v', 'V')
+    $assetName = "RMPStable-$releaseTag.zip"
+    $downloadUrl = "https://github.com/$repository/releases/download/$releaseTag/$assetName"
 
     Write-Host "Installed version: $localVersion"
     Write-Host "Latest version:    $releaseVersion"
-    Write-Host "Release asset:     $($asset.name)"
+    Write-Host "Release asset:     $assetName"
 
     $tempRoot = Join-Path ([IO.Path]::GetTempPath()) ("RMPStable-update-" + [Guid]::NewGuid().ToString('N'))
     $archivePath = Join-Path $tempRoot 'release.zip'
@@ -73,18 +92,6 @@ try {
     Invoke-WebRequest -Uri $downloadUrl -Headers $headers -OutFile $archivePath -UseBasicParsing
     if ((Get-Item -LiteralPath $archivePath).Length -le 0) {
         throw 'The downloaded release package is empty.'
-    }
-
-    $digestProperty = $asset.PSObject.Properties['digest']
-    if ($null -ne $digestProperty -and -not [string]::IsNullOrWhiteSpace([string]$digestProperty.Value)) {
-        $digest = [string]$digestProperty.Value
-        if ($digest -match '^sha256:([0-9a-fA-F]{64})$') {
-            $actualHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $archivePath).Hash
-            if ($actualHash -ne $Matches[1]) {
-                throw 'The downloaded release package failed its SHA-256 check.'
-            }
-            Write-Host 'SHA-256 check passed.'
-        }
     }
 
     Write-Step 'Validating release contents'

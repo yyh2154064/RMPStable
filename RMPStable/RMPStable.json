@@ -1,7 +1,7 @@
 {
   "id": "RMPStable",
   "name": "RMP Stable - 16 Player Multiplayer",
-  "version": "0.3.0",
+  "version": "0.3.3",
   "author": "灰灰神教！",
   "description": "Standalone 16-player multiplayer mod for STS2 v0.107.1 with native-checkpoint Quick SL support.",
   "dependencies": [],

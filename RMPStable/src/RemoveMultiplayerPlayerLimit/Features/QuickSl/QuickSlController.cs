@@ -4,19 +4,22 @@ using System.Linq;
 using System.Reflection;
 using System.Threading.Tasks;
 using Godot;
-using MegaCrit.Sts2.Core.Assets;
 using MegaCrit.Sts2.Core.Helpers;
+using MegaCrit.Sts2.Core.Localization;
 using MegaCrit.Sts2.Core.Logging;
+using MegaCrit.Sts2.Core.Multiplayer;
 using MegaCrit.Sts2.Core.Multiplayer.Connection;
 using MegaCrit.Sts2.Core.Multiplayer.Game;
 using MegaCrit.Sts2.Core.Multiplayer.Game.Lobby;
 using MegaCrit.Sts2.Core.Nodes;
 using MegaCrit.Sts2.Core.Nodes.CommonUi;
 using MegaCrit.Sts2.Core.Nodes.GodotExtensions;
+using MegaCrit.Sts2.Core.Nodes.Multiplayer;
 using MegaCrit.Sts2.Core.Nodes.Screens.PauseMenu;
 using MegaCrit.Sts2.Core.Nodes.Screens.Settings;
 using MegaCrit.Sts2.Core.Platform.Steam;
 using MegaCrit.Sts2.Core.Runs;
+using MegaCrit.Sts2.Core.Saves;
 using MegaCrit.Sts2.addons.mega_text;
 using RemoveMultiplayerPlayerLimit.Infrastructure;
 using RemoveMultiplayerPlayerLimit.Network;
@@ -29,13 +32,12 @@ internal static class QuickSlController
 	private const string InputActionText = "rmpQuickSl";
 	private static readonly StringName InputAction = new StringName(InputActionText);
 	private static readonly FieldInfo? PauseButtonLabelField = typeof(NPauseMenuButton).GetField("_label", BindingFlags.Instance | BindingFlags.NonPublic);
-	private static readonly FieldInfo? RemappableKeyboardInputsField = typeof(NInputManager).GetField("remappableKeyboardInputs", BindingFlags.Static | BindingFlags.NonPublic);
+	private static readonly FieldInfo? RemappableKeyboardInputsField = typeof(NInputManager).GetField("remappableKeyboardInputs", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
 	private static readonly FieldInfo? KeyboardInputMapField = typeof(NInputManager).GetField("_keyboardInputMap", BindingFlags.Instance | BindingFlags.NonPublic);
 	private static readonly FieldInfo? EntryTitleMapField = typeof(NInputSettingsEntry).GetField("_commandToLocTitle", BindingFlags.Static | BindingFlags.NonPublic);
-	private static readonly FieldInfo? VerticalPopupSceneField = typeof(NVerticalPopup).GetField("_scenePath", BindingFlags.Static | BindingFlags.NonPublic);
-	private static readonly MethodInfo? ContinueMethod = typeof(MegaCrit.Sts2.Core.Nodes.Screens.MainMenu.NMainMenu).GetMethod("OnContinueButtonPressedAsync", BindingFlags.Instance | BindingFlags.NonPublic);
 	private static INetGameService? _boundService;
 	private static NPauseMenu? _patchedPauseMenu;
+	private static CanvasLayer? _recoveryCover;
 	private static bool _inputRegistered;
 	private static bool _hotkeyWasDown;
 	private static bool _popupOpen;
@@ -65,6 +67,7 @@ internal static class QuickSlController
 	internal static void Cleanup()
 	{
 		BindService(null);
+		HideRecoveryCover();
 		_recovery = null;
 		_patchedPauseMenu = null;
 	}
@@ -88,20 +91,33 @@ internal static class QuickSlController
 		}
 		try
 		{
-			if (!_inputRegistered && RemappableKeyboardInputsField?.GetValue(null) is ICollection<StringName> inputs && !inputs.Contains(InputAction))
+			if (RemappableKeyboardInputsField?.GetValue(null) is not ICollection<StringName> inputs)
+			{
+				throw new MissingFieldException(typeof(NInputManager).FullName, "remappableKeyboardInputs");
+			}
+			if (!inputs.Contains(InputAction))
 			{
 				inputs.Add(InputAction);
 			}
-			if (!_inputRegistered && EntryTitleMapField?.GetValue(null) is Dictionary<StringName, string> titles)
+			if (EntryTitleMapField?.GetValue(null) is not Dictionary<StringName, string> titles)
 			{
-				titles[InputAction] = "viewMap";
+				throw new MissingFieldException(typeof(NInputSettingsEntry).FullName, "_commandToLocTitle");
 			}
-			if (KeyboardInputMapField?.GetValue(NInputManager.Instance) is Dictionary<StringName, Key> current && !current.ContainsKey(InputAction))
+			titles[InputAction] = "viewMap";
+			if (KeyboardInputMapField?.GetValue(NInputManager.Instance) is not Dictionary<StringName, Key> current)
+			{
+				throw new MissingFieldException(typeof(NInputManager).FullName, "_keyboardInputMap");
+			}
+			if (!current.ContainsKey(InputAction))
 			{
 				current[InputAction] = Key.None;
 				NInputManager.Instance.ModifyShortcutKey(InputAction, Key.F5);
 			}
-			_inputRegistered = true;
+			if (!_inputRegistered)
+			{
+				_inputRegistered = true;
+				Log.Info($"[RMP:QuickSL] Native input action registered (key={NInputManager.Instance.GetShortcutKey(InputAction)}).");
+			}
 		}
 		catch (Exception ex)
 		{
@@ -255,21 +271,38 @@ internal static class QuickSlController
 		_operationRunning = true;
 		try
 		{
-			await NGame.Instance.ReturnToMainMenu();
-			object? result = ContinueMethod?.Invoke(NGame.Instance.MainMenu, null);
-			if (result is Task task)
+			Task? pendingSave = SaveManager.Instance.CurrentRunSaveTask;
+			if (pendingSave != null)
 			{
-				await task;
+				Log.Info("[RMP:QuickSL] Waiting for the native checkpoint save to finish.");
+				await pendingSave;
 			}
-			else
+			ReadSaveResult<SerializableRun> result = SaveManager.Instance.LoadRunSave();
+			if (!result.Success || result.SaveData == null)
 			{
-				throw new MissingMethodException("NMainMenu.OnContinueButtonPressedAsync");
+				throw new InvalidOperationException($"The native run checkpoint could not be read (status={result.Status}).");
 			}
-			Log.Info("[RMP:QuickSL] Singleplayer checkpoint reloaded through the native Continue flow.");
+			SerializableRun save = result.SaveData;
+			RunState runState = RunState.FromSerializable(save);
+			await NGame.Instance.Transition.FadeOut(0.35f, runState.Players[0].Character.CharacterSelectTransitionPath);
+			RunManager.Instance.CleanUp();
+			await RunManager.Instance.SetUpSavedSingleplayer(runState, save);
+			NGame.Instance.ReactionContainer.InitializeNetworking(new NetSingleplayerGameService());
+			await NGame.Instance.LoadRun(runState, save.PreFinishedRoom);
+			await NGame.Instance.Transition.FadeIn(0.35f);
+			Log.Info("[RMP:QuickSL] Singleplayer checkpoint reloaded directly without showing the main menu.");
 		}
 		catch (Exception ex)
 		{
 			Log.Warn("[RMP:QuickSL] Singleplayer reload failed: " + ex);
+			try
+			{
+				await NGame.Instance.ReturnToMainMenu();
+			}
+			catch (Exception recoveryException)
+			{
+				Log.Warn("[RMP:QuickSL] Failed to recover to the main menu after a singleplayer reload error: " + recoveryException);
+			}
 		}
 		finally
 		{
@@ -377,10 +410,12 @@ internal static class QuickSlController
 				PreviousLobbyId = recovery.PreviousLobbyId
 			});
 			await Task.Delay(150);
+			ShowRecoveryCover();
 			await NGame.Instance.ReturnToMainMenu();
 			if (!await HostBootstrapModule.StartQuickSlLoadedHostAsync())
 			{
 				recovery.AutoStartCancelled = true;
+				HideRecoveryCover();
 			}
 		}
 		catch (Exception ex)
@@ -390,6 +425,7 @@ internal static class QuickSlController
 			{
 				_recovery.AutoStartCancelled = true;
 			}
+			HideRecoveryCover();
 		}
 		finally
 		{
@@ -402,10 +438,12 @@ internal static class QuickSlController
 		_operationRunning = true;
 		try
 		{
+			ShowRecoveryCover();
 			await NGame.Instance.ReturnToMainMenu();
 			if (!SteamInitializer.Initialized)
 			{
 				Log.Warn("[RMP:QuickSL] Automatic reconnect requires Steam; falling back to the multiplayer menu.");
+				HideRecoveryCover();
 				NGame.Instance.MainMenu.OpenMultiplayerSubmenu();
 				return;
 			}
@@ -423,6 +461,7 @@ internal static class QuickSlController
 			if (lobbyId == 0)
 			{
 				Log.Warn("[RMP:QuickSL] Host lobby was not advertised; falling back to manual join.");
+				HideRecoveryCover();
 				NGame.Instance.MainMenu.OpenMultiplayerSubmenu();
 				return;
 			}
@@ -433,6 +472,7 @@ internal static class QuickSlController
 				recovery.AutoStartCancelled = true;
 				CancelActiveJoinFlow();
 				Log.Warn("[RMP:QuickSL] Automatic reconnect timed out after 8 seconds; manual join remains available.");
+				HideRecoveryCover();
 				NGame.Instance.MainMenu.OpenMultiplayerSubmenu();
 				return;
 			}
@@ -442,6 +482,7 @@ internal static class QuickSlController
 		{
 			recovery.AutoStartCancelled = true;
 			Log.Warn("[RMP:QuickSL] Automatic reconnect failed: " + ex.Message);
+			HideRecoveryCover();
 			if (NGame.Instance?.MainMenu != null && SceneMonitor.FindActiveLoadRunLobby() == null)
 			{
 				NGame.Instance.MainMenu.OpenMultiplayerSubmenu();
@@ -480,12 +521,14 @@ internal static class QuickSlController
 				recovery.LocalReadySent = true;
 				Log.Info("[RMP:QuickSL] Reconnected client marked ready automatically.");
 			}
+			HideRecoveryCover();
 			return;
 		}
 		if (lobby.NetService.Type != NetGameType.Host || !recovery.IsHost)
 		{
 			return;
 		}
+		HideRecoveryCover();
 		DateTime now = DateTime.UtcNow;
 		foreach (ulong id in recovery.ExpectedPlayers.Where(id => id != localId))
 		{
@@ -565,6 +608,42 @@ internal static class QuickSlController
 		return id.ToString();
 	}
 
+	private static void ShowRecoveryCover()
+	{
+		if (_recoveryCover != null && GodotObject.IsInstanceValid(_recoveryCover))
+		{
+			return;
+		}
+		CanvasLayer layer = new CanvasLayer
+		{
+			Name = "RmpQuickSlRecoveryCover",
+			Layer = 1000
+		};
+		ColorRect backdrop = new ColorRect
+		{
+			Name = "Backdrop",
+			Color = Colors.Black,
+			MouseFilter = Control.MouseFilterEnum.Stop,
+			Position = Vector2.Zero,
+			Size = NGame.Instance.GetViewport().GetVisibleRect().Size
+		};
+		layer.AddChild(backdrop);
+		NGame.Instance.AddChild(layer);
+		_recoveryCover = layer;
+		Log.Info("[RMP:QuickSL] Recovery cover shown; intermediate main-menu frames are hidden.");
+	}
+
+	private static void HideRecoveryCover()
+	{
+		CanvasLayer? layer = _recoveryCover;
+		_recoveryCover = null;
+		if (layer != null && GodotObject.IsInstanceValid(layer))
+		{
+			layer.QueueFree();
+			Log.Info("[RMP:QuickSL] Recovery cover hidden.");
+		}
+	}
+
 	private static void ShowConfirmation(string title, string body, Action yes, Action? no = null)
 	{
 		ShowPopup(title, body, yes, no, showNo: true);
@@ -577,56 +656,93 @@ internal static class QuickSlController
 
 	private static void ShowPopup(string title, string body, Action yes, Action? no, bool showNo)
 	{
-		if (_popupOpen || NModalContainer.Instance == null)
+		if (_popupOpen || NModalContainer.Instance == null || NModalContainer.Instance.OpenModal != null)
 		{
 			return;
 		}
+		_popupOpen = true;
+		TaskHelper.RunSafely(ShowPopupAsync(title, body, yes, no, showNo));
+	}
+
+	private static async Task ShowPopupAsync(string title, string body, Action yes, Action? no, bool showNo)
+	{
+		NGenericPopup? popup = null;
 		try
 		{
-			string? scenePath = VerticalPopupSceneField?.GetValue(null) as string;
-			PackedScene? scene = string.IsNullOrEmpty(scenePath) ? null : ResourceLoader.Load<PackedScene>(scenePath, null, ResourceLoader.CacheMode.Reuse);
-			NVerticalPopup? popup = scene?.Instantiate<NVerticalPopup>();
-			if (popup == null)
+			NModalContainer modal = NModalContainer.Instance ?? throw new InvalidOperationException("The modal container is not available.");
+			if (modal.OpenModal != null)
 			{
+				_popupOpen = false;
 				return;
 			}
-			popup.SetText(title, body);
-			popup.YesButton.SetText(Localization.Get("QUICK_SL_YES", "Yes"));
-			popup.NoButton.SetText(Localization.Get("QUICK_SL_NO", "No"));
-			popup.YesButton.Connect(NClickableControl.SignalName.Released, Callable.From<NButton>(button =>
+			popup = NGenericPopup.Create();
+			if (popup == null)
 			{
-				ClosePopup();
 				_popupOpen = false;
+				return;
+			}
+			popup.Visible = false;
+			popup.TreeExiting += () => _popupOpen = false;
+			modal.Add(popup, showBackstop: false);
+			Log.Info("[RMP:QuickSL] Confirmation popup mounted; waiting for native controls to become ready.");
+
+			NVerticalPopup? verticalPopup = null;
+			NPopupYesNoButton? yesButton = null;
+			NPopupYesNoButton? noButton = null;
+			int readyFrame;
+			for (readyFrame = 1; readyFrame <= 10; readyFrame++)
+			{
+				await NGame.Instance.AwaitProcessFrame();
+				if (!GodotObject.IsInstanceValid(popup))
+				{
+					throw new InvalidOperationException("The confirmation popup was released before initialization completed.");
+				}
+				verticalPopup = popup.GetNodeOrNull<NVerticalPopup>("VerticalPopup");
+				yesButton = verticalPopup?.GetNodeOrNull<NPopupYesNoButton>("YesButton");
+				noButton = verticalPopup?.GetNodeOrNull<NPopupYesNoButton>("NoButton");
+				if (popup.IsNodeReady() && verticalPopup?.IsNodeReady() == true && yesButton?.IsNodeReady() == true && noButton?.IsNodeReady() == true)
+				{
+					break;
+				}
+			}
+			if (verticalPopup == null || yesButton?.IsNodeReady() != true || noButton?.IsNodeReady() != true || readyFrame > 10)
+			{
+				throw new TimeoutException("Native confirmation controls did not become ready within 10 frames.");
+			}
+
+			verticalPopup.SetText(title, body);
+			verticalPopup.InitYesButton(new LocString("main_menu_ui", "GENERIC_POPUP.confirm"), button =>
+			{
+				_popupOpen = false;
+				Log.Info("[RMP:QuickSL] Confirmation accepted.");
 				yes();
-			}));
+			});
 			if (showNo)
 			{
-				popup.NoButton.Connect(NClickableControl.SignalName.Released, Callable.From<NButton>(button =>
+				verticalPopup.InitNoButton(new LocString("main_menu_ui", "GENERIC_POPUP.cancel"), button =>
 				{
-					ClosePopup();
 					_popupOpen = false;
+					Log.Info("[RMP:QuickSL] Confirmation cancelled.");
 					no?.Invoke();
-				}));
+				});
 			}
 			else
 			{
-				popup.HideNoButton();
+				verticalPopup.HideNoButton();
 			}
-			_popupOpen = true;
-			popup.TreeExiting += () => _popupOpen = false;
-			NModalContainer.Instance.Add(popup);
-			NModalContainer.Instance.ShowBackstop();
+			popup.Visible = true;
+			modal.ShowBackstop();
+			Log.Info($"[RMP:QuickSL] Confirmation popup ready after {readyFrame} frame(s).");
 		}
 		catch (Exception ex)
 		{
 			_popupOpen = false;
-			Log.Warn("[RMP:QuickSL] Popup creation failed: " + ex.Message);
+			NModalContainer? modal = NModalContainer.Instance;
+			if (popup != null && GodotObject.IsInstanceValid(popup) && ReferenceEquals(modal?.OpenModal, popup))
+			{
+				modal?.Clear();
+			}
+			Log.Warn("[RMP:QuickSL] Popup creation failed: " + ex);
 		}
-	}
-
-	private static void ClosePopup()
-	{
-		NModalContainer.Instance?.Clear();
-		NModalContainer.Instance?.HideBackstop();
 	}
 }

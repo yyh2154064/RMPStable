@@ -4,7 +4,13 @@ Standalone 16-player multiplayer mod for Slay the Spire 2 v0.107.1. It expands
 multiplayer capacity and prevents duplicate remote treasure rewards from
 splitting reward IDs between peers.
 
-Version 0.3.0 also adds native-checkpoint Quick SL. It is available from the
+Version 0.3.0 added native-checkpoint Quick SL. Version 0.3.1 fixed its
+input-settings registration and changed the updater to avoid GitHub's anonymous
+API rate limit. Version 0.3.2 mounts the shared singleplayer/multiplayer
+confirmation popup before initializing its native controls. Version 0.3.3 hides
+the uninitialized popup frame, reloads singleplayer checkpoints without creating
+the main menu, and conceals multiplayer's required internal menu transition until
+the load lobby is ready. Quick SL is available from the
 pause menu and through a rebindable F5 shortcut. Multiplayer requests require
 host approval; clients reconnect and ready automatically, while the host is
 only readied last after every originally connected client is ready. Any
