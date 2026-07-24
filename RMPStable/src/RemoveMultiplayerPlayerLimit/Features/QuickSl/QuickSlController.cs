@@ -15,6 +15,7 @@ using MegaCrit.Sts2.Core.Nodes;
 using MegaCrit.Sts2.Core.Nodes.CommonUi;
 using MegaCrit.Sts2.Core.Nodes.GodotExtensions;
 using MegaCrit.Sts2.Core.Nodes.Multiplayer;
+using MegaCrit.Sts2.Core.Nodes.Screens.MainMenu;
 using MegaCrit.Sts2.Core.Nodes.Screens.PauseMenu;
 using MegaCrit.Sts2.Core.Nodes.Screens.Settings;
 using MegaCrit.Sts2.Core.Platform.Steam;
@@ -35,6 +36,8 @@ internal static class QuickSlController
 	private static readonly FieldInfo? RemappableKeyboardInputsField = typeof(NInputManager).GetField("remappableKeyboardInputs", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
 	private static readonly FieldInfo? KeyboardInputMapField = typeof(NInputManager).GetField("_keyboardInputMap", BindingFlags.Instance | BindingFlags.NonPublic);
 	private static readonly FieldInfo? EntryTitleMapField = typeof(NInputSettingsEntry).GetField("_commandToLocTitle", BindingFlags.Static | BindingFlags.NonPublic);
+	private static readonly MethodInfo? OpenJoinFriendsScreenMethod = typeof(NMultiplayerSubmenu).GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic).FirstOrDefault(method => method.Name == "OpenJoinFriendsScreen");
+	private static readonly PropertyInfo? JoinFriendPlayerIdProperty = typeof(NJoinFriendButton).GetProperty("PlayerId", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
 	private static INetGameService? _boundService;
 	private static NPauseMenu? _patchedPauseMenu;
 	private static CanvasLayer? _recoveryCover;
@@ -56,6 +59,7 @@ internal static class QuickSlController
 		public bool LocalReadySent;
 		public bool AutoStartCancelled;
 		public bool HostReadySent;
+		public DateTime ClientDeadline;
 	}
 
 	internal static void Initialize()
@@ -377,8 +381,10 @@ internal static class QuickSlController
 			OperationId = message.OperationId,
 			HostId = message.HostId,
 			PreviousLobbyId = message.PreviousLobbyId,
-			IsHost = false
+			IsHost = false,
+			ClientDeadline = DateTime.UtcNow.AddSeconds(8)
 		};
+		Log.Info($"[RMP:QuickSL] Client recovery started (host={message.HostId}, previousLobby={message.PreviousLobbyId}, timeout=8s).");
 		TaskHelper.RunSafely(ReturnAndReconnectClientAsync(_recovery));
 	}
 
@@ -440,53 +446,66 @@ internal static class QuickSlController
 		{
 			ShowRecoveryCover();
 			await NGame.Instance.ReturnToMainMenu();
+			if (recovery.AutoStartCancelled || DateTime.UtcNow >= recovery.ClientDeadline)
+			{
+				FailClientRecovery(recovery, "Returning to the main menu used the 8-second reconnect window.");
+				return;
+			}
 			if (!SteamInitializer.Initialized)
 			{
-				Log.Warn("[RMP:QuickSL] Automatic reconnect requires Steam; falling back to the multiplayer menu.");
-				HideRecoveryCover();
-				NGame.Instance.MainMenu.OpenMultiplayerSubmenu();
+				FailClientRecovery(recovery, "Automatic reconnect requires Steam.");
 				return;
 			}
-			SteamFriends.RequestFriendRichPresence(new CSteamID(recovery.HostId));
-			ulong lobbyId = 0;
-			DateTime availabilityLimit = DateTime.UtcNow.AddSeconds(60);
-			while (DateTime.UtcNow < availabilityLimit && lobbyId == 0)
+			NJoinFriendScreen? joinScreen = await OpenNativeJoinFriendScreenAsync();
+			if (joinScreen == null)
 			{
-				lobbyId = FindNewHostLobby(recovery.HostId, recovery.PreviousLobbyId);
-				if (lobbyId == 0)
+				FailClientRecovery(recovery, "The native Join Friends screen could not be opened.");
+				return;
+			}
+			Log.Info("[RMP:QuickSL] Native multiplayer and Join Friends screens opened behind the recovery cover.");
+			DateTime nextRefreshAt = DateTime.UtcNow.AddMilliseconds(500);
+			bool joinTriggered = false;
+			while (!recovery.AutoStartCancelled && DateTime.UtcNow < recovery.ClientDeadline)
+			{
+				LoadRunLobby? joinedLobby = SceneMonitor.FindActiveLoadRunLobby();
+				if (joinedLobby?.NetService.Type == NetGameType.Client)
 				{
-					await Task.Delay(100);
+					MarkReconnectedClientReady(joinedLobby, recovery);
+					Log.Info("[RMP:QuickSL] Native automatic reconnect reached the loaded-run lobby.");
+					return;
 				}
+
+				NJoinFriendScreen? activeScreen = FindNativeJoinFriendScreen();
+				if (activeScreen != null)
+				{
+					joinScreen = activeScreen;
+					NJoinFriendButton? hostButton = FindHostJoinButton(joinScreen, recovery.HostId);
+					DateTime now = DateTime.UtcNow;
+					if (hostButton != null && !joinTriggered)
+					{
+						EmitNativeRelease(hostButton);
+						joinTriggered = true;
+						Log.Info($"[RMP:QuickSL] Host entry found in the native Join Friends list; released its original join button (host={recovery.HostId}).");
+					}
+					else if (!joinTriggered && hostButton == null && now >= nextRefreshAt)
+					{
+						TriggerNativeFriendRefresh(joinScreen);
+						nextRefreshAt = now.AddSeconds(1);
+						Log.Info($"[RMP:QuickSL] Native Join Friends list refreshed while waiting for host {recovery.HostId}.");
+					}
+				}
+				else if (!joinTriggered && DateTime.UtcNow >= nextRefreshAt)
+				{
+					Log.Info("[RMP:QuickSL] Native Join Friends screen is temporarily unavailable while its submenu transition completes.");
+					nextRefreshAt = DateTime.UtcNow.AddSeconds(1);
+				}
+				await NGame.Instance.AwaitProcessFrame();
 			}
-			if (lobbyId == 0)
-			{
-				Log.Warn("[RMP:QuickSL] Host lobby was not advertised; falling back to manual join.");
-				HideRecoveryCover();
-				NGame.Instance.MainMenu.OpenMultiplayerSubmenu();
-				return;
-			}
-			Task joinTask = NGame.Instance.MainMenu.JoinGame(SteamClientConnectionInitializer.FromLobby(lobbyId));
-			Task finished = await Task.WhenAny(joinTask, Task.Delay(TimeSpan.FromSeconds(8)));
-			if (finished != joinTask)
-			{
-				recovery.AutoStartCancelled = true;
-				CancelActiveJoinFlow();
-				Log.Warn("[RMP:QuickSL] Automatic reconnect timed out after 8 seconds; manual join remains available.");
-				HideRecoveryCover();
-				NGame.Instance.MainMenu.OpenMultiplayerSubmenu();
-				return;
-			}
-			await joinTask;
+			FailClientRecovery(recovery, "The native Join Friends flow did not reach the loaded-run lobby within 8 seconds.");
 		}
 		catch (Exception ex)
 		{
-			recovery.AutoStartCancelled = true;
-			Log.Warn("[RMP:QuickSL] Automatic reconnect failed: " + ex.Message);
-			HideRecoveryCover();
-			if (NGame.Instance?.MainMenu != null && SceneMonitor.FindActiveLoadRunLobby() == null)
-			{
-				NGame.Instance.MainMenu.OpenMultiplayerSubmenu();
-			}
+			FailClientRecovery(recovery, "Automatic reconnect failed: " + ex.GetBaseException().Message);
 		}
 		finally
 		{
@@ -504,6 +523,11 @@ internal static class QuickSlController
 		LoadRunLobby? lobby = SceneMonitor.FindActiveLoadRunLobby();
 		if (lobby == null)
 		{
+			if (!recovery.IsHost && recovery.ClientDeadline != default && DateTime.UtcNow >= recovery.ClientDeadline)
+			{
+				FailClientRecovery(recovery, "Client recovery watchdog reached the 8-second timeout.");
+				return;
+			}
 			if (recovery.HasSeenLoadLobby && RunManager.Instance?.IsInProgress == true)
 			{
 				Log.Info("[RMP:QuickSL] Recovery completed.");
@@ -515,13 +539,7 @@ internal static class QuickSlController
 		ulong localId = lobby.NetService.NetId;
 		if (lobby.NetService.Type == NetGameType.Client)
 		{
-			if (!recovery.LocalReadySent || !lobby.IsPlayerReady(localId))
-			{
-				lobby.SetReady(true);
-				recovery.LocalReadySent = true;
-				Log.Info("[RMP:QuickSL] Reconnected client marked ready automatically.");
-			}
-			HideRecoveryCover();
+			MarkReconnectedClientReady(lobby, recovery);
 			return;
 		}
 		if (lobby.NetService.Type != NetGameType.Host || !recovery.IsHost)
@@ -550,41 +568,128 @@ internal static class QuickSlController
 		}
 	}
 
-	private static ulong FindNewHostLobby(ulong hostId, ulong previousLobbyId)
+	private static void MarkReconnectedClientReady(LoadRunLobby lobby, RecoveryState recovery)
+	{
+		ulong localId = lobby.NetService.NetId;
+		if (!recovery.LocalReadySent || !lobby.IsPlayerReady(localId))
+		{
+			lobby.SetReady(true);
+			recovery.LocalReadySent = true;
+			Log.Info("[RMP:QuickSL] Reconnected client marked ready automatically.");
+		}
+		HideRecoveryCover();
+	}
+
+	private static void FailClientRecovery(RecoveryState recovery, string reason)
+	{
+		if (recovery.AutoStartCancelled)
+		{
+			return;
+		}
+		recovery.AutoStartCancelled = true;
+		CancelActiveJoinFlow();
+		Log.Warn("[RMP:QuickSL] " + reason + " Black recovery cover removed; manual join remains available.");
+		HideRecoveryCover();
+		if (ReferenceEquals(_recovery, recovery))
+		{
+			_recovery = null;
+		}
+		if (NGame.Instance?.MainMenu != null && SceneMonitor.FindActiveLoadRunLobby() == null)
+		{
+			OpenNativeJoinFriendScreenForManualFallback();
+		}
+	}
+
+	private static async Task<NJoinFriendScreen?> OpenNativeJoinFriendScreenAsync()
+	{
+		NJoinFriendScreen? existing = FindNativeJoinFriendScreen();
+		if (existing != null)
+		{
+			return existing;
+		}
+		OpenNativeJoinFriendScreenForManualFallback();
+		for (int frame = 0; frame < 30; frame++)
+		{
+			await NGame.Instance.AwaitProcessFrame();
+			existing = FindNativeJoinFriendScreen();
+			if (existing?.IsNodeReady() == true)
+			{
+				return existing;
+			}
+		}
+		return null;
+	}
+
+	private static void OpenNativeJoinFriendScreenForManualFallback()
 	{
 		try
 		{
-			CSteamID host = new CSteamID(hostId);
-			if (SteamFriends.GetFriendGamePlayed(host, out FriendGameInfo_t gameInfo) && gameInfo.m_steamIDLobby.IsValid())
+			if (FindNativeJoinFriendScreen() != null)
 			{
-				ulong advertisedLobbyId = gameInfo.m_steamIDLobby.m_SteamID;
-				if (advertisedLobbyId != previousLobbyId && SteamMatchmaking.GetLobbyOwner(gameInfo.m_steamIDLobby).m_SteamID == hostId)
-				{
-					return advertisedLobbyId;
-				}
+				return;
 			}
-			string presence = SteamFriends.GetFriendRichPresence(new CSteamID(hostId), "steam_player_group") ?? string.Empty;
-			foreach (string token in presence.Split(presence.Where(ch => !char.IsDigit(ch)).Distinct().ToArray(), StringSplitOptions.RemoveEmptyEntries))
+			NMainMenu? mainMenu = NGame.Instance?.MainMenu;
+			if (mainMenu == null || OpenJoinFriendsScreenMethod == null)
 			{
-				if (ulong.TryParse(token, out ulong id) && id != 0 && id != previousLobbyId)
-				{
-					CSteamID lobby = new CSteamID(id);
-					if (SteamMatchmaking.GetLobbyOwner(lobby).m_SteamID == hostId)
-					{
-						return id;
-					}
-				}
+				return;
+			}
+			NMultiplayerSubmenu submenu = mainMenu.OpenMultiplayerSubmenu();
+			ParameterInfo[] parameters = OpenJoinFriendsScreenMethod.GetParameters();
+			object?[] arguments = parameters.Select(parameter => parameter.HasDefaultValue ? parameter.DefaultValue : parameter.ParameterType.IsValueType ? Activator.CreateInstance(parameter.ParameterType) : null).ToArray();
+			OpenJoinFriendsScreenMethod.Invoke(submenu, arguments);
+		}
+		catch (Exception ex)
+		{
+			Log.Warn("[RMP:QuickSL] Could not open the native Join Friends screen: " + ex.GetBaseException().Message);
+		}
+	}
+
+	private static NJoinFriendScreen? FindNativeJoinFriendScreen()
+	{
+		return FindNodesOfType<NJoinFriendScreen>(SceneMonitor.GetRoot()).FirstOrDefault(screen => GodotObject.IsInstanceValid(screen) && screen.IsVisibleInTree());
+	}
+
+	private static NJoinFriendButton? FindHostJoinButton(NJoinFriendScreen screen, ulong hostId)
+	{
+		foreach (NJoinFriendButton button in FindNodesOfType<NJoinFriendButton>(screen))
+		{
+			object? playerId = JoinFriendPlayerIdProperty?.GetValue(button);
+			if (playerId is ulong unsignedId && unsignedId == hostId)
+			{
+				return button;
+			}
+			if (playerId is long signedId && unchecked((ulong)signedId) == hostId)
+			{
+				return button;
+			}
+			if (playerId is CSteamID steamId && steamId.m_SteamID == hostId)
+			{
+				return button;
 			}
 		}
-		catch { }
-		return 0;
+		return null;
+	}
+
+	private static void TriggerNativeFriendRefresh(NJoinFriendScreen screen)
+	{
+		NJoinFriendRefreshButton? refreshButton = FindNodesOfType<NJoinFriendRefreshButton>(screen).FirstOrDefault();
+		if (refreshButton == null)
+		{
+			throw new InvalidOperationException("The native Join Friends refresh button was not found.");
+		}
+		EmitNativeRelease(refreshButton);
+	}
+
+	private static void EmitNativeRelease(NButton button)
+	{
+		button.EmitSignal(NClickableControl.SignalName.Released, button);
 	}
 
 	private static void CancelActiveJoinFlow()
 	{
 		try
 		{
-			Node? screen = SceneMonitor.FindNode(SceneMonitor.GetRoot(), node => node.GetType().Name == "NJoinFriendScreen");
+			NJoinFriendScreen? screen = FindNativeJoinFriendScreen();
 			object? flow = screen?.GetType().GetField("_currentJoinFlow", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(screen);
 			flow?.GetType().GetMethod("Cancel", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.Invoke(flow, null);
 		}

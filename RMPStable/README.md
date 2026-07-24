@@ -10,7 +10,11 @@ API rate limit. Version 0.3.2 mounts the shared singleplayer/multiplayer
 confirmation popup before initializing its native controls. Version 0.3.3 hides
 the uninitialized popup frame, reloads singleplayer checkpoints without creating
 the main menu, and conceals multiplayer's required internal menu transition until
-the load lobby is ready. Quick SL is available from the
+the load lobby is ready. Version 0.3.4 adds an end-to-end eight-second client
+reconnect watchdog, drives the game's native Multiplayer and Join Friends screens,
+periodically presses their native refresh control until the host appears, and
+releases the host's original join button. It verifies that the loaded-run lobby
+was actually reached and always removes the recovery cover when automatic reconnect fails. Quick SL is available from the
 pause menu and through a rebindable F5 shortcut. Multiplayer requests require
 host approval; clients reconnect and ready automatically, while the host is
 only readied last after every originally connected client is ready. Any
@@ -42,4 +46,8 @@ The ZIP contains a top-level `RMPStable` directory with the runtime files and
 `update.cmd`. Extract that directory into `Slay the Spire 2/mods` and enable
 the mod. End users can later double-click `update.cmd` to install the latest
 published GitHub Release without downloading the ZIP manually. All lobby
-members should use the same version.
+members should use the same version. The v0.3.4 updater uses Windows `curl.exe`
+when available, falls back to .NET networking, avoids `Invoke-WebRequest`, and
+uses the repository manifest when the GitHub Releases page is blocked. It only
+installs a strictly newer published version, so an older or equal GitHub Latest
+release can never overwrite the local installation.
