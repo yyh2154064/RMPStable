@@ -12,6 +12,10 @@
   "QUICK_SL_REQUEST_BODY": "{0} requests a Quick SL. Accept?",
   "QUICK_SL_REJECTED_TITLE": "Quick SL",
   "QUICK_SL_REJECTED_BODY": "The host rejected the Quick SL request.",
+  "QUICK_SL_CLIENT_TIMEOUT_TITLE": "Quick SL Connection Timed Out",
+  "QUICK_SL_CLIENT_TIMEOUT_BODY": "Automatic reconnect timed out. Select Join in Multiplayer, then join the host manually.",
+  "QUICK_SL_HOST_FAILED_TITLE": "Quick SL Host Failed",
+  "QUICK_SL_HOST_FAILED_BODY": "Automatic hosting failed. Select Load Save in Multiplayer to host the current save manually.",
   "QUICK_SL_YES": "Confirm",
   "QUICK_SL_NO": "Cancel"
 }

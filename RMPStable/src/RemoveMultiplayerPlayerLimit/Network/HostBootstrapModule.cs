@@ -283,7 +283,7 @@ public class HostBootstrapModule : IRMPModule
 			}
 		}
 
-		internal static async Task StartLoadedRunHostAsync(SerializableRun run, Control loadingOverlay, NSubmenuStack stack, int hostCapacity)
+		internal static async Task<bool> StartLoadedRunHostAsync(SerializableRun run, Control loadingOverlay, NSubmenuStack stack, int hostCapacity)
 		{
 			loadingOverlay.Visible = true;
 			try
@@ -293,7 +293,7 @@ public class HostBootstrapModule : IRMPModule
 				if (netErrorInfo.HasValue)
 				{
 					ShowNetError(netErrorInfo.Value);
-					return;
+					return false;
 				}
 				TrackHostCapacity(netService, hostCapacity);
 				GameMode gameMode = ResolveGameMode(run);
@@ -322,6 +322,7 @@ public class HostBootstrapModule : IRMPModule
 				}
 				}
 				Log.Info($"[RMP:HostBootstrap] Hosted loaded {gameMode} lobby via {GetTransportName(netService)} with capacity {hostCapacity}, savePlayers={run.Players.Count}, connectedPlayers=1.");
+				return true;
 			}
 			catch (Exception value)
 			{
@@ -663,7 +664,6 @@ public class HostBootstrapModule : IRMPModule
 			Log.Warn("[RMP:QuickSL] Multiplayer checkpoint could not be loaded.");
 			return false;
 		}
-		await HostBootstrapNode.StartLoadedRunHostAsync(result.SaveData, loadingOverlay, mainMenu.SubmenuStack, 16);
-		return true;
+		return await HostBootstrapNode.StartLoadedRunHostAsync(result.SaveData, loadingOverlay, mainMenu.SubmenuStack, 16);
 	}
 }

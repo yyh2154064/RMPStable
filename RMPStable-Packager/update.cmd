@@ -18,7 +18,7 @@ $repository = 'yyh2154064/RMPStable'
 $modId = 'RMPStable'
 $modDirectory = Split-Path -Parent $env:RMP_UPDATE_SELF
 $tempRoot = $null
-$userAgent = 'RMPStable-Updater/0.3.4'
+$userAgent = 'RMPStable-Updater/0.3.5'
 
 function Write-Step([string]$message) {
     Write-Host "`n==> $message" -ForegroundColor Cyan

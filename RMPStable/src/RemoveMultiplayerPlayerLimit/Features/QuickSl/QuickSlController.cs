@@ -11,6 +11,7 @@ using MegaCrit.Sts2.Core.Multiplayer;
 using MegaCrit.Sts2.Core.Multiplayer.Connection;
 using MegaCrit.Sts2.Core.Multiplayer.Game;
 using MegaCrit.Sts2.Core.Multiplayer.Game.Lobby;
+using MegaCrit.Sts2.Core.Multiplayer.Transport.Steam;
 using MegaCrit.Sts2.Core.Nodes;
 using MegaCrit.Sts2.Core.Nodes.CommonUi;
 using MegaCrit.Sts2.Core.Nodes.GodotExtensions;
@@ -31,6 +32,8 @@ namespace RemoveMultiplayerPlayerLimit.Features.QuickSl;
 internal static class QuickSlController
 {
 	private const string InputActionText = "rmpQuickSl";
+	private const int ClientReconnectTimeoutSeconds = 7;
+	private const int SteamListenSocketReleaseTimeoutSeconds = 3;
 	private static readonly StringName InputAction = new StringName(InputActionText);
 	private static readonly FieldInfo? PauseButtonLabelField = typeof(NPauseMenuButton).GetField("_label", BindingFlags.Instance | BindingFlags.NonPublic);
 	private static readonly FieldInfo? RemappableKeyboardInputsField = typeof(NInputManager).GetField("remappableKeyboardInputs", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
@@ -65,7 +68,7 @@ internal static class QuickSlController
 	internal static void Initialize()
 	{
 		RegisterInputAction();
-		Log.Info("[RMP:QuickSL] Initialized (default hotkey F5, reconnect timeout 8s).");
+		Log.Info($"[RMP:QuickSL] Initialized (default hotkey F5, reconnect timeout {ClientReconnectTimeoutSeconds}s).");
 	}
 
 	internal static void Cleanup()
@@ -382,9 +385,9 @@ internal static class QuickSlController
 			HostId = message.HostId,
 			PreviousLobbyId = message.PreviousLobbyId,
 			IsHost = false,
-			ClientDeadline = DateTime.UtcNow.AddSeconds(8)
+			ClientDeadline = DateTime.UtcNow.AddSeconds(ClientReconnectTimeoutSeconds)
 		};
-		Log.Info($"[RMP:QuickSL] Client recovery started (host={message.HostId}, previousLobby={message.PreviousLobbyId}, timeout=8s).");
+		Log.Info($"[RMP:QuickSL] Client recovery started (host={message.HostId}, previousLobby={message.PreviousLobbyId}, timeout={ClientReconnectTimeoutSeconds}s).");
 		TaskHelper.RunSafely(ReturnAndReconnectClientAsync(_recovery));
 	}
 
@@ -398,6 +401,7 @@ internal static class QuickSlController
 		try
 		{
 			INetGameService service = RunManager.Instance.NetService;
+			bool waitForSteamListenSocketRelease = service is NetHostGameService { NetHost: SteamHost };
 			HashSet<ulong> expected = RunManager.Instance.RunLobby?.ConnectedPlayerIds.ToHashSet() ?? new HashSet<ulong> { service.NetId };
 			ulong oldLobbyId = SteamLobbyHelper.TryGetLobbyId(service, out ulong lobbyId) ? lobbyId : 0UL;
 			RecoveryState recovery = new RecoveryState
@@ -418,24 +422,59 @@ internal static class QuickSlController
 			await Task.Delay(150);
 			ShowRecoveryCover();
 			await NGame.Instance.ReturnToMainMenu();
+			await WaitForSteamListenSocketReleaseAsync(waitForSteamListenSocketRelease);
 			if (!await HostBootstrapModule.StartQuickSlLoadedHostAsync())
 			{
-				recovery.AutoStartCancelled = true;
-				HideRecoveryCover();
+				FailHostRecovery(recovery, "The native loaded-run host flow could not be started.");
 			}
 		}
 		catch (Exception ex)
 		{
-			Log.Warn("[RMP:QuickSL] Host reload failed: " + ex);
-			if (_recovery != null)
+			RecoveryState? recovery = _recovery;
+			if (recovery != null)
 			{
-				_recovery.AutoStartCancelled = true;
+				FailHostRecovery(recovery, "Host reload failed: " + ex.GetBaseException().Message);
 			}
-			HideRecoveryCover();
+			else
+			{
+				Log.Warn("[RMP:QuickSL] Host reload failed: " + ex);
+				HideRecoveryCover();
+			}
 		}
 		finally
 		{
 			_operationRunning = false;
+		}
+	}
+
+	private static async Task WaitForSteamListenSocketReleaseAsync(bool required)
+	{
+		if (!required)
+		{
+			return;
+		}
+
+		DateTime deadline = DateTime.UtcNow.AddSeconds(SteamListenSocketReleaseTimeoutSeconds);
+		int attempts = 0;
+		while (true)
+		{
+			attempts++;
+			HSteamListenSocket probe = SteamNetworkingSockets.CreateListenSocketP2P(0, 0, Array.Empty<SteamNetworkingConfigValue_t>());
+			if (probe != HSteamListenSocket.Invalid)
+			{
+				if (!SteamNetworkingSockets.CloseListenSocket(probe))
+				{
+					throw new InvalidOperationException("The Steam listen-socket release probe could not be closed.");
+				}
+				Log.Info($"[RMP:QuickSL] Confirmed that the previous Steam listen socket released virtual port 0 after {attempts} probe(s).");
+				return;
+			}
+
+			if (DateTime.UtcNow >= deadline)
+			{
+				throw new TimeoutException($"The previous Steam listen socket did not release virtual port 0 within {SteamListenSocketReleaseTimeoutSeconds} seconds.");
+			}
+			await NGame.Instance.AwaitProcessFrame();
 		}
 	}
 
@@ -448,7 +487,7 @@ internal static class QuickSlController
 			await NGame.Instance.ReturnToMainMenu();
 			if (recovery.AutoStartCancelled || DateTime.UtcNow >= recovery.ClientDeadline)
 			{
-				FailClientRecovery(recovery, "Returning to the main menu used the 8-second reconnect window.");
+				FailClientRecovery(recovery, $"Returning to the main menu used the {ClientReconnectTimeoutSeconds}-second reconnect window.");
 				return;
 			}
 			if (!SteamInitializer.Initialized)
@@ -501,7 +540,7 @@ internal static class QuickSlController
 				}
 				await NGame.Instance.AwaitProcessFrame();
 			}
-			FailClientRecovery(recovery, "The native Join Friends flow did not reach the loaded-run lobby within 8 seconds.");
+			FailClientRecovery(recovery, $"The native Join Friends flow did not reach the loaded-run lobby within {ClientReconnectTimeoutSeconds} seconds.");
 		}
 		catch (Exception ex)
 		{
@@ -525,7 +564,7 @@ internal static class QuickSlController
 		{
 			if (!recovery.IsHost && recovery.ClientDeadline != default && DateTime.UtcNow >= recovery.ClientDeadline)
 			{
-				FailClientRecovery(recovery, "Client recovery watchdog reached the 8-second timeout.");
+				FailClientRecovery(recovery, $"Client recovery watchdog reached the {ClientReconnectTimeoutSeconds}-second timeout.");
 				return;
 			}
 			if (recovery.HasSeenLoadLobby && RunManager.Instance?.IsInProgress == true)
@@ -588,16 +627,99 @@ internal static class QuickSlController
 		}
 		recovery.AutoStartCancelled = true;
 		CancelActiveJoinFlow();
-		Log.Warn("[RMP:QuickSL] " + reason + " Black recovery cover removed; manual join remains available.");
+		Log.Warn("[RMP:QuickSL] " + reason + " Black recovery cover removed; returning to the Multiplayer submenu for manual join.");
 		HideRecoveryCover();
 		if (ReferenceEquals(_recovery, recovery))
 		{
 			_recovery = null;
 		}
-		if (NGame.Instance?.MainMenu != null && SceneMonitor.FindActiveLoadRunLobby() == null)
+		TaskHelper.RunSafely(ShowManualRecoveryFallbackAsync(isHost: false));
+	}
+
+	private static void FailHostRecovery(RecoveryState recovery, string reason)
+	{
+		if (recovery.AutoStartCancelled)
 		{
-			OpenNativeJoinFriendScreenForManualFallback();
+			return;
 		}
+		recovery.AutoStartCancelled = true;
+		Log.Warn("[RMP:QuickSL] " + reason + " Black recovery cover removed; returning to the Multiplayer submenu for manual hosting.");
+		HideRecoveryCover();
+		if (ReferenceEquals(_recovery, recovery))
+		{
+			_recovery = null;
+		}
+		TaskHelper.RunSafely(ShowManualRecoveryFallbackAsync(isHost: true));
+	}
+
+	private static async Task ShowManualRecoveryFallbackAsync(bool isHost)
+	{
+		for (int frame = 0; frame < 30 && NGame.Instance?.MainMenu == null; frame++)
+		{
+			await NGame.Instance.AwaitProcessFrame();
+		}
+		if (NGame.Instance?.MainMenu == null || SceneMonitor.FindActiveLoadRunLobby() != null)
+		{
+			Log.Warn("[RMP:QuickSL] Could not show the manual recovery fallback because the main menu is unavailable.");
+			return;
+		}
+
+		OpenNativeMultiplayerSubmenuForManualFallback();
+		await NGame.Instance.AwaitProcessFrame();
+		string title = isHost
+			? Localization.Get("QUICK_SL_HOST_FAILED_TITLE", "Quick SL Host Failed")
+			: Localization.Get("QUICK_SL_CLIENT_TIMEOUT_TITLE", "Quick SL Connection Timed Out");
+		string body = isHost
+			? Localization.Get("QUICK_SL_HOST_FAILED_BODY", "Automatic hosting failed. Use Load Save in Multiplayer to host the current save manually.")
+			: Localization.Get("QUICK_SL_CLIENT_TIMEOUT_BODY", "Automatic reconnect timed out. Select Join in Multiplayer and join the host manually.");
+		await ShowInformationWhenAvailableAsync(title, body);
+	}
+
+	private static void OpenNativeMultiplayerSubmenuForManualFallback()
+	{
+		try
+		{
+			NMainMenu? mainMenu = NGame.Instance?.MainMenu;
+			if (mainMenu == null)
+			{
+				return;
+			}
+			NSubmenuStack stack = mainMenu.SubmenuStack;
+			for (int i = 0; i < 8; i++)
+			{
+				NSubmenu? current = stack.Peek();
+				if (current is NMultiplayerSubmenu)
+				{
+					return;
+				}
+				if (current == null)
+				{
+					mainMenu.OpenMultiplayerSubmenu();
+					return;
+				}
+				stack.Pop();
+			}
+			throw new InvalidOperationException("The native submenu stack did not reach the Multiplayer submenu within 8 pops.");
+		}
+		catch (Exception ex)
+		{
+			Log.Warn("[RMP:QuickSL] Could not open the native Multiplayer submenu: " + ex.GetBaseException().Message);
+		}
+	}
+
+	private static async Task ShowInformationWhenAvailableAsync(string title, string body)
+	{
+		for (int frame = 0; frame < 120; frame++)
+		{
+			NModalContainer? modal = NModalContainer.Instance;
+			if (!_popupOpen && modal != null && modal.OpenModal == null)
+			{
+				ShowInformation(title, body);
+				return;
+			}
+			await NGame.Instance.AwaitProcessFrame();
+		}
+		Log.Warn("[RMP:QuickSL] Timed out waiting to show the native manual-recovery popup.");
 	}
 
 	private static async Task<NJoinFriendScreen?> OpenNativeJoinFriendScreenAsync()

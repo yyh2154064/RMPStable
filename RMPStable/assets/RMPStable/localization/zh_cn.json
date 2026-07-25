@@ -12,6 +12,10 @@
   "QUICK_SL_REQUEST_BODY": "{0} 请求快速SL，是否同意？",
   "QUICK_SL_REJECTED_TITLE": "快速SL",
   "QUICK_SL_REJECTED_BODY": "房主拒绝了快速SL请求。",
+  "QUICK_SL_CLIENT_TIMEOUT_TITLE": "快速SL连接超时",
+  "QUICK_SL_CLIENT_TIMEOUT_BODY": "自动重连已超时。请在“多人联机”中点击“加入”，然后手动加入房主的房间。",
+  "QUICK_SL_HOST_FAILED_TITLE": "快速SL建房失败",
+  "QUICK_SL_HOST_FAILED_BODY": "自动建房失败。请在“多人联机”中点击“读取存档”，手动创建当前存档的房间。",
   "QUICK_SL_YES": "确认",
   "QUICK_SL_NO": "取消"
 }
