@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using MegaCrit.Sts2.Core.Logging;
 using MegaCrit.Sts2.Core.Multiplayer.Serialization;
 using MegaCrit.Sts2.Core.Multiplayer.Transport;
@@ -27,9 +28,13 @@ public struct RmpQuickSlDecisionMessage : INetMessage, IPacketSerializable
 
 public struct RmpQuickSlBeginMessage : INetMessage, IPacketSerializable
 {
+	private const int PlayerCountBits = 5;
+	private const int MaxPlayerCount = 16;
+
 	public ulong OperationId;
 	public ulong HostId;
 	public ulong PreviousLobbyId;
+	public List<ulong>? PlayerIds;
 	public readonly bool ShouldBroadcast => true;
 	public readonly bool ShouldBuffer => false;
 	public readonly NetTransferMode Mode => NetTransferMode.Reliable;
@@ -39,11 +44,27 @@ public struct RmpQuickSlBeginMessage : INetMessage, IPacketSerializable
 		writer.WriteULong(OperationId);
 		writer.WriteULong(HostId);
 		writer.WriteULong(PreviousLobbyId);
+		int count = PlayerIds == null ? 0 : System.Math.Min(PlayerIds.Count, MaxPlayerCount);
+		writer.WriteInt(count, PlayerCountBits);
+		for (int i = 0; i < count; i++)
+		{
+			writer.WriteULong(PlayerIds![i]);
+		}
 	}
 	public void Deserialize(PacketReader reader)
 	{
 		OperationId = reader.ReadULong();
 		HostId = reader.ReadULong();
 		PreviousLobbyId = reader.ReadULong();
+		int count = reader.ReadInt(PlayerCountBits);
+		if (count < 0 || count > MaxPlayerCount)
+		{
+			throw new System.InvalidOperationException($"Quick SL player count {count} is outside the supported range.");
+		}
+		PlayerIds = new List<ulong>(count);
+		for (int i = 0; i < count; i++)
+		{
+			PlayerIds.Add(reader.ReadULong());
+		}
 	}
 }

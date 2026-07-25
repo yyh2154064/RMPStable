@@ -32,7 +32,9 @@ namespace RemoveMultiplayerPlayerLimit.Features.QuickSl;
 internal static class QuickSlController
 {
 	private const string InputActionText = "rmpQuickSl";
-	private const int ClientReconnectTimeoutSeconds = 7;
+	private const string NativeLoadingOverlayPath = "res://scenes/screens/main_menu/loading_overlay.tscn";
+	private const int ClientReconnectTimeoutSeconds = 9;
+	private const int HostClientReadyTimeoutSeconds = 9;
 	private const int SteamListenSocketReleaseTimeoutSeconds = 3;
 	private static readonly StringName InputAction = new StringName(InputActionText);
 	private static readonly FieldInfo? PauseButtonLabelField = typeof(NPauseMenuButton).GetField("_label", BindingFlags.Instance | BindingFlags.NonPublic);
@@ -41,9 +43,14 @@ internal static class QuickSlController
 	private static readonly FieldInfo? EntryTitleMapField = typeof(NInputSettingsEntry).GetField("_commandToLocTitle", BindingFlags.Static | BindingFlags.NonPublic);
 	private static readonly MethodInfo? OpenJoinFriendsScreenMethod = typeof(NMultiplayerSubmenu).GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic).FirstOrDefault(method => method.Name == "OpenJoinFriendsScreen");
 	private static readonly PropertyInfo? JoinFriendPlayerIdProperty = typeof(NJoinFriendButton).GetProperty("PlayerId", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+	private static readonly FieldInfo? JoinFriendCurrentJoinFlowField = typeof(NJoinFriendScreen).GetField("_currentJoinFlow", BindingFlags.Instance | BindingFlags.NonPublic);
+	private static readonly FieldInfo? JoinFriendRefreshTaskField = typeof(NJoinFriendScreen).GetField("_refreshTask", BindingFlags.Instance | BindingFlags.NonPublic);
+	private static readonly FieldInfo? RunLobbyPlayerCollectionField = typeof(RunLobby).GetField("_playerCollection", BindingFlags.Instance | BindingFlags.NonPublic);
 	private static INetGameService? _boundService;
 	private static NPauseMenu? _patchedPauseMenu;
 	private static CanvasLayer? _recoveryCover;
+	private static NLoadingOverlay? _recoveryLoadingOverlay;
+	private static string? _recoveryStatusText;
 	private static bool _inputRegistered;
 	private static bool _hotkeyWasDown;
 	private static bool _popupOpen;
@@ -54,9 +61,11 @@ internal static class QuickSlController
 	{
 		public ulong OperationId;
 		public ulong HostId;
+		public ulong LocalId;
 		public ulong PreviousLobbyId;
 		public HashSet<ulong> ExpectedPlayers = new HashSet<ulong>();
 		public Dictionary<ulong, DateTime> Deadlines = new Dictionary<ulong, DateTime>();
+		public Dictionary<ulong, DateTime> CandidateRetryAfter = new Dictionary<ulong, DateTime>();
 		public bool IsHost;
 		public bool HasSeenLoadLobby;
 		public bool LocalReadySent;
@@ -88,6 +97,7 @@ internal static class QuickSlController
 		PatchInputSettingsLabel();
 		PollHotkey();
 		ProcessRecoveryLobby();
+		ApplyRecoveryCoverStatus();
 	}
 
 	private static void RegisterInputAction()
@@ -383,10 +393,14 @@ internal static class QuickSlController
 		{
 			OperationId = message.OperationId,
 			HostId = message.HostId,
+			LocalId = _boundService.NetId,
 			PreviousLobbyId = message.PreviousLobbyId,
+			ExpectedPlayers = message.PlayerIds?.ToHashSet() ?? new HashSet<ulong>(),
 			IsHost = false,
 			ClientDeadline = DateTime.UtcNow.AddSeconds(ClientReconnectTimeoutSeconds)
 		};
+		_recovery.ExpectedPlayers.Add(message.HostId);
+		_recovery.ExpectedPlayers.Add(_boundService.NetId);
 		Log.Info($"[RMP:QuickSL] Client recovery started (host={message.HostId}, previousLobby={message.PreviousLobbyId}, timeout={ClientReconnectTimeoutSeconds}s).");
 		TaskHelper.RunSafely(ReturnAndReconnectClientAsync(_recovery));
 	}
@@ -402,12 +416,13 @@ internal static class QuickSlController
 		{
 			INetGameService service = RunManager.Instance.NetService;
 			bool waitForSteamListenSocketRelease = service is NetHostGameService { NetHost: SteamHost };
-			HashSet<ulong> expected = RunManager.Instance.RunLobby?.ConnectedPlayerIds.ToHashSet() ?? new HashSet<ulong> { service.NetId };
+			HashSet<ulong> expected = GetOriginalRunPlayerIds(service.NetId);
 			ulong oldLobbyId = SteamLobbyHelper.TryGetLobbyId(service, out ulong lobbyId) ? lobbyId : 0UL;
 			RecoveryState recovery = new RecoveryState
 			{
 				OperationId = unchecked((ulong)DateTime.UtcNow.Ticks),
 				HostId = service.NetId,
+				LocalId = service.NetId,
 				PreviousLobbyId = oldLobbyId,
 				ExpectedPlayers = expected,
 				IsHost = true
@@ -417,10 +432,11 @@ internal static class QuickSlController
 			{
 				OperationId = recovery.OperationId,
 				HostId = recovery.HostId,
-				PreviousLobbyId = recovery.PreviousLobbyId
+				PreviousLobbyId = recovery.PreviousLobbyId,
+				PlayerIds = recovery.ExpectedPlayers.OrderBy(id => id == recovery.HostId ? 0 : 1).ThenBy(id => id).ToList()
 			});
 			await Task.Delay(150);
-			ShowRecoveryCover();
+			ShowRecoveryCover(Localization.Get("QUICK_SL_STATUS_INITIALIZING_ROOM", "Initializing room..."));
 			await NGame.Instance.ReturnToMainMenu();
 			await WaitForSteamListenSocketReleaseAsync(waitForSteamListenSocketRelease);
 			if (!await HostBootstrapModule.StartQuickSlLoadedHostAsync())
@@ -445,6 +461,32 @@ internal static class QuickSlController
 		{
 			_operationRunning = false;
 		}
+	}
+
+	private static HashSet<ulong> GetOriginalRunPlayerIds(ulong hostId)
+	{
+		HashSet<ulong> result = new HashSet<ulong> { hostId };
+		RunLobby? runLobby = RunManager.Instance?.RunLobby;
+		try
+		{
+			if (runLobby != null && RunLobbyPlayerCollectionField?.GetValue(runLobby) is IPlayerCollection playerCollection)
+			{
+				foreach (var player in playerCollection.Players)
+				{
+					result.Add(player.NetId);
+				}
+			}
+		}
+		catch (Exception ex)
+		{
+			Log.Warn("[RMP:QuickSL] Could not read the complete run player collection: " + ex.GetBaseException().Message);
+		}
+		if (result.Count == 1 && runLobby != null)
+		{
+			result.UnionWith(runLobby.ConnectedPlayerIds);
+		}
+		Log.Info($"[RMP:QuickSL] Captured {result.Count} original run player ID(s) for reconnect and auto-start tracking.");
+		return result;
 	}
 
 	private static async Task WaitForSteamListenSocketReleaseAsync(bool required)
@@ -478,13 +520,36 @@ internal static class QuickSlController
 		}
 	}
 
+	private static async Task WaitForMainMenuToSettleAsync(RecoveryState recovery)
+	{
+		DateTime earliestReturn = DateTime.UtcNow.AddSeconds(1);
+		DateTime stableSince = DateTime.UtcNow;
+		NMainMenu? lastMainMenu = null;
+		while (!recovery.AutoStartCancelled && DateTime.UtcNow < recovery.ClientDeadline)
+		{
+			NMainMenu? currentMainMenu = NGame.Instance?.MainMenu;
+			if (!ReferenceEquals(currentMainMenu, lastMainMenu))
+			{
+				lastMainMenu = currentMainMenu;
+				stableSince = DateTime.UtcNow;
+			}
+			DateTime now = DateTime.UtcNow;
+			if (currentMainMenu != null && now >= earliestReturn && now - stableSince >= TimeSpan.FromMilliseconds(250))
+			{
+				return;
+			}
+			await NGame.Instance.AwaitProcessFrame();
+		}
+	}
+
 	private static async Task ReturnAndReconnectClientAsync(RecoveryState recovery)
 	{
 		_operationRunning = true;
 		try
 		{
-			ShowRecoveryCover();
+			ShowRecoveryCover(Localization.Get("QUICK_SL_STATUS_SEARCHING_ROOM", "Searching for room..."));
 			await NGame.Instance.ReturnToMainMenu();
+			await WaitForMainMenuToSettleAsync(recovery);
 			if (recovery.AutoStartCancelled || DateTime.UtcNow >= recovery.ClientDeadline)
 			{
 				FailClientRecovery(recovery, $"Returning to the main menu used the {ClientReconnectTimeoutSeconds}-second reconnect window.");
@@ -496,14 +561,12 @@ internal static class QuickSlController
 				return;
 			}
 			NJoinFriendScreen? joinScreen = await OpenNativeJoinFriendScreenAsync();
-			if (joinScreen == null)
-			{
-				FailClientRecovery(recovery, "The native Join Friends screen could not be opened.");
-				return;
-			}
-			Log.Info("[RMP:QuickSL] Native multiplayer and Join Friends screens opened behind the recovery cover.");
-			DateTime nextRefreshAt = DateTime.UtcNow.AddMilliseconds(500);
+			DateTime nextOpenAt = DateTime.UtcNow;
+			DateTime nextRefreshAt = DateTime.UtcNow;
 			bool joinTriggered = false;
+			bool joinFlowSeen = false;
+			DateTime joinTriggeredAt = default;
+			ulong joinCandidateId = 0UL;
 			while (!recovery.AutoStartCancelled && DateTime.UtcNow < recovery.ClientDeadline)
 			{
 				LoadRunLobby? joinedLobby = SceneMonitor.FindActiveLoadRunLobby();
@@ -515,28 +578,64 @@ internal static class QuickSlController
 				}
 
 				NJoinFriendScreen? activeScreen = FindNativeJoinFriendScreen();
-				if (activeScreen != null)
+				DateTime now = DateTime.UtcNow;
+				if (activeScreen == null)
+				{
+					if (!joinTriggered && now >= nextOpenAt)
+					{
+						SetRecoveryCoverStatus(Localization.Get("QUICK_SL_STATUS_SEARCHING_ROOM", "Searching for room..."));
+						OpenNativeJoinFriendScreenForManualFallback();
+						nextOpenAt = now.AddSeconds(1);
+					}
+					await NGame.Instance.AwaitProcessFrame();
+					continue;
+				}
+
+				if (!ReferenceEquals(joinScreen, activeScreen))
 				{
 					joinScreen = activeScreen;
-					NJoinFriendButton? hostButton = FindHostJoinButton(joinScreen, recovery.HostId);
-					DateTime now = DateTime.UtcNow;
-					if (hostButton != null && !joinTriggered)
+					joinTriggered = false;
+					joinFlowSeen = false;
+					joinCandidateId = 0UL;
+					nextRefreshAt = now;
+					SetRecoveryCoverStatus(Localization.Get("QUICK_SL_STATUS_SEARCHING_ROOM", "Searching for room..."));
+					Log.Info("[RMP:QuickSL] Native multiplayer and Join Friends screens are ready behind the recovery cover.");
+				}
+
+				if (joinTriggered)
+				{
+					object? currentJoinFlow = JoinFriendCurrentJoinFlowField?.GetValue(activeScreen);
+					if (currentJoinFlow != null)
 					{
-						EmitNativeRelease(hostButton);
-						joinTriggered = true;
-						Log.Info($"[RMP:QuickSL] Host entry found in the native Join Friends list; released its original join button (host={recovery.HostId}).");
+						joinFlowSeen = true;
 					}
-					else if (!joinTriggered && hostButton == null && now >= nextRefreshAt)
+					else if (joinFlowSeen || now - joinTriggeredAt >= TimeSpan.FromMilliseconds(750))
 					{
-						TriggerNativeFriendRefresh(joinScreen);
-						nextRefreshAt = now.AddSeconds(1);
-						Log.Info($"[RMP:QuickSL] Native Join Friends list refreshed while waiting for host {recovery.HostId}.");
+						if (joinCandidateId != 0UL)
+						{
+							recovery.CandidateRetryAfter[joinCandidateId] = now.AddSeconds(1);
+						}
+						joinTriggered = false;
+						joinFlowSeen = false;
+						joinCandidateId = 0UL;
+						nextRefreshAt = now;
+						SetRecoveryCoverStatus(Localization.Get("QUICK_SL_STATUS_SEARCHING_ROOM", "Searching for room..."));
+						Log.Info("[RMP:QuickSL] Native join attempt ended before the loaded-run lobby was reached; resuming candidate search.");
 					}
 				}
-				else if (!joinTriggered && DateTime.UtcNow >= nextRefreshAt)
+				else if (TryFindJoinCandidateButton(activeScreen, recovery, now, out NJoinFriendButton candidateButton, out ulong candidateId))
 				{
-					Log.Info("[RMP:QuickSL] Native Join Friends screen is temporarily unavailable while its submenu transition completes.");
-					nextRefreshAt = DateTime.UtcNow.AddSeconds(1);
+					SetRecoveryCoverStatus(Localization.Get("QUICK_SL_STATUS_JOINING_ROOM", "Joining room..."));
+					EmitNativeRelease(candidateButton);
+					joinTriggered = true;
+					joinTriggeredAt = now;
+					joinCandidateId = candidateId;
+					Log.Info($"[RMP:QuickSL] Original player entry found in the native Join Friends list; released its join button (candidate={candidateId}, host={recovery.HostId}).");
+				}
+				else if (now >= nextRefreshAt && TriggerNativeFriendRefresh(activeScreen))
+				{
+					nextRefreshAt = now.AddSeconds(1);
+					Log.Info($"[RMP:QuickSL] Native Join Friends list refreshed while searching {recovery.ExpectedPlayers.Count} original player candidate(s).");
 				}
 				await NGame.Instance.AwaitProcessFrame();
 			}
@@ -562,15 +661,15 @@ internal static class QuickSlController
 		LoadRunLobby? lobby = SceneMonitor.FindActiveLoadRunLobby();
 		if (lobby == null)
 		{
-			if (!recovery.IsHost && recovery.ClientDeadline != default && DateTime.UtcNow >= recovery.ClientDeadline)
-			{
-				FailClientRecovery(recovery, $"Client recovery watchdog reached the {ClientReconnectTimeoutSeconds}-second timeout.");
-				return;
-			}
 			if (recovery.HasSeenLoadLobby && RunManager.Instance?.IsInProgress == true)
 			{
 				Log.Info("[RMP:QuickSL] Recovery completed.");
 				_recovery = null;
+				return;
+			}
+			if (!recovery.IsHost && !recovery.HasSeenLoadLobby && recovery.ClientDeadline != default && DateTime.UtcNow >= recovery.ClientDeadline)
+			{
+				FailClientRecovery(recovery, $"Client recovery watchdog reached the {ClientReconnectTimeoutSeconds}-second timeout.");
 			}
 			return;
 		}
@@ -591,7 +690,7 @@ internal static class QuickSlController
 		{
 			if (!recovery.Deadlines.ContainsKey(id))
 			{
-				recovery.Deadlines[id] = now.AddSeconds(8);
+				recovery.Deadlines[id] = now.AddSeconds(HostClientReadyTimeoutSeconds);
 			}
 			if (now >= recovery.Deadlines[id] && (!lobby.ConnectedPlayerIds.Contains(id) || !lobby.IsPlayerReady(id)))
 			{
@@ -609,6 +708,8 @@ internal static class QuickSlController
 
 	private static void MarkReconnectedClientReady(LoadRunLobby lobby, RecoveryState recovery)
 	{
+		recovery.HasSeenLoadLobby = true;
+		recovery.ClientDeadline = default;
 		ulong localId = lobby.NetService.NetId;
 		if (!recovery.LocalReadySent || !lobby.IsPlayerReady(localId))
 		{
@@ -771,35 +872,71 @@ internal static class QuickSlController
 		return FindNodesOfType<NJoinFriendScreen>(SceneMonitor.GetRoot()).FirstOrDefault(screen => GodotObject.IsInstanceValid(screen) && screen.IsVisibleInTree());
 	}
 
-	private static NJoinFriendButton? FindHostJoinButton(NJoinFriendScreen screen, ulong hostId)
+	private static bool TryFindJoinCandidateButton(NJoinFriendScreen screen, RecoveryState recovery, DateTime now, out NJoinFriendButton button, out ulong candidateId)
 	{
-		foreach (NJoinFriendButton button in FindNodesOfType<NJoinFriendButton>(screen))
+		Dictionary<ulong, NJoinFriendButton> buttonsByPlayerId = new Dictionary<ulong, NJoinFriendButton>();
+		foreach (NJoinFriendButton candidateButton in FindNodesOfType<NJoinFriendButton>(screen))
 		{
-			object? playerId = JoinFriendPlayerIdProperty?.GetValue(button);
-			if (playerId is ulong unsignedId && unsignedId == hostId)
+			if (TryGetJoinButtonPlayerId(candidateButton, out ulong playerId))
 			{
-				return button;
-			}
-			if (playerId is long signedId && unchecked((ulong)signedId) == hostId)
-			{
-				return button;
-			}
-			if (playerId is CSteamID steamId && steamId.m_SteamID == hostId)
-			{
-				return button;
+				buttonsByPlayerId[playerId] = candidateButton;
 			}
 		}
-		return null;
+
+		ulong localId = recovery.LocalId;
+		foreach (ulong playerId in recovery.ExpectedPlayers.OrderBy(id => id == recovery.HostId ? 0 : 1).ThenBy(id => id))
+		{
+			if (playerId == localId || recovery.CandidateRetryAfter.TryGetValue(playerId, out DateTime retryAfter) && now < retryAfter)
+			{
+				continue;
+			}
+			if (buttonsByPlayerId.TryGetValue(playerId, out NJoinFriendButton? candidateButton))
+			{
+				button = candidateButton;
+				candidateId = playerId;
+				return true;
+			}
+		}
+		button = null!;
+		candidateId = 0UL;
+		return false;
 	}
 
-	private static void TriggerNativeFriendRefresh(NJoinFriendScreen screen)
+	private static bool TryGetJoinButtonPlayerId(NJoinFriendButton button, out ulong playerId)
 	{
+		object? value = JoinFriendPlayerIdProperty?.GetValue(button);
+		if (value is ulong unsignedId)
+		{
+			playerId = unsignedId;
+			return true;
+		}
+		if (value is long signedId)
+		{
+			playerId = unchecked((ulong)signedId);
+			return true;
+		}
+		if (value is CSteamID steamId)
+		{
+			playerId = steamId.m_SteamID;
+			return true;
+		}
+		playerId = 0UL;
+		return false;
+	}
+
+	private static bool TriggerNativeFriendRefresh(NJoinFriendScreen screen)
+	{
+		if (JoinFriendRefreshTaskField?.GetValue(screen) is Task refreshTask && !refreshTask.IsCompleted)
+		{
+			return false;
+		}
 		NJoinFriendRefreshButton? refreshButton = FindNodesOfType<NJoinFriendRefreshButton>(screen).FirstOrDefault();
 		if (refreshButton == null)
 		{
 			throw new InvalidOperationException("The native Join Friends refresh button was not found.");
 		}
 		EmitNativeRelease(refreshButton);
+		return true;
 	}
 
 	private static void EmitNativeRelease(NButton button)
@@ -835,10 +972,11 @@ internal static class QuickSlController
 		return id.ToString();
 	}
 
-	private static void ShowRecoveryCover()
+	private static void ShowRecoveryCover(string statusText)
 	{
 		if (_recoveryCover != null && GodotObject.IsInstanceValid(_recoveryCover))
 		{
+			SetRecoveryCoverStatus(statusText);
 			return;
 		}
 		CanvasLayer layer = new CanvasLayer
@@ -855,15 +993,74 @@ internal static class QuickSlController
 			Size = NGame.Instance.GetViewport().GetVisibleRect().Size
 		};
 		layer.AddChild(backdrop);
+		PackedScene? loadingOverlayScene = GD.Load<PackedScene>(NativeLoadingOverlayPath);
+		if (loadingOverlayScene == null)
+		{
+			throw new InvalidOperationException($"The native loading overlay could not be loaded from {NativeLoadingOverlayPath}.");
+		}
+		NLoadingOverlay loadingOverlay = loadingOverlayScene.Instantiate<NLoadingOverlay>();
+		loadingOverlay.Name = "NativeLoadingOverlay";
+		if (loadingOverlay is Control loadingControl)
+		{
+			loadingControl.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
+			loadingControl.MouseFilter = Control.MouseFilterEnum.Ignore;
+		}
+		layer.AddChild(loadingOverlay);
 		NGame.Instance.AddChild(layer);
 		_recoveryCover = layer;
+		_recoveryLoadingOverlay = loadingOverlay;
+		SetRecoveryCoverStatus(statusText);
 		Log.Info("[RMP:QuickSL] Recovery cover shown; intermediate main-menu frames are hidden.");
+	}
+
+	private static void SetRecoveryCoverStatus(string statusText)
+	{
+		_recoveryStatusText = statusText;
+		ApplyRecoveryCoverStatus();
+	}
+
+	private static void ApplyRecoveryCoverStatus()
+	{
+		NLoadingOverlay? loadingOverlay = _recoveryLoadingOverlay;
+		string? statusText = _recoveryStatusText;
+		if (loadingOverlay == null || !GodotObject.IsInstanceValid(loadingOverlay) || string.IsNullOrWhiteSpace(statusText))
+		{
+			return;
+		}
+		MegaLabel? megaLabel = FindNodesOfType<MegaLabel>(loadingOverlay).FirstOrDefault();
+		if (megaLabel != null)
+		{
+			if (megaLabel.Text != statusText)
+			{
+				megaLabel.SetTextAutoSize(statusText);
+			}
+			return;
+		}
+		MegaRichTextLabel? richTextLabel = FindNodesOfType<MegaRichTextLabel>(loadingOverlay).FirstOrDefault();
+		if (richTextLabel != null && richTextLabel.Text != statusText)
+		{
+			richTextLabel.Text = statusText;
+			return;
+		}
+		Label? label = FindNodesOfType<Label>(loadingOverlay).FirstOrDefault();
+		if (label != null && label.Text != statusText)
+		{
+			label.Text = statusText;
+			return;
+		}
+		RichTextLabel? fallbackRichTextLabel = FindNodesOfType<RichTextLabel>(loadingOverlay).FirstOrDefault();
+		if (fallbackRichTextLabel != null && fallbackRichTextLabel.Text != statusText)
+		{
+			fallbackRichTextLabel.Text = statusText;
+		}
 	}
 
 	private static void HideRecoveryCover()
 	{
 		CanvasLayer? layer = _recoveryCover;
 		_recoveryCover = null;
+		_recoveryLoadingOverlay = null;
+		_recoveryStatusText = null;
 		if (layer != null && GodotObject.IsInstanceValid(layer))
 		{
 			layer.QueueFree();

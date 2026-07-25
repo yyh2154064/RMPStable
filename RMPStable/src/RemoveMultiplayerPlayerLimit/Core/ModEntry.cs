@@ -27,7 +27,7 @@ public static class ModEntry
 
 	public static void Initialize()
 	{
-		Log.Warn("[RMP Stable] Initializing standalone v0.3.5 for STS2 v0.107.1...");
+		Log.Warn("[RMP Stable] Initializing standalone v0.3.6 for STS2 v0.107.1...");
 		Modules.Clear();
 		ConfigManager configManager = new ConfigManager();
 		ReflectionCache cache = new ReflectionCache();

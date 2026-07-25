@@ -19,9 +19,14 @@ Steam virtual port 0 is available before recreating the host, changes the client
 and returns failed hosts and clients to the Multiplayer submenu with native manual-recovery popups. Quick SL is available from the
 pause menu and through a rebindable F5 shortcut. Multiplayer requests require
 host approval; clients reconnect and ready automatically, while the host is
-only readied last after every originally connected client is ready. Any
-seven-second client timeout cancels automatic start and leaves the final
-decision to the host's normal lobby confirmation.
+only readied last after every original run member is ready. Version 0.3.6 extends the
+client recovery window to nine seconds, tracks every player stored in the run
+instead of only currently connected peers, and lets clients discover the new
+lobby through the host or any original player who is a Steam friend. It also
+stabilizes the native Join Friends transition, retries completed join failures,
+stops the reconnect watchdog once the loaded-run lobby is reached, and shows
+the game's native loading overlay with room initialization, search, and join
+status text throughout multiplayer recovery.
 
 ## Source layout
 
