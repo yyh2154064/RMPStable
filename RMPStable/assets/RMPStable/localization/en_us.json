@@ -16,6 +16,8 @@
   "QUICK_SL_CLIENT_TIMEOUT_BODY": "Automatic reconnect timed out. Select Join in Multiplayer, then join the host manually.",
   "QUICK_SL_HOST_FAILED_TITLE": "Quick SL Host Failed",
   "QUICK_SL_HOST_FAILED_BODY": "Automatic hosting failed. Select Load Save in Multiplayer to host the current save manually.",
+  "QUICK_SL_PLAYER_TIMEOUT_TITLE": "Quick SL Player Timed Out",
+  "QUICK_SL_PLAYER_TIMEOUT_BODY": "{0} did not reconnect and become ready in time. Automatic start was cancelled; wait in the lobby and ready up manually.",
   "QUICK_SL_STATUS_INITIALIZING_ROOM": "Initializing room...",
   "QUICK_SL_STATUS_SEARCHING_ROOM": "Searching for room...",
   "QUICK_SL_STATUS_JOINING_ROOM": "Joining room...",

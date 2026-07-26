@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Reflection;
+using System.Text;
 using Godot;
 using Godot.Bridge;
 using Godot.NativeInterop;
@@ -75,6 +76,18 @@ public class TreasureModule : IRMPModule
 
 		private readonly HashSet<string> _mirroredRemoteChestRewards = new HashSet<string>();
 
+		private TreasureRoomRelicSynchronizer? _diagnosticSynchronizer;
+
+		private Action? _diagnosticVotesChangedHandler;
+
+		private Action<List<RelicPickingResult>>? _diagnosticRelicsAwardedHandler;
+
+		private readonly HashSet<ulong> _diagnosticHolderIds = new HashSet<ulong>();
+
+		private readonly Dictionary<ulong, int> _diagnosticHolderReleaseCounts = new Dictionary<ulong, int>();
+
+		private string? _lastTreasureDiagnosticSnapshot;
+
 		public TreasureNode(TreasureModule mod)
 		{
 			_mod = mod;
@@ -93,6 +106,7 @@ public class TreasureModule : IRMPModule
 			{
 				tree.NodeAdded -= OnNodeAdded;
 			}
+			BindTreasureDiagnostics(null);
 			UnregisterTreasureChestHandler();
 		}
 
@@ -123,6 +137,7 @@ public class TreasureModule : IRMPModule
 		public override void _Process(double delta)
 		{
 			EnsureTreasureChestHandler();
+			BindTreasureDiagnostics(RunManager.Instance?.TreasureRoomRelicSynchronizer);
 			if (++_frameCounter % 10 != 0)
 			{
 				return;
@@ -130,8 +145,21 @@ public class TreasureModule : IRMPModule
 			NTreasureRoomRelicCollection nTreasureRoomRelicCollection = SceneMonitor.FindTreasureRoomRelicCollection();
 			if (nTreasureRoomRelicCollection == null || nTreasureRoomRelicCollection != _lastCollection)
 			{
+				if (_lastCollection != null)
+				{
+					string previousInstance = GodotObject.IsInstanceValid(_lastCollection) ? _lastCollection.GetInstanceId().ToString() : "freed";
+					Log.Info($"[RMP:TreasureDiag] Relic collection left (instance={previousInstance}).");
+				}
 				_lastCollection = nTreasureRoomRelicCollection;
 				_layoutApplied = false;
+				_diagnosticHolderIds.Clear();
+				_diagnosticHolderReleaseCounts.Clear();
+				_lastTreasureDiagnosticSnapshot = null;
+				if (nTreasureRoomRelicCollection != null)
+				{
+					EnsureHolderDiagnosticHandlers(nTreasureRoomRelicCollection);
+					LogTreasureState("collection-entered", force: true);
+				}
 			}
 			else
 			{
@@ -141,6 +169,8 @@ public class TreasureModule : IRMPModule
 				}
 				ExpandHolders(nTreasureRoomRelicCollection);
 				_mod.PrewarmAllPlayerStates();
+				EnsureHolderDiagnosticHandlers(nTreasureRoomRelicCollection);
+				LogTreasureState("poll");
 				List<NTreasureRoomRelicHolder> holdersInUse = _mod.GetHoldersInUse(nTreasureRoomRelicCollection);
 				if (holdersInUse == null || holdersInUse.Count == 0)
 				{
@@ -266,6 +296,140 @@ public class TreasureModule : IRMPModule
 
 		private void HandleTreasureChestOpened(TreasureChestOpenedMessage message, ulong senderId)
 		{
+		}
+
+		private void BindTreasureDiagnostics(TreasureRoomRelicSynchronizer? synchronizer)
+		{
+			if (ReferenceEquals(_diagnosticSynchronizer, synchronizer))
+			{
+				return;
+			}
+			if (_diagnosticSynchronizer != null)
+			{
+				if (_diagnosticVotesChangedHandler != null)
+				{
+					_diagnosticSynchronizer.VotesChanged -= _diagnosticVotesChangedHandler;
+				}
+				if (_diagnosticRelicsAwardedHandler != null)
+				{
+					_diagnosticSynchronizer.RelicsAwarded -= _diagnosticRelicsAwardedHandler;
+				}
+			}
+
+			_diagnosticSynchronizer = synchronizer;
+			_diagnosticVotesChangedHandler = null;
+			_diagnosticRelicsAwardedHandler = null;
+			_lastTreasureDiagnosticSnapshot = null;
+			if (synchronizer == null)
+			{
+				return;
+			}
+
+			_diagnosticVotesChangedHandler = () => LogTreasureState("votes-changed", force: true);
+			_diagnosticRelicsAwardedHandler = results =>
+			{
+				StringBuilder summary = new StringBuilder();
+				for (int i = 0; i < results.Count; i++)
+				{
+					RelicPickingResult result = results[i];
+					if (i > 0)
+					{
+						summary.Append("; ");
+					}
+					summary.Append($"type={result.type}, player={result.player?.NetId.ToString() ?? "null"}, relic={result.relic?.ToString() ?? "none"}, fight={result.fight}");
+				}
+				Log.Info($"[RMP:TreasureDiag] Relics awarded (count={results.Count}): [{summary}]");
+				LogTreasureState("relics-awarded", force: true);
+			};
+			synchronizer.VotesChanged += _diagnosticVotesChangedHandler;
+			synchronizer.RelicsAwarded += _diagnosticRelicsAwardedHandler;
+			Log.Info($"[RMP:TreasureDiag] Bound diagnostics to treasure synchronizer (localPlayer={_mod.GetSyncLocalPlayerId(synchronizer)?.ToString() ?? "unknown"}).");
+		}
+
+		private void EnsureHolderDiagnosticHandlers(NTreasureRoomRelicCollection collection)
+		{
+			List<NTreasureRoomRelicHolder> holders = _mod.GetHoldersInUse(collection);
+			if (holders == null)
+			{
+				return;
+			}
+			foreach (NTreasureRoomRelicHolder holder in holders)
+			{
+				if (holder == null || !GodotObject.IsInstanceValid(holder))
+				{
+					continue;
+				}
+				ulong instanceId = holder.GetInstanceId();
+				if (!_diagnosticHolderIds.Add(instanceId))
+				{
+					continue;
+				}
+				holder.Connect(NClickableControl.SignalName.Released, Callable.From<NButton>(_ => LogHolderReleased(holder)));
+				Log.Info($"[RMP:TreasureDiag] Observing relic holder release (collection={collection.GetInstanceId()}, holder={instanceId}, name={holder.Name}, index={holder.Index}).");
+			}
+		}
+
+		private void LogHolderReleased(NTreasureRoomRelicHolder holder)
+		{
+			ulong instanceId = holder.GetInstanceId();
+			int releaseCount = _diagnosticHolderReleaseCounts.TryGetValue(instanceId, out int currentCount) ? currentCount + 1 : 1;
+			_diagnosticHolderReleaseCounts[instanceId] = releaseCount;
+			TreasureRoomRelicSynchronizer? synchronizer = RunManager.Instance?.TreasureRoomRelicSynchronizer;
+			List<RelicModel>? relics = synchronizer == null ? null : _mod.GetSyncCurrentRelics(synchronizer);
+			string relic = relics != null && holder.Index >= 0 && holder.Index < relics.Count ? relics[holder.Index].ToString() : "none";
+			Log.Info($"[RMP:TreasureDiag] Relic holder released (holder={instanceId}, name={holder.Name}, index={holder.Index}, releaseCount={releaseCount}, active={relics != null}, relic={relic}).");
+			LogTreasureState("holder-released", force: true);
+		}
+
+		private void LogTreasureState(string reason, bool force = false)
+		{
+			TreasureRoomRelicSynchronizer? synchronizer = _diagnosticSynchronizer;
+			if (synchronizer == null)
+			{
+				return;
+			}
+
+			List<RelicModel>? relics = _mod.GetSyncCurrentRelics(synchronizer);
+			List<int?>? votes = _mod.GetSyncVotes(synchronizer);
+			int? predictedVote = _mod.GetSyncPredictedVote(synchronizer);
+			StringBuilder relicSummary = new StringBuilder();
+			if (relics != null)
+			{
+				for (int i = 0; i < relics.Count; i++)
+				{
+					if (i > 0)
+					{
+						relicSummary.Append(", ");
+					}
+					relicSummary.Append($"{i}:{relics[i]}");
+				}
+			}
+
+			StringBuilder voteSummary = new StringBuilder();
+			IPlayerCollection? playerCollection = _mod.GetSyncPlayerCollection(synchronizer);
+			int playerIndex = 0;
+			if (playerCollection != null)
+			{
+				foreach (Player player in playerCollection.Players)
+				{
+					if (playerIndex > 0)
+					{
+						voteSummary.Append(", ");
+					}
+					int? vote = votes != null && playerIndex < votes.Count ? votes[playerIndex] : null;
+					voteSummary.Append($"{player.NetId}:{(vote.HasValue ? vote.Value.ToString() : "none")}");
+					playerIndex++;
+				}
+			}
+
+			string collectionInstance = _lastCollection == null ? "none" : GodotObject.IsInstanceValid(_lastCollection) ? _lastCollection.GetInstanceId().ToString() : "freed";
+			string snapshot = $"collection={collectionInstance}, active={relics != null}, relics=[{relicSummary}], votes=[{voteSummary}], predicted={(predictedVote.HasValue ? predictedVote.Value.ToString() : "none")}";
+			if (!force && string.Equals(snapshot, _lastTreasureDiagnosticSnapshot, StringComparison.Ordinal))
+			{
+				return;
+			}
+			_lastTreasureDiagnosticSnapshot = snapshot;
+			Log.Info($"[RMP:TreasureDiag] State changed ({reason}): {snapshot}");
 		}
 
 		private void ApplyLayout(NTreasureRoomRelicCollection collection)
@@ -707,6 +871,16 @@ public class TreasureModule : IRMPModule
 	internal List<int?>? GetSyncVotes(TreasureRoomRelicSynchronizer s)
 	{
 		return SyncVotesField?.GetValue(s) as List<int?>;
+	}
+
+	internal int? GetSyncPredictedVote(TreasureRoomRelicSynchronizer s)
+	{
+		object? value = SyncPredictedVoteField?.GetValue(s);
+		if (value is int vote)
+		{
+			return vote;
+		}
+		return null;
 	}
 
 	internal void SetSyncPredictedVote(TreasureRoomRelicSynchronizer s, int? vote)

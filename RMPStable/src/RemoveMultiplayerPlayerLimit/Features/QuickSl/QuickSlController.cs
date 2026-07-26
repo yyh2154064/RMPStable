@@ -71,6 +71,7 @@ internal static class QuickSlController
 		public bool LocalReadySent;
 		public bool AutoStartCancelled;
 		public bool HostReadySent;
+		public bool HostTimeoutNoticeShown;
 		public DateTime ClientDeadline;
 	}
 
@@ -686,6 +687,7 @@ internal static class QuickSlController
 		}
 		HideRecoveryCover();
 		DateTime now = DateTime.UtcNow;
+		List<ulong> timedOutPlayers = new List<ulong>();
 		foreach (ulong id in recovery.ExpectedPlayers.Where(id => id != localId))
 		{
 			if (!recovery.Deadlines.ContainsKey(id))
@@ -694,8 +696,20 @@ internal static class QuickSlController
 			}
 			if (now >= recovery.Deadlines[id] && (!lobby.ConnectedPlayerIds.Contains(id) || !lobby.IsPlayerReady(id)))
 			{
-				recovery.AutoStartCancelled = true;
+				timedOutPlayers.Add(id);
 			}
+		}
+		if (timedOutPlayers.Count > 0 && !recovery.HostTimeoutNoticeShown)
+		{
+			recovery.AutoStartCancelled = true;
+			recovery.HostTimeoutNoticeShown = true;
+			string playerNames = string.Join(", ", timedOutPlayers.Select(GetPlayerName));
+			Log.Warn($"[RMP:QuickSL] Host automatic start cancelled because these original players did not reconnect and become ready within {HostClientReadyTimeoutSeconds}s: {playerNames}.");
+			TaskHelper.RunSafely(ShowInformationWhenAvailableAsync(
+				Localization.Get("QUICK_SL_PLAYER_TIMEOUT_TITLE", "Quick SL Player Timed Out"),
+				string.Format(
+					Localization.Get("QUICK_SL_PLAYER_TIMEOUT_BODY", "{0} did not reconnect and become ready in time. Automatic start was cancelled; wait in the lobby and ready up manually."),
+					playerNames)));
 		}
 		bool allClientsReady = recovery.ExpectedPlayers.Where(id => id != localId).All(id => lobby.ConnectedPlayerIds.Contains(id) && lobby.IsPlayerReady(id));
 		if (!recovery.AutoStartCancelled && allClientsReady && !recovery.HostReadySent)
@@ -989,9 +1003,9 @@ internal static class QuickSlController
 			Name = "Backdrop",
 			Color = Colors.Black,
 			MouseFilter = Control.MouseFilterEnum.Stop,
-			Position = Vector2.Zero,
-			Size = NGame.Instance.GetViewport().GetVisibleRect().Size
+			ZIndex = 0
 		};
+		backdrop.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
 		layer.AddChild(backdrop);
 		PackedScene? loadingOverlayScene = GD.Load<PackedScene>(NativeLoadingOverlayPath);
 		if (loadingOverlayScene == null)
@@ -1000,6 +1014,8 @@ internal static class QuickSlController
 		}
 		NLoadingOverlay loadingOverlay = loadingOverlayScene.Instantiate<NLoadingOverlay>();
 		loadingOverlay.Name = "NativeLoadingOverlay";
+		loadingOverlay.Visible = true;
+		loadingOverlay.ZIndex = 1;
 		if (loadingOverlay is Control loadingControl)
 		{
 			loadingControl.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
@@ -1010,13 +1026,18 @@ internal static class QuickSlController
 		_recoveryCover = layer;
 		_recoveryLoadingOverlay = loadingOverlay;
 		SetRecoveryCoverStatus(statusText);
-		Log.Info("[RMP:QuickSL] Recovery cover shown; intermediate main-menu frames are hidden.");
+		Log.Info($"[RMP:QuickSL] Recovery cover shown; intermediate main-menu frames are hidden (layer={layer.Layer}, backdropZ={backdrop.ZIndex}, overlayZ={loadingOverlay.ZIndex}, overlayVisible={loadingOverlay.Visible}).");
 	}
 
 	private static void SetRecoveryCoverStatus(string statusText)
 	{
+		bool changed = !string.Equals(_recoveryStatusText, statusText, StringComparison.Ordinal);
 		_recoveryStatusText = statusText;
 		ApplyRecoveryCoverStatus();
+		if (changed)
+		{
+			Log.Info($"[RMP:QuickSL] Recovery status changed: {statusText}");
+		}
 	}
 
 	private static void ApplyRecoveryCoverStatus()
@@ -1034,18 +1055,31 @@ internal static class QuickSlController
 			{
 				megaLabel.SetTextAutoSize(statusText);
 			}
+			if (megaLabel.GetMeta("rmp_status_target_logged", false).AsBool() == false)
+			{
+				megaLabel.SetMeta("rmp_status_target_logged", true);
+				Log.Info($"[RMP:QuickSL] Recovery status target resolved to {megaLabel.GetType().Name} at {megaLabel.GetPath()} (visibleInTree={megaLabel.IsVisibleInTree()}).");
+			}
 			return;
 		}
 		MegaRichTextLabel? richTextLabel = FindNodesOfType<MegaRichTextLabel>(loadingOverlay).FirstOrDefault();
 		if (richTextLabel != null && richTextLabel.Text != statusText)
 		{
 			richTextLabel.Text = statusText;
+		}
+		if (richTextLabel != null)
+		{
+			LogRecoveryStatusTargetOnce(richTextLabel);
 			return;
 		}
 		Label? label = FindNodesOfType<Label>(loadingOverlay).FirstOrDefault();
 		if (label != null && label.Text != statusText)
 		{
 			label.Text = statusText;
+		}
+		if (label != null)
+		{
+			LogRecoveryStatusTargetOnce(label);
 			return;
 		}
 		RichTextLabel? fallbackRichTextLabel = FindNodesOfType<RichTextLabel>(loadingOverlay).FirstOrDefault();
@@ -1053,6 +1087,26 @@ internal static class QuickSlController
 		{
 			fallbackRichTextLabel.Text = statusText;
 		}
+		if (fallbackRichTextLabel != null)
+		{
+			LogRecoveryStatusTargetOnce(fallbackRichTextLabel);
+			return;
+		}
+		if (loadingOverlay.IsNodeReady() && loadingOverlay.GetMeta("rmp_missing_status_target_logged", false).AsBool() == false)
+		{
+			loadingOverlay.SetMeta("rmp_missing_status_target_logged", true);
+			Log.Warn("[RMP:QuickSL] Recovery loading overlay is ready, but no supported status label was found.");
+		}
+	}
+
+	private static void LogRecoveryStatusTargetOnce(Control label)
+	{
+		if (label.GetMeta("rmp_status_target_logged", false).AsBool())
+		{
+			return;
+		}
+		label.SetMeta("rmp_status_target_logged", true);
+		Log.Info($"[RMP:QuickSL] Recovery status target resolved to {label.GetType().Name} at {label.GetPath()} (visibleInTree={label.IsVisibleInTree()}).");
 	}
 
 	private static void HideRecoveryCover()

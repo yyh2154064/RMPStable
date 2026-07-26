@@ -27,6 +27,11 @@ stabilizes the native Join Friends transition, retries completed join failures,
 stops the reconnect watchdog once the loaded-run lobby is reached, and shows
 the game's native loading overlay with room initialization, search, and join
 status text throughout multiplayer recovery.
+Version 0.3.7 fixes the hidden Quick SL loading overlay, keeps its black cover
+full-screen across viewport changes, adds recovery UI diagnostics, reports the
+names of original players who time out before reconnecting and becoming ready,
+and adds non-invasive treasure voting, relic-fight, award, and holder-release
+diagnostics.
 
 ## Source layout
 

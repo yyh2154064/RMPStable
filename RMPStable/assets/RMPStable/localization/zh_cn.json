@@ -16,6 +16,8 @@
   "QUICK_SL_CLIENT_TIMEOUT_BODY": "自动重连已超时。请在“多人联机”中点击“加入”，然后手动加入房主的房间。",
   "QUICK_SL_HOST_FAILED_TITLE": "快速SL建房失败",
   "QUICK_SL_HOST_FAILED_BODY": "自动建房失败。请在“多人联机”中点击“读取存档”，手动创建当前存档的房间。",
+  "QUICK_SL_PLAYER_TIMEOUT_TITLE": "快速SL玩家连接超时",
+  "QUICK_SL_PLAYER_TIMEOUT_BODY": "{0} 未能在时限内完成重连和自动准备。自动开始已取消；请在大厅中等待该玩家，然后手动准备。",
   "QUICK_SL_STATUS_INITIALIZING_ROOM": "正在初始化房间...",
   "QUICK_SL_STATUS_SEARCHING_ROOM": "正在搜索房间...",
   "QUICK_SL_STATUS_JOINING_ROOM": "正在加入房间...",
