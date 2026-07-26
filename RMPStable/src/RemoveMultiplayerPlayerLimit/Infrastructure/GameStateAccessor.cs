@@ -1,8 +1,6 @@
-using System;
 using System.Reflection;
 using Godot;
 using MegaCrit.Sts2.Core.Runs;
-using RemoveMultiplayerPlayerLimit.Core;
 
 namespace RemoveMultiplayerPlayerLimit.Infrastructure;
 
@@ -69,12 +67,4 @@ public static class GameStateAccessor
 		}
 	}
 
-	public static int GetEffectivePlayerCount(int rawCount)
-	{
-		if (!ProtocolConfig.DifficultyScalingEnabled)
-		{
-			return Math.Min(rawCount, 4);
-		}
-		return rawCount;
-	}
 }

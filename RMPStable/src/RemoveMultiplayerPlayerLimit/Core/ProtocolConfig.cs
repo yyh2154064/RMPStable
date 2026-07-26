@@ -15,12 +15,4 @@ internal static class ProtocolConfig
 	internal const int SlotIdBits = 4;
 
 	internal const int LobbyListLengthBits = 5;
-
-	internal static bool DifficultyScalingEnabled { get; private set; } = true;
-
-
-	internal static void SetDifficultyScalingEnabled(bool value)
-	{
-		DifficultyScalingEnabled = value;
-	}
 }

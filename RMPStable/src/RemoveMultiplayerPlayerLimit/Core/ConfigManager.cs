@@ -20,8 +20,6 @@ public class ConfigManager
 
 	public static ConfigManager? Instance { get; private set; }
 
-	public bool DifficultyScaling => ProtocolConfig.DifficultyScalingEnabled;
-
 	public bool MacOsTlsWorkaround { get; set; } = true;
 
 
@@ -29,12 +27,6 @@ public class ConfigManager
 	{
 		Instance = this;
 		LoadOrCreateConfig();
-	}
-
-	public void SetDifficultyScaling(bool value)
-	{
-		ProtocolConfig.SetDifficultyScalingEnabled(value);
-		Save();
 	}
 
 	public void Save()
@@ -48,9 +40,6 @@ public class ConfigManager
 			using StreamWriter streamWriter = new StreamWriter(_configPath, append: false);
 			streamWriter.WriteLine("[macos]");
 			streamWriter.WriteLine("tls_workaround=" + MacOsTlsWorkaround.ToString().ToLowerInvariant());
-			streamWriter.WriteLine();
-			streamWriter.WriteLine("[multiplayer]");
-			streamWriter.WriteLine("difficulty_scaling=" + ProtocolConfig.DifficultyScalingEnabled.ToString().ToLowerInvariant());
 		}
 		catch (Exception ex)
 		{
@@ -112,14 +101,7 @@ public class ConfigManager
 			int num2 = num + 1;
 			string a = text3.Substring(num2, text3.Length - num2).Trim();
 			text3 = text;
-			if (!(text3 == "macos"))
-			{
-				if (text3 == "multiplayer" && text4 == "difficulty_scaling")
-				{
-					ProtocolConfig.SetDifficultyScalingEnabled(string.Equals(a, "true", StringComparison.OrdinalIgnoreCase));
-				}
-			}
-			else if (text4 == "tls_workaround")
+			if (text3 == "macos" && text4 == "tls_workaround")
 			{
 				MacOsTlsWorkaround = string.Equals(a, "true", StringComparison.OrdinalIgnoreCase);
 			}

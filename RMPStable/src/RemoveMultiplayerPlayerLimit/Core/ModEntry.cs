@@ -4,8 +4,6 @@ using Godot;
 using MegaCrit.Sts2.Core.Logging;
 using MegaCrit.Sts2.Core.Modding;
 using RemoveMultiplayerPlayerLimit.Features.CampfireLayout;
-using RemoveMultiplayerPlayerLimit.Features.DifficultyScaling;
-using RemoveMultiplayerPlayerLimit.Features.SettingsUI;
 using RemoveMultiplayerPlayerLimit.Features.QuickSl;
 using RemoveMultiplayerPlayerLimit.Features.ShopLayout;
 using RemoveMultiplayerPlayerLimit.Features.TreasureRoom;
@@ -33,11 +31,9 @@ public static class ModEntry
 		ReflectionCache cache = new ReflectionCache();
 		int value = 16;
 		int value2 = 32;
-		Modules.Add(new DifficultyModule());
 		Modules.Add(new CampfireModule());
 		Modules.Add(new ShopModule());
 		Modules.Add(new TreasureModule());
-		Modules.Add(new SettingsModule());
 		Modules.Add(new QuickSlModule());
 		Modules.Add(new VictoryModule());
 		Modules.Add(new HostBootstrapModule());
@@ -80,6 +76,6 @@ public static class ModEntry
 			}
 		}
 		sceneTree.Root.CallDeferred("add_child", _root);
-		Log.Warn($"[RMP Stable] All modules loaded. Player limit fixed at {16}, slot bits: {4} (cap {value}), lobby bits: {5} (cap {value2}), treasure reward desync fix: enabled, difficulty scaling: {ProtocolConfig.DifficultyScalingEnabled}, macOS TLS: {configManager.MacOsTlsWorkaround}");
+		Log.Warn($"[RMP Stable] All modules loaded. Player limit fixed at {16}, slot bits: {4} (cap {value}), lobby bits: {5} (cap {value2}), treasure reward desync fix: enabled, native multiplayer scaling: enabled, macOS TLS: {configManager.MacOsTlsWorkaround}");
 	}
 }
