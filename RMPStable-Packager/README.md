@@ -1,6 +1,6 @@
 # RMP Stable one-click packager
 
-Double-click `一键打包.cmd` to build a distributable v0.3.8 ZIP from the sibling
+Double-click `一键打包.cmd` to build a distributable v0.3.9 ZIP from the sibling
 `RMPStable` source directory. ZIP files are written to `output` beside this
 script. The package contains one DLL with embedded implementations for v0.107.1
 and v0.111.0 Public Beta.
@@ -21,9 +21,9 @@ Godot 4.5.1 release into the ignored `tools` directory and verifies its SHA-256
 hash. Build intermediates are isolated under `.work` and removed after every
 run; only the ZIP remains.
 
-The ZIP also contains `update.cmd`. The v0.3.7 updater can install v0.3.8
+The ZIP also contains `update.cmd`. The v0.3.7 updater can install v0.3.9
 because the runtime package still uses the same root DLL, PCK, and JSON files.
 The DLL selects the matching embedded implementation at startup. Each release
 must have a GitHub Release tagged `v<version>` and attach the generated
-`RMPStable-v<version>.zip` as an asset. Mark v0.3.8 as the Latest release so the
+`RMPStable-v<version>.zip` as an asset. Mark v0.3.9 as the Latest release so the
 already-installed v0.3.7 updater discovers it.

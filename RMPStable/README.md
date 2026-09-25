@@ -37,6 +37,8 @@ Version 0.3.8 embeds separate builds for v0.107.1 and v0.111.0 Public Beta in
 one DLL. It selects the matching implementation when the game loads the mod,
 including the beta lobby player, host handshake, player count, and input binding
 API changes.
+Version 0.3.9 registers the embedded payload's network messages with the game's
+message type table, fixing multiplayer Quick SL requests and host reloads.
 
 ## Source layout
 
@@ -66,7 +68,7 @@ The packager requires:
 The ZIP contains a top-level `RMPStable` directory with `RMPStable.dll`,
 `RMPStable.pck`, `RMPStable.json`, and `update.cmd`. Extract that directory
 into `Slay the Spire 2/mods` and enable the mod. The DLL detects the game
-version automatically. The existing v0.3.7 `update.cmd` can install v0.3.8
+version automatically. The existing v0.3.7 `update.cmd` can install v0.3.9
 because it replaces the same three runtime files. End users can later
 double-click `update.cmd` to install the latest
 published GitHub Release without downloading the ZIP manually. All lobby

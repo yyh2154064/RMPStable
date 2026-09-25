@@ -1,7 +1,7 @@
 {
   "id": "RMPStable",
   "name": "RMP Stable - 16 Player Multiplayer",
-  "version": "0.3.8",
+  "version": "0.3.9",
   "author": "灰灰神教！",
   "description": "16-player multiplayer and Quick SL for STS2 v0.107.1 and v0.111.0 Public Beta.",
   "dependencies": [],

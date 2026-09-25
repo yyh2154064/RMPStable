@@ -1,4 +1,4 @@
-RMP Stable v0.3.8
+RMP Stable v0.3.9
 =================
 
 适用游戏版本：Slay the Spire 2 v0.107.1、v0.111.0 Public Beta
@@ -15,8 +15,8 @@ RMP Stable v0.3.8
    模组会在启动时自动识别 v0.107.1 或 v0.111.0，无需切换 DLL。
 4. 建议房主重新加载存档后再让其他玩家加入；首次验证建议新开一局。
 5. 后续更新可在关闭游戏后双击模组目录内的 update.cmd；脚本会从 GitHub 最新正式版
-   中下载并替换 DLL、PCK、JSON。0.3.7 的原更新脚本也可直接安装 0.3.8。
-   发布时必须创建标签 v0.3.8 的 GitHub Release，将 RMPStable-v0.3.8.zip
+   中下载并替换 DLL、PCK、JSON。0.3.7 的原更新脚本也可直接安装 0.3.9。
+   发布时必须创建标签 v0.3.9 的 GitHub Release，将 RMPStable-v0.3.9.zip
    作为附件上传，并将该 Release 设为 Latest；仅上传到仓库文件列表无法被更新脚本找到。
 
 内置功能：
@@ -29,6 +29,7 @@ RMP Stable v0.3.8
 - 暂停菜单新增“快速SL”，默认快捷键 F5，可在原版输入设置中改键。
 - 单人快速SL直接载入原版检查点，不改写房间或奖励状态，过程中不会显示主菜单。
 - 多人快速SL由房主确认；普通玩家自动重连并就绪，所有原成员到齐后房主最后自动就绪。
+- 0.3.9 修复双版本内嵌 DLL 的联机消息未注册问题，恢复队友请求与房主快速SL。
 - 多人恢复会遮住内部主菜单过渡，仅在联机读档大厅建立后显示大厅。
 - 每名普通玩家从收到快速SL消息起有独立的 9 秒完整恢复期限；寻找大厅、加入及等待读档大厅均计入期限。
 - 普通玩家会在黑幕后依次打开原版多人模式和加入好友页面，自动重复点击原版“刷新”，优先加入房主，也可通过任意已回房的原成员好友加入同一大厅。
@@ -50,9 +51,9 @@ DLL 中的本地化路径也已改为 res://RMPStable/localization/。
 触发“多人游戏数据不同步”。本模组不会注册该重复奖励处理器。
 
 启动日志应出现：
-[RMP Stable] Initializing standalone v0.3.8 for STS2 v0.107.1...
+[RMP Stable] Initializing standalone v0.3.9 for STS2 v0.107.1...
 或
-[RMP Stable] Initializing standalone v0.3.8 for STS2 v0.111.0 Public Beta...
+[RMP Stable] Initializing standalone v0.3.9 for STS2 v0.111.0 Public Beta...
 
 验证建议：
 使用 5～6 人新局，经过至少一个宝箱房后连续切换若干楼层。如果仍然发生不同步，

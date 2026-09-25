@@ -206,7 +206,7 @@ if (-not (Test-Path -LiteralPath $releaseInfoPath -PathType Leaf)) {
 }
 $currentGameVersion = [string]((Get-Content -Raw -LiteralPath $releaseInfoPath | ConvertFrom-Json).version)
 if ($currentGameVersion -notin @('v0.107.1', 'v0.111.0')) {
-    throw "当前游戏版本 $currentGameVersion 不在 RMP Stable 0.3.8 的兼容列表中。"
+    throw "当前游戏版本 $currentGameVersion 不在 RMP Stable 0.3.9 的兼容列表中。"
 }
 $currentReferenceDir = Join-Path $referenceRoot $currentGameVersion
 New-Item -ItemType Directory -Path $currentReferenceDir -Force | Out-Null

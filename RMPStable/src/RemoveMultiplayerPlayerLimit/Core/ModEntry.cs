@@ -26,9 +26,9 @@ public static class ModEntry
 	public static void Initialize()
 	{
 #if STS2_0111
-		Log.Warn("[RMP Stable] Initializing standalone v0.3.8 for STS2 v0.111.0 Public Beta...");
+		Log.Warn("[RMP Stable] Initializing standalone v0.3.9 for STS2 v0.111.0 Public Beta...");
 #else
-		Log.Warn("[RMP Stable] Initializing standalone v0.3.8 for STS2 v0.107.1...");
+		Log.Warn("[RMP Stable] Initializing standalone v0.3.9 for STS2 v0.107.1...");
 #endif
 		Modules.Clear();
 		ConfigManager configManager = new ConfigManager();

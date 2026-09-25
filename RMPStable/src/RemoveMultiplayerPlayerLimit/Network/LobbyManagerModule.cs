@@ -56,6 +56,7 @@ public class LobbyManagerModule : IRMPModule
 
 		public override void _Process(double delta)
 		{
+			PayloadMessageRegistration.EnsureRegistered();
 			QuickSlController.ProcessFrame();
 			HandleStartRunLobby(SceneMonitor.FindActiveStartRunLobby());
 			if (++_frameCounter % 15 == 0)
