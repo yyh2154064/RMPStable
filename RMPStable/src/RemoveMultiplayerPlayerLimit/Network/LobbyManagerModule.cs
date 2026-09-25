@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.ComponentModel;
+using System.Linq;
 using System.Reflection;
 using Godot;
 using Godot.Bridge;
@@ -109,7 +110,7 @@ public class LobbyManagerModule : IRMPModule
 
 		private void SyncLobbyState(StartRunLobby lobby, int targetLimit)
 		{
-			if (_module._maxPlayersField != null && lobby.MaxPlayers != targetLimit)
+			if (_module._maxPlayersField != null && (int)_module._maxPlayersField.GetValue(lobby)! != targetLimit)
 			{
 				_module._maxPlayersField.SetValue(lobby, targetLimit);
 				Log.Info($"[RMP] StartRunLobby.MaxPlayers synchronized to {targetLimit}");
@@ -143,7 +144,11 @@ public class LobbyManagerModule : IRMPModule
 			{
 				_lastLoggedLoadLobby = loadRunLobby;
 				int count = loadRunLobby.Run.Players.Count;
+#if STS2_0111
+				int count2 = loadRunLobby.PlayerIds.Count();
+#else
 				int count2 = loadRunLobby.ConnectedPlayerIds.Count;
+#endif
 				int capacity;
 				int value = (HostBootstrapModule.TryGetTrackedHostCapacity(loadRunLobby.NetService, out capacity) ? capacity : count);
 				string value2 = SceneMonitor.GetActiveLoadLobbyScreenName() ?? "UnknownLoadLobbyScreen";
@@ -284,7 +289,11 @@ public class LobbyManagerModule : IRMPModule
 
 	public void Initialize(ConfigManager config, ReflectionCache cache)
 	{
+#if STS2_0111
+		_maxPlayersField = cache.GetField(typeof(StartRunLobby), "_maxPlayers");
+#else
 		_maxPlayersField = cache.GetField(typeof(StartRunLobby), "<MaxPlayers>k__BackingField");
+#endif
 	}
 
 	public Node? CreateNode()

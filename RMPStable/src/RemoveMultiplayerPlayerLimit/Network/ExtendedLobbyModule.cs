@@ -204,14 +204,24 @@ public class ExtendedLobbyModule : IRMPModule
 			{
 				throw new InvalidOperationException("Extended join request received as non-host.");
 			}
-			if (lobby.Players.Count >= lobby.MaxPlayers)
+#if STS2_0111
+			int maxPlayers = (int?)typeof(StartRunLobby).GetField("_maxPlayers", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(lobby) ?? 16;
+#else
+			int maxPlayers = lobby.MaxPlayers;
+#endif
+			if (lobby.Players.Count >= maxPlayers)
 			{
 				netHostGameService.DisconnectClient(senderId, NetError.LobbyFull);
 				return;
 			}
 			try
 			{
+#if STS2_0111
+				bool isModded = netHostGameService.GetVersionInfoForPeer(senderId)?.IsModded() == true;
+				LobbyPlayer? lobbyPlayer = (LobbyPlayer?)TryAddPlayerMethod?.Invoke(lobby, new object[4] { message.unlockState, message.maxAscensionUnlocked, isModded, senderId });
+#else
 				LobbyPlayer? lobbyPlayer = (LobbyPlayer?)TryAddPlayerMethod?.Invoke(lobby, new object[3] { message.unlockState, message.maxAscensionUnlocked, senderId });
+#endif
 				if (!lobbyPlayer.HasValue)
 				{
 					netHostGameService.DisconnectClient(senderId, NetError.InternalError);

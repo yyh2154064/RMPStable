@@ -1,6 +1,7 @@
 # RMP Stable
 
-Standalone 16-player multiplayer mod for Slay the Spire 2 v0.107.1. It expands
+Standalone 16-player multiplayer mod for Slay the Spire 2 v0.107.1 and
+v0.111.0 Public Beta. It expands
 multiplayer capacity and prevents duplicate remote treasure rewards from
 splitting reward IDs between peers.
 
@@ -32,6 +33,10 @@ full-screen across viewport changes, adds recovery UI diagnostics, reports the
 names of original players who time out before reconnecting and becoming ready,
 and adds non-invasive treasure voting, relic-fight, award, and holder-release
 diagnostics.
+Version 0.3.8 embeds separate builds for v0.107.1 and v0.111.0 Public Beta in
+one DLL. It selects the matching implementation when the game loads the mod,
+including the beta lobby player, host handshake, player count, and input binding
+API changes.
 
 ## Source layout
 
@@ -39,7 +44,8 @@ diagnostics.
 directory:
 
 - `src/` contains the complete C# project and sources for `RMPStable.dll`.
-- `assets/` contains the Godot project used to create `RMPStable.pck`.
+- `../RMPStable-Bootstrap/` embeds the two builds into the release DLL.
+- `doc/` contains the Godot project used to create `RMPStable.pck`.
 - `RMPStable.json` is the release manifest copied into the mod package.
 
 Compiled DLL and PCK files are intentionally absent from this directory. Run
@@ -48,15 +54,21 @@ Compiled DLL and PCK files are intentionally absent from this directory. Run
 
 The packager requires:
 
-- Slay the Spire 2 v0.107.1 installed through Steam (or `-GameDir` supplied).
+- Slay the Spire 2 v0.107.1 or v0.111.0 installed through Steam (or `-GameDir`
+  supplied), plus local assembly snapshots of both versions. Run the packager
+  once on each branch to populate the ignored `RMPStable-Packager/tools/game-references`
+  folders; the first run may stop after saving the currently installed branch.
 - A .NET 7 or newer SDK available as `dotnet`.
 - Internet access on the first run if Godot 4.5.x is not already available.
   The packager downloads the official portable Godot 4.5.1 build and verifies
   its SHA-256 hash. `GODOT_EXE` and `-GodotPath` remain available as overrides.
 
-The ZIP contains a top-level `RMPStable` directory with the runtime files and
-`update.cmd`. Extract that directory into `Slay the Spire 2/mods` and enable
-the mod. End users can later double-click `update.cmd` to install the latest
+The ZIP contains a top-level `RMPStable` directory with `RMPStable.dll`,
+`RMPStable.pck`, `RMPStable.json`, and `update.cmd`. Extract that directory
+into `Slay the Spire 2/mods` and enable the mod. The DLL detects the game
+version automatically. The existing v0.3.7 `update.cmd` can install v0.3.8
+because it replaces the same three runtime files. End users can later
+double-click `update.cmd` to install the latest
 published GitHub Release without downloading the ZIP manually. All lobby
 members should use the same version. The v0.3.5 updater uses Windows `curl.exe`
 when available, falls back to .NET networking, avoids `Invoke-WebRequest`, and

@@ -14,10 +14,15 @@ $packagerDir = $PSScriptRoot
 $repositoryDir = Split-Path -Parent $packagerDir
 $sourceDir = Join-Path $repositoryDir $modId
 $projectPath = Join-Path $sourceDir "src\RMPStable.csproj"
+$bootstrapProjectPath = Join-Path $repositoryDir "RMPStable-Bootstrap\RMPStable-Bootstrap.csproj"
 $nugetConfig = Join-Path $sourceDir "src\NuGet.Config"
 $assetSourceDir = Join-Path $sourceDir "assets"
+if (-not (Test-Path -LiteralPath (Join-Path $assetSourceDir 'project.godot') -PathType Leaf)) {
+    $assetSourceDir = Join-Path $sourceDir "doc"
+}
 $manifestPath = Join-Path $sourceDir "RMPStable.json"
 $updaterPath = Join-Path $packagerDir "update.cmd"
+$referenceRoot = Join-Path $packagerDir "tools\game-references"
 $outputDir = Join-Path $packagerDir "output"
 $workDir = Join-Path $packagerDir ".work"
 
@@ -168,7 +173,7 @@ function Invoke-Native([string]$FilePath, [string[]]$Arguments, [string]$Failure
     }
 }
 
-foreach ($requiredPath in @($projectPath, $nugetConfig, $assetSourceDir, $manifestPath, $updaterPath)) {
+foreach ($requiredPath in @($projectPath, $bootstrapProjectPath, $nugetConfig, $assetSourceDir, $manifestPath, $updaterPath)) {
     if (-not (Test-Path -LiteralPath $requiredPath)) {
         throw "缺少项目文件：$requiredPath"
     }
@@ -195,6 +200,24 @@ if ($sdkMajors.Count -eq 0 -or ($sdkMajors | Measure-Object -Maximum).Maximum -l
 }
 $resolvedGameDir = Resolve-GameDirectory $GameDir
 $gameManagedDir = Join-Path $resolvedGameDir "data_sts2_windows_x86_64"
+$releaseInfoPath = Join-Path $resolvedGameDir 'release_info.json'
+if (-not (Test-Path -LiteralPath $releaseInfoPath -PathType Leaf)) {
+    throw "缺少游戏版本文件：$releaseInfoPath"
+}
+$currentGameVersion = [string]((Get-Content -Raw -LiteralPath $releaseInfoPath | ConvertFrom-Json).version)
+if ($currentGameVersion -notin @('v0.107.1', 'v0.111.0')) {
+    throw "当前游戏版本 $currentGameVersion 不在 RMP Stable 0.3.8 的兼容列表中。"
+}
+$currentReferenceDir = Join-Path $referenceRoot $currentGameVersion
+New-Item -ItemType Directory -Path $currentReferenceDir -Force | Out-Null
+Get-ChildItem -LiteralPath $gameManagedDir -Filter '*.dll' -File |
+    Copy-Item -Destination $currentReferenceDir -Force
+foreach ($version in @('v0.107.1', 'v0.111.0')) {
+    $requiredReference = Join-Path (Join-Path $referenceRoot $version) 'sts2.dll'
+    if (-not (Test-Path -LiteralPath $requiredReference -PathType Leaf)) {
+        throw "缺少 $version 的游戏程序集快照。请先将 Steam 切换到该版本并运行一次打包器以保存程序集，然后切回所需版本重新打包。缺少：$requiredReference"
+    }
+}
 $godot = Resolve-GodotExecutable $GodotPath
 Write-Host "游戏目录：$resolvedGameDir"
 Write-Host "Godot：$godot"
@@ -208,35 +231,74 @@ if (Test-Path -LiteralPath $workDir) {
     Remove-Item -LiteralPath $workDir -Recurse -Force
 }
 
-$managedOutputDir = Join-Path $workDir "managed"
-$intermediateOutputDir = Join-Path $workDir "obj"
 $assetWorkDir = Join-Path $workDir "assets"
 $packageRoot = Join-Path $workDir "package"
 $packageModDir = Join-Path $packageRoot $modId
-New-Item -ItemType Directory -Force -Path $managedOutputDir, $assetWorkDir, $packageModDir, $outputDir | Out-Null
+New-Item -ItemType Directory -Force -Path $assetWorkDir, $packageModDir, $outputDir | Out-Null
 
 try {
-    Write-Step "从 C# 源码生成 RMPStable.dll"
-    Invoke-Native $dotnet.Source @(
-        "restore", $projectPath,
-        "--configfile", $nugetConfig,
-        "-p:GameManagedDir=$gameManagedDir",
-        "-p:BaseIntermediateOutputPath=$intermediateOutputDir\",
-        "--nologo"
-    ) "C# 项目还原失败"
-    Invoke-Native $dotnet.Source @(
-        "build", $projectPath,
-        "--configuration", $Configuration,
-        "--output", $managedOutputDir,
-        "--no-restore",
-        "-p:GameManagedDir=$gameManagedDir",
-        "-p:BaseIntermediateOutputPath=$intermediateOutputDir\",
-        "--nologo"
-    ) "DLL 构建失败"
+    foreach ($version in @('v0.107.1', 'v0.111.0')) {
+        $compatibility = if ($version -eq 'v0.111.0') { 'beta' } else { 'stable' }
+        $referenceDir = Join-Path $referenceRoot $version
+        $managedOutputDir = Join-Path $workDir "managed\$version"
+        $intermediateOutputDir = Join-Path $workDir "obj\$version"
+        $payloadName = if ($version -eq 'v0.111.0') { 'RMPStablePayload_v0111' } else { 'RMPStablePayload_v0107' }
+        New-Item -ItemType Directory -Force -Path $managedOutputDir | Out-Null
+        Write-Step "构建 $version 专用 RMPStable.dll"
+        Invoke-Native $dotnet.Source @(
+            "restore", $projectPath,
+            "--configfile", $nugetConfig,
+            "-p:GameManagedDir=$referenceDir",
+            "-p:GameCompatibility=$compatibility",
+            "-p:AssemblyName=$payloadName",
+            "-p:BaseIntermediateOutputPath=$intermediateOutputDir\",
+            "--nologo"
+        ) "$version C# 项目还原失败"
+        Invoke-Native $dotnet.Source @(
+            "build", $projectPath,
+            "--configuration", $Configuration,
+            "--output", $managedOutputDir,
+            "--no-restore",
+            "-p:GameManagedDir=$referenceDir",
+            "-p:GameCompatibility=$compatibility",
+            "-p:AssemblyName=$payloadName",
+            "-p:BaseIntermediateOutputPath=$intermediateOutputDir\",
+            "--nologo"
+        ) "$version DLL 构建失败"
+        $builtDll = Join-Path $managedOutputDir "$payloadName.dll"
+        if (-not (Test-Path -LiteralPath $builtDll -PathType Leaf)) {
+            throw "$version 构建完成但没有生成 RMPStable.dll。"
+        }
+    }
 
-    $builtDll = Join-Path $managedOutputDir "RMPStable.dll"
-    if (-not (Test-Path -LiteralPath $builtDll -PathType Leaf)) {
-        throw "构建完成但没有生成 RMPStable.dll。"
+    $stablePayload = Join-Path $workDir 'managed\v0.107.1\RMPStablePayload_v0107.dll'
+    $betaPayload = Join-Path $workDir 'managed\v0.111.0\RMPStablePayload_v0111.dll'
+    $bootstrapOutputDir = Join-Path $workDir 'bootstrap'
+    $bootstrapObjDir = Join-Path $workDir 'obj\bootstrap'
+    Write-Step '构建自动选择游戏版本的 RMPStable.dll'
+    Invoke-Native $dotnet.Source @(
+        'restore', $bootstrapProjectPath,
+        '--configfile', $nugetConfig,
+        "-p:GameManagedDir=$(Join-Path $referenceRoot 'v0.107.1')",
+        "-p:StablePayloadPath=$stablePayload",
+        "-p:BetaPayloadPath=$betaPayload",
+        "-p:BaseIntermediateOutputPath=$bootstrapObjDir\",
+        '--nologo'
+    ) '引导 DLL 项目还原失败'
+    Invoke-Native $dotnet.Source @(
+        'build', $bootstrapProjectPath,
+        '--configuration', $Configuration,
+        '--output', $bootstrapOutputDir,
+        '--no-restore',
+        "-p:GameManagedDir=$(Join-Path $referenceRoot 'v0.107.1')",
+        "-p:StablePayloadPath=$stablePayload",
+        "-p:BetaPayloadPath=$betaPayload",
+        "-p:BaseIntermediateOutputPath=$bootstrapObjDir\",
+        '--nologo'
+    ) '引导 DLL 构建失败'
+    $bootstrapDll = Join-Path $bootstrapOutputDir 'RMPStable.dll'
+    if (-not (Test-Path -LiteralPath $bootstrapDll -PathType Leaf)) {
+        throw '引导 DLL 构建完成但没有生成 RMPStable.dll。'
     }
 
     Write-Step "从 Godot 资源源码生成 RMPStable.pck"
@@ -264,7 +326,7 @@ try {
     }
 
     Write-Step "组装并压缩 Mod"
-    Copy-Item -LiteralPath $builtDll -Destination (Join-Path $packageModDir "RMPStable.dll") -Force
+    Copy-Item -LiteralPath $bootstrapDll -Destination (Join-Path $packageModDir "RMPStable.dll") -Force
     Copy-Item -LiteralPath $manifestPath -Destination (Join-Path $packageModDir "RMPStable.json") -Force
     Copy-Item -LiteralPath $updaterPath -Destination (Join-Path $packageModDir "update.cmd") -Force
 
@@ -274,7 +336,9 @@ try {
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     $archive = [System.IO.Compression.ZipFile]::OpenRead($zipPath)
     try {
-        $entries = @($archive.Entries | ForEach-Object { $_.FullName.Replace('\', '/') })
+        $entries = @($archive.Entries |
+            Where-Object { $_.Name -ne '' } |
+            ForEach-Object { $_.FullName.Replace('\', '/') })
     }
     finally {
         $archive.Dispose()
@@ -291,7 +355,7 @@ try {
         }
     }
     if ($entries.Count -ne $expectedEntries.Count) {
-        throw "ZIP 校验失败：应仅包含 DLL、PCK、JSON 与 update.cmd，实际包含 $($entries.Count) 个文件。"
+        throw "ZIP 校验失败：应包含预期的 4 个文件，实际包含 $($entries.Count) 个文件。"
     }
 
     $zip = Get-Item -LiteralPath $zipPath

@@ -38,9 +38,27 @@ internal static class QuickSlController
 	private const int SteamListenSocketReleaseTimeoutSeconds = 3;
 	private static readonly StringName InputAction = new StringName(InputActionText);
 	private static readonly FieldInfo? PauseButtonLabelField = typeof(NPauseMenuButton).GetField("_label", BindingFlags.Instance | BindingFlags.NonPublic);
-	private static readonly FieldInfo? RemappableKeyboardInputsField = typeof(NInputManager).GetField("remappableKeyboardInputs", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
-	private static readonly FieldInfo? KeyboardInputMapField = typeof(NInputManager).GetField("_keyboardInputMap", BindingFlags.Instance | BindingFlags.NonPublic);
-	private static readonly FieldInfo? EntryTitleMapField = typeof(NInputSettingsEntry).GetField("_commandToLocTitle", BindingFlags.Static | BindingFlags.NonPublic);
+	private static readonly FieldInfo? RemappableKeyboardInputsField = typeof(NInputManager).GetField(
+#if STS2_0111
+		"remappableMKbInputs",
+#else
+		"remappableKeyboardInputs",
+#endif
+		BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
+	private static readonly FieldInfo? KeyboardInputMapField = typeof(NInputManager).GetField(
+#if STS2_0111
+		"_mKbInputMap",
+#else
+		"_keyboardInputMap",
+#endif
+		BindingFlags.Instance | BindingFlags.NonPublic);
+	private static readonly FieldInfo? EntryTitleMapField = typeof(NInputSettingsEntry).GetField(
+#if STS2_0111
+		"commandToLocTitle",
+#else
+		"_commandToLocTitle",
+#endif
+		BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
 	private static readonly MethodInfo? OpenJoinFriendsScreenMethod = typeof(NMultiplayerSubmenu).GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic).FirstOrDefault(method => method.Name == "OpenJoinFriendsScreen");
 	private static readonly PropertyInfo? JoinFriendPlayerIdProperty = typeof(NJoinFriendButton).GetProperty("PlayerId", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
 	private static readonly FieldInfo? JoinFriendCurrentJoinFlowField = typeof(NJoinFriendScreen).GetField("_currentJoinFlow", BindingFlags.Instance | BindingFlags.NonPublic);
@@ -56,6 +74,42 @@ internal static class QuickSlController
 	private static bool _popupOpen;
 	private static bool _operationRunning;
 	private static RecoveryState? _recovery;
+
+	private static Key GetHotkey()
+	{
+#if STS2_0111
+		return NInputManager.Instance.GetMKbHotkey(InputAction);
+#else
+		return NInputManager.Instance.GetShortcutKey(InputAction);
+#endif
+	}
+
+	private static void SetHotkey(Key key)
+	{
+#if STS2_0111
+		NInputManager.Instance.ModifyMKbKey(InputAction, key);
+#else
+		NInputManager.Instance.ModifyShortcutKey(InputAction, key);
+#endif
+	}
+
+	private static IEnumerable<ulong> GetConnectedPlayerIds(RunLobby lobby)
+	{
+#if STS2_0111
+		return lobby.PlayerIds;
+#else
+		return lobby.ConnectedPlayerIds;
+#endif
+	}
+
+	private static IEnumerable<ulong> GetConnectedPlayerIds(LoadRunLobby lobby)
+	{
+#if STS2_0111
+		return lobby.PlayerIds;
+#else
+		return lobby.ConnectedPlayerIds;
+#endif
+	}
 
 	private sealed class RecoveryState
 	{
@@ -129,12 +183,12 @@ internal static class QuickSlController
 			if (!current.ContainsKey(InputAction))
 			{
 				current[InputAction] = Key.None;
-				NInputManager.Instance.ModifyShortcutKey(InputAction, Key.F5);
+				SetHotkey(Key.F5);
 			}
 			if (!_inputRegistered)
 			{
 				_inputRegistered = true;
-				Log.Info($"[RMP:QuickSL] Native input action registered (key={NInputManager.Instance.GetShortcutKey(InputAction)}).");
+				Log.Info($"[RMP:QuickSL] Native input action registered (key={GetHotkey()}).");
 			}
 		}
 		catch (Exception ex)
@@ -244,7 +298,7 @@ internal static class QuickSlController
 
 	private static void PollHotkey()
 	{
-		Key key = _inputRegistered ? NInputManager.Instance.GetShortcutKey(InputAction) : Key.F5;
+		Key key = _inputRegistered ? GetHotkey() : Key.F5;
 		bool down = key != Key.None && Input.IsKeyPressed(key);
 		if (down && !_hotkeyWasDown && RunManager.Instance?.IsInProgress == true)
 		{
@@ -484,7 +538,7 @@ internal static class QuickSlController
 		}
 		if (result.Count == 1 && runLobby != null)
 		{
-			result.UnionWith(runLobby.ConnectedPlayerIds);
+			result.UnionWith(GetConnectedPlayerIds(runLobby));
 		}
 		Log.Info($"[RMP:QuickSL] Captured {result.Count} original run player ID(s) for reconnect and auto-start tracking.");
 		return result;
@@ -694,7 +748,7 @@ internal static class QuickSlController
 			{
 				recovery.Deadlines[id] = now.AddSeconds(HostClientReadyTimeoutSeconds);
 			}
-			if (now >= recovery.Deadlines[id] && (!lobby.ConnectedPlayerIds.Contains(id) || !lobby.IsPlayerReady(id)))
+			if (now >= recovery.Deadlines[id] && (!GetConnectedPlayerIds(lobby).Contains(id) || !lobby.IsPlayerReady(id)))
 			{
 				timedOutPlayers.Add(id);
 			}
@@ -711,7 +765,7 @@ internal static class QuickSlController
 					Localization.Get("QUICK_SL_PLAYER_TIMEOUT_BODY", "{0} did not reconnect and become ready in time. Automatic start was cancelled; wait in the lobby and ready up manually."),
 					playerNames)));
 		}
-		bool allClientsReady = recovery.ExpectedPlayers.Where(id => id != localId).All(id => lobby.ConnectedPlayerIds.Contains(id) && lobby.IsPlayerReady(id));
+		bool allClientsReady = recovery.ExpectedPlayers.Where(id => id != localId).All(id => GetConnectedPlayerIds(lobby).Contains(id) && lobby.IsPlayerReady(id));
 		if (!recovery.AutoStartCancelled && allClientsReady && !recovery.HostReadySent)
 		{
 			recovery.HostReadySent = true;

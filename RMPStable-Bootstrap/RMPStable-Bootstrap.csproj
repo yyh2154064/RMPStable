@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>RMPStable</AssemblyName>
+    <TargetFramework>net7.0</TargetFramework>
+    <LangVersion>11.0</LangVersion>
+    <Nullable>enable</Nullable>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <DisableImplicitFrameworkReferences>true</DisableImplicitFrameworkReferences>
+    <NoStdLib>true</NoStdLib>
+    <NoWarn>$(NoWarn);CA1416;SYSLIB0003</NoWarn>
+    <DefaultItemExcludes>$(DefaultItemExcludes);bin/**;obj/**;.compat-work/**</DefaultItemExcludes>
+  </PropertyGroup>
+  <ItemGroup Condition="Exists('$(GameManagedDir)')">
+    <Reference Include="$(GameManagedDir)\*.dll"
+               Exclude="$(GameManagedDir)\cl*.dll;$(GameManagedDir)\coreclr.dll;$(GameManagedDir)\host*.dll;$(GameManagedDir)\Microsoft.DiaSymReader.Native*.dll;$(GameManagedDir)\mscordac*.dll;$(GameManagedDir)\mscordbi.dll;$(GameManagedDir)\mscorrc.dll;$(GameManagedDir)\msquic.dll;$(GameManagedDir)\System.IO.Compression.Native.dll;$(GameManagedDir)\steam_api64.dll">
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="..\RMPStable\src\GodotPlugins\Game\Main.cs" Link="GodotPlugins\Game\Main.cs" />
+    <EmbeddedResource Include="$(StablePayloadPath)" LogicalName="RMPStable.Payload.v0107.dll" />
+    <EmbeddedResource Include="$(BetaPayloadPath)" LogicalName="RMPStable.Payload.v0111.dll" />
+  </ItemGroup>
+  <Target Name="ValidateInputs" BeforeTargets="ResolveAssemblyReferences">
+    <Error Condition="!Exists('$(GameManagedDir)\sts2.dll')" Text="GameManagedDir must contain sts2.dll." />
+    <Error Condition="!Exists('$(StablePayloadPath)')" Text="StablePayloadPath does not exist." />
+    <Error Condition="!Exists('$(BetaPayloadPath)')" Text="BetaPayloadPath does not exist." />
+  </Target>
+</Project>

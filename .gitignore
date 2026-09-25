@@ -1,6 +1,7 @@
 # One-time migration tools and scratch data
 /.migration/
 /.tools/
+**/.compat-work/
 
 # C# build outputs
 **/bin/

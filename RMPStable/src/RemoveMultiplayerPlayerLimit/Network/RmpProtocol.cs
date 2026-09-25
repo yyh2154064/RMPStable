@@ -16,7 +16,11 @@ namespace RemoveMultiplayerPlayerLimit.Network;
 
 public static class RmpProtocol
 {
+#if STS2_0111
+	public const int ProtocolVersion = 4;
+#else
 	public const int ProtocolVersion = 3;
+#endif
 
 	private static INetGameService? _netService;
 

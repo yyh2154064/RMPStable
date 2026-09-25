@@ -30,6 +30,15 @@ namespace RemoveMultiplayerPlayerLimit.Network;
 
 public class HostBootstrapModule : IRMPModule
 {
+	private static NetHostGameService CreateHostService()
+	{
+#if STS2_0111
+		return new NetHostGameService(PeerVersionInfo.LocalDefault());
+#else
+		return new NetHostGameService();
+#endif
+	}
+
 	private class HostBootstrapNode : Node
 	{
 		public new class MethodName : Node.MethodName
@@ -237,7 +246,7 @@ public class HostBootstrapModule : IRMPModule
 			loadingOverlay.Visible = true;
 			try
 			{
-				NetHostGameService netService = new NetHostGameService();
+				NetHostGameService netService = CreateHostService();
 				NetErrorInfo? netErrorInfo = await StartHostAsync(netService, hostCapacity);
 				if (netErrorInfo.HasValue)
 				{
@@ -288,7 +297,7 @@ public class HostBootstrapModule : IRMPModule
 			loadingOverlay.Visible = true;
 			try
 			{
-				NetHostGameService netService = new NetHostGameService();
+				NetHostGameService netService = CreateHostService();
 				NetErrorInfo? netErrorInfo = await StartHostAsync(netService, hostCapacity);
 				if (netErrorInfo.HasValue)
 				{

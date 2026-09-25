@@ -9,7 +9,8 @@
     <DisableImplicitFrameworkReferences>true</DisableImplicitFrameworkReferences>
     <NoStdLib>true</NoStdLib>
     <NoWarn>$(NoWarn);CA1416;SYSLIB0003</NoWarn>
-    <DefaultItemExcludes>$(DefaultItemExcludes);bin/**;obj/**</DefaultItemExcludes>
+    <DefaultItemExcludes>$(DefaultItemExcludes);bin/**;obj/**;.compat-work/**</DefaultItemExcludes>
+    <DefineConstants Condition="'$(GameCompatibility)' == 'beta'">$(DefineConstants);STS2_0111</DefineConstants>
   </PropertyGroup>
 
   <!--

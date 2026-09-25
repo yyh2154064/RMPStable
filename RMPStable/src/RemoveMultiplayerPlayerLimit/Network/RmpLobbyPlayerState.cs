@@ -19,6 +19,10 @@ public struct RmpLobbyPlayerState : IPacketSerializable
 
 	public bool isReady;
 
+#if STS2_0111
+	public bool isModded;
+#endif
+
 	public readonly LobbyPlayer ToLobbyPlayer()
 	{
 		LobbyPlayer result = default(LobbyPlayer);
@@ -28,6 +32,9 @@ public struct RmpLobbyPlayerState : IPacketSerializable
 		result.unlockState = unlockState;
 		result.maxMultiplayerAscensionUnlocked = maxMultiplayerAscensionUnlocked;
 		result.isReady = isReady;
+#if STS2_0111
+		result.isModded = isModded;
+#endif
 		return result;
 	}
 
@@ -40,6 +47,9 @@ public struct RmpLobbyPlayerState : IPacketSerializable
 		result.unlockState = lobbyPlayer.unlockState;
 		result.maxMultiplayerAscensionUnlocked = lobbyPlayer.maxMultiplayerAscensionUnlocked;
 		result.isReady = lobbyPlayer.isReady;
+#if STS2_0111
+		result.isModded = lobbyPlayer.isModded;
+#endif
 		return result;
 	}
 
@@ -51,6 +61,9 @@ public struct RmpLobbyPlayerState : IPacketSerializable
 		writer.Write(unlockState);
 		writer.WriteInt(maxMultiplayerAscensionUnlocked);
 		writer.WriteBool(isReady);
+#if STS2_0111
+		writer.WriteBool(isModded);
+#endif
 	}
 
 	public void Deserialize(PacketReader reader)
@@ -61,5 +74,8 @@ public struct RmpLobbyPlayerState : IPacketSerializable
 		unlockState = reader.Read<SerializableUnlockState>();
 		maxMultiplayerAscensionUnlocked = reader.ReadInt();
 		isReady = reader.ReadBool();
+#if STS2_0111
+		isModded = reader.ReadBool();
+#endif
 	}
 }
