@@ -53,18 +53,49 @@ public static class Smoke
 		Input.ParseInputEvent(new InputEventKey { Keycode = key, Pressed = true }); await Frames(3);
 		Input.ParseInputEvent(new InputEventKey { Keycode = key, Pressed = false }); await Frames(3);
 	}
+	private static async Task Pointer(Vector2 position, bool? pressed = null)
+	{
+		InputEvent input = pressed.HasValue
+			? new InputEventMouseButton { Position = position, GlobalPosition = position, ButtonIndex = MouseButton.Left, Pressed = pressed.Value }
+			: new InputEventMouseMotion { Position = position, GlobalPosition = position };
+		Game.GetViewport().PushInput(input, true); await Frames(3);
+	}
+	private static async Task Click(Vector2 position) { await Pointer(position); await Pointer(position, true); await Pointer(position, false); }
+	private static async Task CheckPanelInput(Player player)
+	{
+		var view = Field("_view")!;
+		var panel = (Control)view.GetType().GetField("_panel", Instance)!.GetValue(view)!;
+		var surface = panel.GetNode<SubViewportContainer>("SpectatorSurface");
+		var deck = (Button)view.GetType().GetField("_deck", Instance)!.GetValue(view)!;
+		string before = Fingerprint(player);
+		await Click(panel.Position + surface.Position + deck.GetGlobalRect().GetCenter() * surface.Scale);
+		Check((bool)view.GetType().GetField("_showDeck", Instance)!.GetValue(view)!, "game pointer reaches embedded deck control");
+		Check(MegaCrit.Sts2.Core.Nodes.Screens.Capstones.NCapstoneContainer.Instance!.CurrentCapstoneScreen == null && before == Fingerprint(player), "embedded pointer does not click or change underlying game");
+		await Click(panel.Position + surface.Position + deck.GetGlobalRect().GetCenter() * surface.Scale);
+		Check(!(bool)view.GetType().GetField("_showDeck", Instance)!.GetValue(view)!, "embedded deck control returns to source page");
+		var origin = panel.Position; var title = panel.Position + new Vector2(100, 22);
+		await Pointer(title); await Pointer(title, true); await Pointer(title + new Vector2(80, 50)); await Pointer(title + new Vector2(80, 50), false);
+		Check(panel.Position.DistanceTo(origin + new Vector2(80, 50)) < 2, $"titlebar drag moves embedded panel (from {origin} to {panel.Position})");
+		float width = panel.Size.X; var corner = panel.Position + panel.Size - new Vector2(10, 10);
+		await Pointer(corner); await Pointer(corner, true); await Pointer(corner - new Vector2(100, 56)); await Pointer(corner - new Vector2(100, 56), false);
+		Check(panel.Size.X < width - 90 && Math.Abs(surface.Scale.X - surface.Scale.Y) < 0.001f, "resize keeps spectator aspect ratio");
+		Check(before == Fingerprint(player), "moving and resizing panel leaves player unchanged");
+	}
 	private static string Fingerprint(Player p) => JsonSerializer.Serialize(p.ToSerializable()) + ":" + p.PlayerCombatState?.Energy + ":" + string.Join(",", p.PlayerCombatState?.Hand.Cards.Select(c => c.Id + ":" + c.CurrentUpgradeLevel) ?? Array.Empty<string>());
 	private static async Task SaveFrame(string name, int waitFrames = 30)
 	{
 		await Frames(waitFrames);
 		if (DisplayServer.GetName() == "headless") return;
-		var window = Game.GetTree().Root.GetNode<Window>("RmpLocalSpectator");
+		var overlay = Game.GetTree().Root.GetNode<CanvasLayer>("RmpLocalSpectator");
 		await Game.ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
 		var view = Field("_view")!;
 		((Control)view.GetType().GetField("_preview", Instance)!.GetValue(view)!).Visible = false;
 		await Game.ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
-		window.GetTexture().GetImage().SavePng(Path.Combine(Output, name + ".png"));
+		((SubViewport)view.GetType().GetField("_viewport", Instance)!.GetValue(view)!).GetTexture().GetImage().SavePng(Path.Combine(Output, name + ".png"));
+		Game.GetViewport().GetTexture().GetImage().SavePng(Path.Combine(Output, name + "-embedded.png"));
+		overlay.Hide(); await Game.ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
 		Game.GetViewport().GetTexture().GetImage().SavePng(Path.Combine(Output, name + "-original.png"));
+		overlay.Show();
 		((Control)view.GetType().GetField("_preview", Instance)!.GetValue(view)!).Visible = true;
 	}
 	private static async Task Inspect(RunState state, string page, int minimumCards, int waitFrames = 40)
@@ -89,7 +120,7 @@ public static class Smoke
 		object isolated = snap.GetType().GetMethod("RoundTrip", Static)!.Invoke(null, new[] { snap })!;
 		Field("_view")!.GetType().GetMethod("Update", Instance)!.Invoke(Field("_view"), new[] { isolated });
 		Check(before == Fingerprint(state.Players[0]), page + " rendering leaves player unchanged");
-		var rendered = Descendants(Game.GetTree().Root.GetNode<Window>("RmpLocalSpectator")).OfType<NCard>().ToList();
+		var rendered = Descendants(Game.GetTree().Root.GetNode<CanvasLayer>("RmpLocalSpectator")).OfType<NCard>().ToList();
 		Check((minimumCards == 0 || rendered.Count > 0) && rendered.All(c => c.Model == null), page + " cards have no gameplay model");
 		if (page is "loot" or "event" or "selection") Check(doc.RootElement.GetProperty("PageArt").GetArrayLength() > 0 && doc.RootElement.GetProperty("PageLabels").GetArrayLength() > 0, page + " native art and options populated");
 		if (page == "map") Check(doc.RootElement.GetProperty("Drawings").EnumerateArray().Any(s => s.GetProperty("Lines").EnumerateArray().Any(l => l.GetProperty("Points").ValueKind == JsonValueKind.Array && l.GetProperty("Points").GetArrayLength() >= 4)), "map drawings contain actual vector strokes");
@@ -138,9 +169,14 @@ public static class Smoke
 			File.WriteAllLines(Path.Combine(Output, "shop-tree.txt"), Descendants(NMerchantRoom.Instance).Select(n => n.GetPath() + " " + n.GetType().Name + "/" + n.GetClass() + " " + (n is Control c ? c.Position + " " + c.Size : "") + " " + (n is TextureRect t ? t.Texture?.ResourcePath : "") + " " + (n.GetClass() == "SpineSprite" ? string.Join(";", n.GetPropertyList().Select(p => p["name"].AsString()).Where(p => p.Contains("skeleton") || p.Contains("animation")).Select(p => p + "=" + n.Get(p))) : "")));
 			var realCard = Descendants(NRun.Instance!).OfType<NCard>().First();
 			File.WriteAllLines(Path.Combine(Output, "card-tree.txt"), Descendants(realCard).OfType<Control>().Select(c => c.GetPath() + " " + c.Position + " " + c.Size));
+			int windowCount = Descendants(Game.GetTree().Root).OfType<Window>().Count();
+			int foregroundFps = Engine.MaxFps;
 			await Key(Godot.Key.F8);
 			Check(Field("_view") != null, "F8 opens spectator");
+			Check(Descendants(Game.GetTree().Root).OfType<Window>().Count() == windowCount, "embedded spectator creates no native or embedded Window");
+			Check(Engine.MaxFps == foregroundFps, "opening embedded panel preserves foreground FPS limit");
 			await Inspect(state, "shop", 7);
+			await CheckPanelInput(state.Players[0]);
 			await Key(Godot.Key.F8); Check(Field("_view") == null, "F8 closes spectator");
 #if STS2_0111
 			NInputManager.Instance!.ModifyMKbKey("rmpLiveSharing", Godot.Key.F9);
@@ -172,14 +208,14 @@ public static class Smoke
 			var intentValue = Descendants(NCombatRoom.Instance).OfType<MegaCrit.Sts2.Core.Nodes.Combat.NIntent>().First().GetNode<MegaRichTextLabel>("%Value");
 			string oldIntent = intentValue.Text; intentValue.Text = "123[font_size=18]×12[/font_size]"; await Frames(5);
 			await Inspect(state, "combat", 1, 0); await SaveFrame("intent-multidigit");
-			Check(Descendants(Game.GetTree().Root.GetNode<Window>("RmpLocalSpectator")).OfType<MegaRichTextLabel>().Any(l => l.Text == intentValue.Text && l.GetContentHeight() <= l.Size.Y && l.GetContentWidth() <= l.Size.X), "multi-digit and multi-hit intent text fits its rendered rectangle");
+			Check(Descendants(Game.GetTree().Root.GetNode<CanvasLayer>("RmpLocalSpectator")).OfType<MegaRichTextLabel>().Any(l => l.Text == intentValue.Text && l.GetContentHeight() <= l.Size.Y && l.GetContentWidth() <= l.Size.X), "multi-digit and multi-hit intent text fits its rendered rectangle");
 			intentValue.Text = oldIntent; await Frames(10);
 			string beforeDeck = Fingerprint(state.Players[0]);
 			var view = Field("_view")!;
 			var deck = (Button)view.GetType().GetField("_deck", Instance)!.GetValue(view)!;
 			deck.EmitSignal(Button.SignalName.Pressed);
 			await Frames(30);
-			Check(Descendants(Game.GetTree().Root.GetNode<Window>("RmpLocalSpectator")).OfType<NCard>().Count() == state.Players[0].Deck.Cards.Count, "spectator deck shows all cards");
+			Check(Descendants(Game.GetTree().Root.GetNode<CanvasLayer>("RmpLocalSpectator")).OfType<NCard>().Count() == state.Players[0].Deck.Cards.Count, "spectator deck shows all cards");
 			Check(beforeDeck == Fingerprint(state.Players[0]), "deck browsing leaves player unchanged");
 			await SaveFrame("deck");
 			foreach (int mode in new[] { 0, 1, 2, 3 })
@@ -196,7 +232,7 @@ public static class Smoke
 			view.GetType().GetMethod("NavigateInspect", Instance)!.Invoke(view, new object[] { -1 });
 			Check((int)view.GetType().GetField("_inspectIndex", Instance)!.GetValue(view)! == 0, "first card has no previous or wrap");
 			await SaveFrame("inspect");
-			Descendants(Game.GetTree().Root.GetNode<Window>("RmpLocalSpectator")).OfType<Button>().Single(b => b.Name == "SpectatorInspectUpgrade").EmitSignal(Button.SignalName.Pressed);
+			Descendants(Game.GetTree().Root.GetNode<CanvasLayer>("RmpLocalSpectator")).OfType<Button>().Single(b => b.Name == "SpectatorInspectUpgrade").EmitSignal(Button.SignalName.Pressed);
 			await SaveFrame("inspect-upgrade");
 			for (int i = 0; i < 30; i++) view.GetType().GetMethod("NavigateInspect", Instance)!.Invoke(view, new object[] { 1 });
 			Check((int)view.GetType().GetField("_inspectIndex", Instance)!.GetValue(view)! == state.Players[0].Deck.Cards.Count - 1, "last card has no next or wrap");
@@ -209,13 +245,13 @@ public static class Smoke
 			var tipsRect = Descendants(detail).OfType<VBoxContainer>().Single(n => n.Name == "SpectatorTips").GetGlobalRect();
 			Check(tipsRect.Position.X >= cardFrame.End.X || tipsRect.End.X <= cardFrame.Position.X, "keyword panel sits beside the inspected card");
 			Check(Descendants(detail).OfType<NCard>().Single().GetNode<Label>("%TitleLabel").GetThemeColor("font_color") == StsColors.green, "upgrade title uses original bright green");
-			Descendants(Game.GetTree().Root.GetNode<Window>("RmpLocalSpectator")).OfType<Button>().Single(b => b.Name == "SpectatorInspectUpgrade").EmitSignal(Button.SignalName.Pressed);
+			Descendants(Game.GetTree().Root.GetNode<CanvasLayer>("RmpLocalSpectator")).OfType<Button>().Single(b => b.Name == "SpectatorInspectUpgrade").EmitSignal(Button.SignalName.Pressed);
 			await SaveFrame("inspect-base");
 			Check(beforeDeck == Fingerprint(state.Players[0]), "downgrade comparison leaves original upgraded card unchanged");
 			view.GetType().GetMethod("CloseInspect", Instance)!.Invoke(view, null);
-			var pin = Descendants(Game.GetTree().Root.GetNode<Window>("RmpLocalSpectator")).OfType<Button>().Single(b => b.Name == "SpectatorPin");
-			pin.ButtonPressed = false; Check(!Game.GetTree().Root.GetNode<Window>("RmpLocalSpectator").AlwaysOnTop, "pin off updates native window");
-			pin.ButtonPressed = true; Check(Game.GetTree().Root.GetNode<Window>("RmpLocalSpectator").AlwaysOnTop, "pin on updates native window");
+			var panel = Game.GetTree().Root.GetNode<Control>("RmpLocalSpectator/SpectatorPanel");
+			Check(panel.GetGlobalRect().Size.X > 600 && panel.GetGlobalRect().End.X <= Game.GetViewport().GetVisibleRect().Size.X, "embedded panel fits game viewport");
+			Check(Math.Abs(panel.Size.X - Game.GetViewport().GetVisibleRect().Size.X * 0.65f * 3 / 5) < 1, "default panel width is three fifths of initial embedded size");
 			deck.EmitSignal(Button.SignalName.Pressed);
 			var map = MegaCrit.Sts2.Core.Nodes.Screens.Map.NMapScreen.Instance!.Open(true);
 			await Frames(90);
@@ -256,8 +292,8 @@ public static class Smoke
 			typeof(NDeckCardSelectScreen).GetMethod("ConfirmSelection", Instance)!.Invoke(selection, new object?[] { null }); await selectTask; await Frames(60);
 			await Inspect(state, "event", 0); Check(state.Players[0].Deck.Cards.Count == 6, "Ancient selection returns to event after removing chosen cards");
 			if (Environment.GetEnvironmentVariable("RMP_SMOKE_HOLD") == "1") { GD.Print("[LiveSharingSmoke] HOLD for visual review"); return; }
-			Game.GetTree().Root.GetNode<Window>("RmpLocalSpectator").EmitSignal(Window.SignalName.CloseRequested);
-			await Frames(5); Check(Field("_view") == null, "native window close disposes spectator");
+			Descendants(Game.GetTree().Root.GetNode<CanvasLayer>("RmpLocalSpectator")).OfType<Button>().Single(b => b.Name == "SpectatorClose").EmitSignal(Button.SignalName.Pressed);
+			await Frames(5); Check(Field("_view") == null, "embedded panel close disposes spectator");
 			await Key(Godot.Key.F9); Check(Field("_view") != null, "spectator can reopen");
 			RunManager.Instance.CleanUp();
 			await Frames(5); Check(Field("_view") == null && !Game.GetTree().Root.HasNode("RmpLocalSpectator"), "run cleanup closes and frees spectator");

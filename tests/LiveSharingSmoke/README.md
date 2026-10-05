@@ -10,7 +10,10 @@ spectator key in the isolated profile. Card reward candidates here intentionally
 come from the starting deck: the test exercises presentation and lifecycle, not
 reward generation or choosing a reward. It exercises damaged health bars, long
 multi-hit intent text, native sort comparers, inspection boundaries, keyword
-placement, upgrade/base previews, and the always-on-top window flag. It draws and
+placement, upgrade/base previews, and the embedded panel. It verifies that no
+Window is created, the foreground FPS limit is unchanged, and real viewport
+pointer events can browse, drag and resize the panel without acting on the game.
+It draws and
 erases map strokes, shows loot, chooses Neow's Leafy Poultice, then Tezcatara's
 Biiig Hug and completes the real removal selection/confirmation flow. These
 choices affect only the disposable test run. Map timing reports capture, JSON,
@@ -44,7 +47,8 @@ New-Item -ItemType Directory -Force $env:RMP_SMOKE_OUTPUT | Out-Null
 
 Adjust the main-pack path to the installed game of the same version. Remove
 `--headless` and add `--rendering-method gl_compatibility --windowed` for image
-comparison. The renderer's screenshots are test outputs only. Optional
+comparison. Outputs also include `*-embedded.png` showing the panel inside the
+original game. The renderer's screenshots are test outputs only. Optional
 `RMP_SMOKE_HOLD=1` keeps the final event window open for manual inspection.
 
 Success is `[LiveSharingSmoke] ALL PASSED`; assertion failures write

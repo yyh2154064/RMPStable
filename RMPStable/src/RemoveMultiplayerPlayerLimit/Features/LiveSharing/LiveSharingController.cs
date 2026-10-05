@@ -137,7 +137,7 @@ internal static class LiveSharingController
 			foreach (var entry in LocalSpectatorSource.Descendants<NInputSettingsEntry>(settings))
 			{
 				if (entry.InputName != Action) continue;
-				string text = Localization.Get("LIVE_SHARING_INPUT_LABEL", LocalSpectatorSource.T("本地观战窗口（单人测试）", "Local spectator (singleplayer test)"));
+				string text = Localization.Get("LIVE_SHARING_INPUT_LABEL", LocalSpectatorSource.T("本地观战面板（单人测试）", "Local spectator (singleplayer test)"));
 				var label = entry.GetNodeOrNull<Node>("%InputLabel");
 				if (label is MegaLabel plain) plain.SetTextAutoSize(text);
 				else if (label is MegaRichTextLabel rich) rich.SetTextAutoSize(text);

@@ -3,7 +3,7 @@
   "SETTINGS_PLAYER_LIMIT_LABEL": "联机人数上限",
   "QUICK_SL_BUTTON": "快速SL",
   "QUICK_SL_INPUT_LABEL": "快速SL",
-  "LIVE_SHARING_INPUT_LABEL": "本地观战窗口（单人测试）",
+  "LIVE_SHARING_INPUT_LABEL": "本地观战面板（单人测试）",
   "QUICK_SL_CONFIRM_TITLE": "快速SL",
   "QUICK_SL_CONFIRM_SINGLE": "确定要返回到游戏原生存档的最近检查点吗？",
   "QUICK_SL_CONFIRM_CLIENT": "确定要向房主发送快速SL请求吗？",

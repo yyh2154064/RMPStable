@@ -16,7 +16,9 @@ namespace RemoveMultiplayerPlayerLimit.Features.LiveSharing;
 // Native NCard instances intentionally have Model == null for their entire lifetime.
 internal sealed partial class SpectatorView : IDisposable
 {
-	private readonly Window _window;
+	private readonly CanvasLayer _overlay;
+	private readonly Control _panel;
+	private readonly SubViewport _viewport;
 	private readonly Control _canvas;
 	private readonly Control _background;
 	private readonly Control _actors;
@@ -37,7 +39,6 @@ internal sealed partial class SpectatorView : IDisposable
 	private readonly Control _screenText;
 	private readonly Control _screenHovers;
 	private readonly Control _screenDrawings;
-	private readonly Button _pin;
 	private readonly ColorRect _header;
 	private readonly Label _title;
 	private readonly Label _summary;
@@ -53,20 +54,10 @@ internal sealed partial class SpectatorView : IDisposable
 
 	internal SpectatorView(Action close)
 	{
-		_window = new Window
-		{
-			Visible = false,
-			Name = "RmpLocalSpectator", Title = T("RMP 观战原型 · 单人本地 · 只读", "RMP spectator · local singleplayer · read only"),
-			Size = new Vector2I(1280, 720), MinSize = new Vector2I(800, 450),
-			ContentScaleSize = new Vector2I(1920, 1080), ContentScaleMode = Window.ContentScaleModeEnum.CanvasItems,
-			ContentScaleAspect = Window.ContentScaleAspectEnum.Keep, Transient = false, Exclusive = false,
-			ForceNative = true, AlwaysOnTop = true
-		};
+		(_overlay, _panel, _viewport) = CreatePanel(close);
 		try
 		{
-		_window.CloseRequested += close;
-		((SceneTree)Engine.GetMainLoop()).Root.AddChild(_window);
-		_canvas = Area(_window, Vector2.Zero, new Vector2(1920, 1080));
+		_canvas = Area(_viewport, Vector2.Zero, new Vector2(1920, 1080));
 		Solid(_canvas, new Rect2(0, 0, 1920, 1080), new Color("10151f"));
 		_page = Area(_canvas, Vector2.Zero, new Vector2(1920, 1080));
 		_background = Area(_page, Vector2.Zero, _page.Size);
@@ -98,16 +89,8 @@ internal sealed partial class SpectatorView : IDisposable
 		_status = Text(_canvas, "", new Rect2(24, 1055, 1840, 25), 18);
 		_preview = Area(_canvas, Vector2.Zero, new Vector2(1920, 1080));
 		_inspect = Area(_canvas, Vector2.Zero, new Vector2(1920, 1080));
-		_pin = new Button { Name = "SpectatorPin", Text = T("置顶：开启", "Always on top: on"), ToggleMode = true, ButtonPressed = true, Position = new Vector2(1680, 1041), Size = new Vector2(220, 34), FocusMode = Control.FocusModeEnum.None };
-		_canvas.AddChild(_pin);
-		_pin.Toggled += enabled => { _window.Transient = false; _window.AlwaysOnTop = enabled; _pin.Text = enabled ? T("置顶：开启", "Always on top: on") : T("置顶：关闭", "Always on top: off"); };
-		// PopupCentered makes a Window transient on Windows, which prevents
-		// toggling AlwaysOnTop. Show an ordinary, independently centered window.
-		var workArea = DisplayServer.ScreenGetUsableRect();
-		_window.Position = workArea.Position + (workArea.Size - _window.Size) / 2;
-		_window.Show();
 		}
-		catch { _window.QueueFree(); throw; }
+		catch { _overlay.QueueFree(); throw; }
 	}
 
 	internal void Update(SpectatorSnapshot snapshot)
@@ -508,5 +491,5 @@ internal sealed partial class SpectatorView : IDisposable
 	}
 	private static void Clear(Node node) { foreach (Node child in node.GetChildren()) { node.RemoveChild(child); child.QueueFree(); } }
 	private static string T(string zh, string en) => LocalSpectatorSource.T(zh, en);
-	public void Dispose() { if (GodotObject.IsInstanceValid(_window)) { _window.Hide(); _window.QueueFree(); } }
+	public void Dispose() { if (GodotObject.IsInstanceValid(_overlay)) { _overlay.Hide(); _overlay.QueueFree(); } }
 }
