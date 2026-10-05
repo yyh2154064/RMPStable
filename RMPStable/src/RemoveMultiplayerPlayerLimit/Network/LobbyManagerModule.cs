@@ -10,6 +10,7 @@ using MegaCrit.Sts2.Core.Multiplayer.Game;
 using MegaCrit.Sts2.Core.Multiplayer.Game.Lobby;
 using RemoveMultiplayerPlayerLimit.Core;
 using RemoveMultiplayerPlayerLimit.Features.QuickSl;
+using RemoveMultiplayerPlayerLimit.Features.LiveSharing;
 using RemoveMultiplayerPlayerLimit.Infrastructure;
 
 namespace RemoveMultiplayerPlayerLimit.Network;
@@ -58,6 +59,7 @@ public class LobbyManagerModule : IRMPModule
 		{
 			PayloadMessageRegistration.EnsureRegistered();
 			QuickSlController.ProcessFrame();
+			LiveSharingController.ProcessFrame(delta);
 			HandleStartRunLobby(SceneMonitor.FindActiveStartRunLobby());
 			if (++_frameCounter % 15 == 0)
 			{

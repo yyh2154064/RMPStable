@@ -1,0 +1,12 @@
+{
+  "id": "LiveSharingSmoke",
+  "name": "RMP isolated spectator test harness",
+  "author": "RMP Stable Contributors",
+  "version": "0.1.0",
+  "description": "Developer test only. Requires RMP_SMOKE_OUTPUT and an isolated non-Steam profile.",
+  "has_dll": true,
+  "has_pck": false,
+  "affects_gameplay": true,
+	"min_game_version": "0.107.1",
+  "dependencies": [{ "id": "RMPStable" }]
+}

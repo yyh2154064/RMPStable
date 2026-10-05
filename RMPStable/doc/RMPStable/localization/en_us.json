@@ -3,6 +3,7 @@
   "SETTINGS_PLAYER_LIMIT_LABEL": "Max Players",
   "QUICK_SL_BUTTON": "Quick SL",
   "QUICK_SL_INPUT_LABEL": "Quick SL",
+  "LIVE_SHARING_INPUT_LABEL": "Local spectator (singleplayer test)",
   "QUICK_SL_CONFIRM_TITLE": "Quick SL",
   "QUICK_SL_CONFIRM_SINGLE": "Return to the latest checkpoint in the game's native save?",
   "QUICK_SL_CONFIRM_CLIENT": "Send a Quick SL request to the host?",

@@ -3,6 +3,10 @@
 This repository stores the editable source code for RMP Stable. Compiled mod
 artifacts are deliberately not kept under `RMPStable`.
 
+This branch implements the singleplayer local spectator prototype (F8, off by
+default). See [安装、使用与实现边界](docs/live-sharing-test.md). It is an experimental
+build; multiplayer spectator transport is not included.
+
 - `RMPStable/src`: C# source and project file.
 - `RMPStable-Bootstrap`: version-detecting loader that embeds both compiled implementations.
 - `RMPStable/doc`: Godot source project for the icon and localization.

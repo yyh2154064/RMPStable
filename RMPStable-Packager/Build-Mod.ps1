@@ -184,6 +184,7 @@ if ($manifest.id -ne $modId -or [string]::IsNullOrWhiteSpace($manifest.version))
     throw "RMPStable.json 中的 id 或 version 无效。"
 }
 $safeVersion = "$($manifest.version)" -replace '[^0-9A-Za-z._-]', '_'
+$isLiveSharingTest = "$($manifest.version)" -match '-liveSharing'
 
 Write-Step "检查构建环境"
 $dotnet = Get-Command dotnet -ErrorAction SilentlyContinue
@@ -328,7 +329,12 @@ try {
     Write-Step "组装并压缩 Mod"
     Copy-Item -LiteralPath $bootstrapDll -Destination (Join-Path $packageModDir "RMPStable.dll") -Force
     Copy-Item -LiteralPath $manifestPath -Destination (Join-Path $packageModDir "RMPStable.json") -Force
-    Copy-Item -LiteralPath $updaterPath -Destination (Join-Path $packageModDir "update.cmd") -Force
+    if ($isLiveSharingTest) {
+        Copy-Item -LiteralPath (Join-Path $repositoryDir 'docs\live-sharing-test.md') -Destination (Join-Path $packageModDir 'README-liveSharing.md') -Force
+    }
+    else {
+        Copy-Item -LiteralPath $updaterPath -Destination (Join-Path $packageModDir "update.cmd") -Force
+    }
 
     $zipPath = Join-Path $outputDir "RMPStable-v$safeVersion.zip"
     Compress-Archive -LiteralPath $packageModDir -DestinationPath $zipPath -CompressionLevel Optimal -Force
@@ -346,9 +352,9 @@ try {
     $expectedEntries = @(
         "RMPStable/RMPStable.dll",
         "RMPStable/RMPStable.pck",
-        "RMPStable/RMPStable.json",
-        "RMPStable/update.cmd"
+        "RMPStable/RMPStable.json"
     )
+    $expectedEntries += if ($isLiveSharingTest) { 'RMPStable/README-liveSharing.md' } else { 'RMPStable/update.cmd' }
     foreach ($entry in $expectedEntries) {
         if ($entries -notcontains $entry) {
             throw "ZIP 校验失败，缺少：$entry"
