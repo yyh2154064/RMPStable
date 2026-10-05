@@ -8,7 +8,13 @@ It creates a disposable, unsaved Ironclad run, opens a generated merchant, shows
 three card candidates, and enters ExoskeletonsWeak combat. It also remaps the
 spectator key in the isolated profile. Card reward candidates here intentionally
 come from the starting deck: the test exercises presentation and lifecycle, not
-reward generation or choosing a reward.
+reward generation or choosing a reward. It exercises damaged health bars, long
+multi-hit intent text, native sort comparers, inspection boundaries, keyword
+placement, upgrade/base previews, and the always-on-top window flag. It draws and
+erases map strokes, shows loot, chooses Neow's Leafy Poultice, then Tezcatara's
+Biiig Hug and completes the real removal selection/confirmation flow. These
+choices affect only the disposable test run. Map timing reports capture, JSON,
+render-update cost and the current engine FPS limit separately.
 
 The initializer requires both `RMP_SMOKE_OUTPUT` and the exact command-line pair
 `--force-steam off`. Set `APPDATA` and `LOCALAPPDATA` to a fresh directory inside
@@ -39,7 +45,7 @@ New-Item -ItemType Directory -Force $env:RMP_SMOKE_OUTPUT | Out-Null
 Adjust the main-pack path to the installed game of the same version. Remove
 `--headless` and add `--rendering-method gl_compatibility --windowed` for image
 comparison. The renderer's screenshots are test outputs only. Optional
-`RMP_SMOKE_HOLD=1` keeps the final combat window open for manual inspection.
+`RMP_SMOKE_HOLD=1` keeps the final event window open for manual inspection.
 
 Success is `[LiveSharingSmoke] ALL PASSED`; assertion failures write
 `failure.txt` and request exit code 1. Outputs include page JSON and, when

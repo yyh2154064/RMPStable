@@ -5,6 +5,7 @@ using System.Text.Json;
 using Godot;
 using MegaCrit.Sts2.Core.Bindings.MegaSpine;
 using MegaCrit.Sts2.Core.Logging;
+using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.Nodes.Cards;
 using MegaCrit.Sts2.Core.Nodes.Combat;
 using MegaCrit.Sts2.addons.mega_text;
@@ -13,12 +14,14 @@ namespace RemoveMultiplayerPlayerLimit.Features.LiveSharing;
 
 // This renderer must not access RunManager, Player, CardModel, or any game command.
 // Native NCard instances intentionally have Model == null for their entire lifetime.
-internal sealed class SpectatorView : IDisposable
+internal sealed partial class SpectatorView : IDisposable
 {
 	private readonly Window _window;
 	private readonly Control _canvas;
 	private readonly Control _background;
 	private readonly Control _actors;
+	private readonly Control _actorSprites;
+	private readonly Control _actorState;
 	private readonly Control _inventory;
 	private readonly Control _offers;
 	private readonly Control _preview;
@@ -26,6 +29,15 @@ internal sealed class SpectatorView : IDisposable
 	private readonly Control _page;
 	private readonly Control _hud;
 	private readonly Control _underlay;
+	private readonly Control _screen;
+	private readonly Control _inspect;
+	private readonly Control _combatHud;
+	private readonly Control _combatHudText;
+	private readonly Control _screenArt;
+	private readonly Control _screenText;
+	private readonly Control _screenHovers;
+	private readonly Control _screenDrawings;
+	private readonly Button _pin;
 	private readonly ColorRect _header;
 	private readonly Label _title;
 	private readonly Label _summary;
@@ -35,6 +47,8 @@ internal sealed class SpectatorView : IDisposable
 	private SpectatorSnapshot? _snapshot;
 	private bool _showDeck;
 	private string _roomKey = "", _actorKey = "", _cardKey = "", _itemKey = "", _offerKey = "", _hudKey = "";
+	private string _screenKey = "", _sourcePage = "";
+	private string _spriteKey = "";
 	private readonly HashSet<string> _reportedAssets = new();
 
 	internal SpectatorView(Action close)
@@ -46,7 +60,7 @@ internal sealed class SpectatorView : IDisposable
 			Size = new Vector2I(1280, 720), MinSize = new Vector2I(800, 450),
 			ContentScaleSize = new Vector2I(1920, 1080), ContentScaleMode = Window.ContentScaleModeEnum.CanvasItems,
 			ContentScaleAspect = Window.ContentScaleAspectEnum.Keep, Transient = false, Exclusive = false,
-			ForceNative = true
+			ForceNative = true, AlwaysOnTop = true
 		};
 		try
 		{
@@ -57,8 +71,17 @@ internal sealed class SpectatorView : IDisposable
 		_page = Area(_canvas, Vector2.Zero, new Vector2(1920, 1080));
 		_background = Area(_page, Vector2.Zero, _page.Size);
 		_actors = Area(_page, Vector2.Zero, _page.Size);
+		_actorSprites = Area(_actors, Vector2.Zero, _page.Size);
+		_actorState = Area(_actors, Vector2.Zero, _page.Size);
 		_underlay = Area(_page, Vector2.Zero, _page.Size);
+		_combatHud = Area(_page, Vector2.Zero, _page.Size);
+		_combatHudText = Area(_page, Vector2.Zero, _page.Size);
 		_offers = Area(_page, Vector2.Zero, _page.Size);
+		_screen = Area(_page, Vector2.Zero, _page.Size);
+		_screenArt = Area(_screen, Vector2.Zero, _page.Size);
+		_screenDrawings = Area(_screen, Vector2.Zero, _page.Size);
+		_screenText = Area(_screen, Vector2.Zero, _page.Size);
+		_screenHovers = Area(_screen, Vector2.Zero, _page.Size);
 		_cards = Area(_page, Vector2.Zero, _page.Size);
 		_hud = Area(_page, Vector2.Zero, _page.Size);
 		// Small spectator controls sit over the native composition rather than
@@ -74,7 +97,15 @@ internal sealed class SpectatorView : IDisposable
 		_deck.Pressed += () => { _showDeck = !_showDeck; _cardKey = ""; if (_snapshot != null) Update(_snapshot); };
 		_status = Text(_canvas, "", new Rect2(24, 1055, 1840, 25), 18);
 		_preview = Area(_canvas, Vector2.Zero, new Vector2(1920, 1080));
-		_window.PopupCentered();
+		_inspect = Area(_canvas, Vector2.Zero, new Vector2(1920, 1080));
+		_pin = new Button { Name = "SpectatorPin", Text = T("置顶：开启", "Always on top: on"), ToggleMode = true, ButtonPressed = true, Position = new Vector2(1680, 1041), Size = new Vector2(220, 34), FocusMode = Control.FocusModeEnum.None };
+		_canvas.AddChild(_pin);
+		_pin.Toggled += enabled => { _window.Transient = false; _window.AlwaysOnTop = enabled; _pin.Text = enabled ? T("置顶：开启", "Always on top: on") : T("置顶：关闭", "Always on top: off"); };
+		// PopupCentered makes a Window transient on Windows, which prevents
+		// toggling AlwaysOnTop. Show an ordinary, independently centered window.
+		var workArea = DisplayServer.ScreenGetUsableRect();
+		_window.Position = workArea.Position + (workArea.Size - _window.Size) / 2;
+		_window.Show();
 		}
 		catch { _window.QueueFree(); throw; }
 	}
@@ -82,6 +113,7 @@ internal sealed class SpectatorView : IDisposable
 	internal void Update(SpectatorSnapshot snapshot)
 	{
 		if (snapshot.Schema != 1) throw new InvalidOperationException("Unsupported spectator snapshot version.");
+		if (_sourcePage != snapshot.Page) { CloseInspect(); _showDeck = false; _cardKey = ""; _sourcePage = snapshot.Page; }
 		_snapshot = snapshot;
 		_deck.Disabled = false;
 		_title.Text = snapshot.Character + "  ·  " + T("只读观战", "Spectator");
@@ -90,6 +122,8 @@ internal sealed class SpectatorView : IDisposable
 		_status.Text = T("单人本地测试 · 悬停放大卡牌 · 在游戏窗口按观战快捷键开关", "Local test · hover to enlarge cards · toggle the hotkey in the game window");
 		_deck.Text = _showDeck ? T("返回当前页面", "Current page") : T("查看牌组", "View deck");
 		_page.Scale = new Vector2(1920 / Math.Max(1, snapshot.Width), 1080 / Math.Max(1, snapshot.Height));
+		_page.Size = new Vector2(snapshot.Width, snapshot.Height);
+		foreach (var pane in new[] { _cards, _screen, _underlay, _background, _actors, _offers, _hud }) pane.Size = _page.Size;
 		bool nativeHud = snapshot.HudArt.Count > 0;
 		_header.Visible = _title.Visible = _summary.Visible = _inventory.Visible = !nativeHud;
 		_detail.Visible = !nativeHud;
@@ -99,7 +133,7 @@ internal sealed class SpectatorView : IDisposable
 		if (nativeHud && snapshot.DeckButtonRect != null) { var rect = Rectangle(snapshot.DeckButtonRect); _deck.Position = rect.Position * _page.Scale; _deck.Size = rect.Size * _page.Scale; }
 		string hudKey = JsonSerializer.Serialize(snapshot.HudArt) + JsonSerializer.Serialize(snapshot.HudLabels);
 		if (_hudKey != hudKey) { _hudKey = hudKey; Clear(_hud); DrawArt(_hud, snapshot.HudArt); DrawLabels(_hud, snapshot.HudLabels); }
-		string roomKey = snapshot.Room + ":" + snapshot.Background.Count;
+		string roomKey = snapshot.Room + JsonSerializer.Serialize(snapshot.Background);
 		if (_roomKey != roomKey)
 		{
 			_roomKey = roomKey;
@@ -107,13 +141,21 @@ internal sealed class SpectatorView : IDisposable
 			DrawBackground(snapshot);
 		}
 		string actorKey = JsonSerializer.Serialize(snapshot.Creatures);
+		string spriteKey = JsonSerializer.Serialize(snapshot.Creatures.Select(c => new { c.VisualScene, c.Animation, c.Transform }));
+		if (_spriteKey != spriteKey) { _spriteKey = spriteKey; Clear(_actorSprites); DrawCreatureArt(snapshot.Creatures); }
 		if (_actorKey != actorKey)
 		{
 			_actorKey = actorKey;
-			Clear(_actors);
+			Clear(_actorState);
 			DrawCreatures(snapshot.Creatures);
 		}
-		_actors.Visible = snapshot.Page == "combat" || snapshot.Page == "reward";
+		_actors.Visible = snapshot.Creatures.Count > 0;
+		bool screenRebuilt = RetainArt(_screenArt, snapshot.PageArt);
+		RetainArt(_combatHud, snapshot.CombatHudArt);
+		UpdateDrawings(snapshot.Drawings);
+		string screenKey = snapshot.Page + JsonSerializer.Serialize(snapshot.PageLabels) + JsonSerializer.Serialize(snapshot.Hovers) + JsonSerializer.Serialize(snapshot.CombatHudLabels);
+		if (_screenKey != screenKey || screenRebuilt)
+		{ _screenKey = screenKey; ClearMounted(_mountedLabels); Clear(_screenText); DrawLabels(_screenText, snapshot.PageLabels, nativeOrder: true); Clear(_combatHudText); DrawLabels(_combatHudText, snapshot.CombatHudLabels); Clear(_screenHovers); DrawHovers(snapshot.Hovers); }
 		string itemKey = JsonSerializer.Serialize(snapshot.Inventory);
 		if (_itemKey != itemKey)
 		{
@@ -126,14 +168,14 @@ internal sealed class SpectatorView : IDisposable
 			_offerKey = offerKey; Clear(_offers);
 			if (snapshot.Page == "shop") DrawItems(_offers, snapshot.Items, true);
 		}
-		var cards = _showDeck ? snapshot.Deck : snapshot.Cards;
+		var cards = _showDeck || snapshot.Page == "deck" ? snapshot.Deck : snapshot.Cards;
 		string cardKey = _showDeck + snapshot.Page + JsonSerializer.Serialize(cards) + JsonSerializer.Serialize(snapshot.UnderlayCards) + JsonSerializer.Serialize(snapshot.UnderlayItems) + JsonSerializer.Serialize(snapshot.RewardArt) + JsonSerializer.Serialize(snapshot.RewardLabels);
-		if (_cardKey != cardKey)
+		if (_cardKey != cardKey || screenRebuilt)
 		{
-			_cardKey = cardKey; Clear(_preview); Clear(_cards); Clear(_underlay);
-			if (snapshot.Page == "reward" && !_showDeck)
+			_cardKey = cardKey; ClearMounted(_mountedCards); Clear(_preview); Clear(_cards); Clear(_underlay);
+			if (snapshot.Page is not "combat" and not "shop" && snapshot.UnderlayPage.Length > 0 && !_showDeck)
 			{
-				var basePage = new SpectatorSnapshot { Width = snapshot.Width, Height = snapshot.Height, Page = snapshot.UnderlayItems.Count > 0 ? "shop" : "combat" };
+				var basePage = new SpectatorSnapshot { Width = snapshot.Width, Height = snapshot.Height, Page = snapshot.UnderlayPage };
 				DrawPageCards(basePage, snapshot.UnderlayCards, _underlay);
 				DrawItems(_underlay, snapshot.UnderlayItems, true);
 			}
@@ -144,8 +186,11 @@ internal sealed class SpectatorView : IDisposable
 	internal void ShowError(string message)
 	{
 		_snapshot = null; _deck.Disabled = true;
-		Clear(_preview); Clear(_cards); Clear(_actors); Clear(_offers); Clear(_inventory); Clear(_background); Clear(_hud); Clear(_underlay);
-		_cardKey = _actorKey = _offerKey = _itemKey = _roomKey = _hudKey = "";
+		ClearMounted(_mountedCards); ClearMounted(_mountedLabels);
+		Clear(_preview); Clear(_cards); Clear(_actorSprites); Clear(_actorState); Clear(_offers); Clear(_inventory); Clear(_background); Clear(_hud); Clear(_underlay);
+		foreach (var pane in new[] { _screenArt, _screenDrawings, _screenText, _screenHovers, _combatHud, _combatHudText }) Clear(pane);
+		_retainedArt.Clear(); _drawingSurfaces.Clear(); CloseInspect();
+		_cardKey = _actorKey = _offerKey = _itemKey = _roomKey = _hudKey = _screenKey = _spriteKey = "";
 		_header.Visible = _title.Visible = _summary.Visible = true;
 		_status.Text = T("状态暂不可用：", "State unavailable: ") + message;
 		_summary.Text = T("等待有效的单人游戏状态", "Waiting for a valid singleplayer state");
@@ -154,20 +199,10 @@ internal sealed class SpectatorView : IDisposable
 	private void DrawPageCards(SpectatorSnapshot snapshot, List<CardSnapshot> cards, Control? destination = null)
 	{
 		var cardRoot = destination ?? _cards;
-		bool deck = _showDeck || snapshot.Page == "run";
+		bool deck = _showDeck || snapshot.Page is "run" or "deck";
 		if (deck)
 		{
-			Solid(cardRoot, new Rect2(0, 140, snapshot.Width, snapshot.Height - 140), new Color(0.02f, 0.02f, 0.02f, 0.96f));
-			var scroll = new ScrollContainer { Position = new Vector2(70, 170), Size = new Vector2(snapshot.Width - 140, snapshot.Height - 230), HorizontalScrollMode = ScrollContainer.ScrollMode.Disabled };
-			cardRoot.AddChild(scroll);
-			var grid = new GridContainer { Columns = 7 };
-			grid.AddThemeConstantOverride("h_separation", 28); grid.AddThemeConstantOverride("v_separation", 32);
-			scroll.AddChild(grid);
-			foreach (var card in cards)
-			{
-				var slot = new Control { CustomMinimumSize = new Vector2(220, 330), MouseFilter = Control.MouseFilterEnum.Stop };
-				grid.AddChild(slot); DrawCard(slot, card, new Vector2(8, 8), 0.68f); Hover(slot, card);
-			}
+			DrawDeck(snapshot, cards, cardRoot);
 			return;
 		}
 		if (snapshot.Page == "reward")
@@ -187,25 +222,36 @@ internal sealed class SpectatorView : IDisposable
 				transform = new Transform2D(0, Vector2.One * scale, 0, center);
 			}
 			var holder = new Node2D { Transform = transform };
-			cardRoot.AddChild(holder);
+			Node drawingParent = cardRoot;
+			if (destination == null && PageAnchor(card.ArtKey) is { } nativeAnchor && snapshot.Page is "event" or "selection")
+			{
+				var nativeTransform = snapshot.PageArt.First(a => a.Key == card.ArtKey).Transform;
+				holder.Transform = Matrix(nativeTransform).AffineInverse() * transform;
+				drawingParent = nativeAnchor; _mountedCards.Add(holder);
+			}
+			drawingParent.AddChild(holder);
 			DrawCard(holder, card, Vector2.Zero, 1, centered: true);
-			var hitbox = Area(holder, new Vector2(-160, -230), new Vector2(320, 450));
+			var hitboxHolder = new Node2D { Transform = transform }; cardRoot.AddChild(hitboxHolder);
+			var hitbox = Area(hitboxHolder, new Vector2(-160, -230), new Vector2(320, 450));
 			hitbox.MouseFilter = Control.MouseFilterEnum.Stop;
-			Hover(hitbox, card);
+			Hover(hitbox, card, cards);
 			if (card.Art.Count > 0) { DrawArt(cardRoot, card.Art); DrawLabels(cardRoot, card.Labels); }
 			else if (card.Price.HasValue) Text(holder, card.Sold ? T("已售出", "Sold out") : $"{card.Price} G", new Rect2(-150, 225, 300, 55), 44, HorizontalAlignment.Center);
 		}
 	}
-	private void Hover(Control slot, CardSnapshot card)
+	private void Hover(Control slot, CardSnapshot card, List<CardSnapshot> cards, int? index = null, bool upgraded = false)
 	{
 		slot.MouseEntered += () =>
 		{
+			if (_inspectIndex >= 0) return;
 			Clear(_preview);
 			var center = slot.GetGlobalRect().GetCenter();
 			var origin = new Vector2(Math.Clamp(center.X - 180, 24, 1536), Math.Clamp(center.Y - 254, 150, 520));
 			DrawCard(_preview, card, origin, 1.2f);
+			DrawTips(_preview, card.Tips, new Vector2(origin.X > 1160 ? origin.X - 380 : origin.X + 370, origin.Y));
 		};
-		slot.MouseExited += () => Clear(_preview);
+		slot.MouseExited += () => { if (_inspectIndex < 0) Clear(_preview); };
+		slot.GuiInput += input => { if (input is InputEventMouseButton { ButtonIndex: MouseButton.Left, Pressed: true }) { OpenInspect(cards, index ?? cards.IndexOf(card), upgraded); slot.AcceptEvent(); } };
 	}
 	private static Transform2D Matrix(float[] t) => new(new Vector2(t[0], t[1]), new Vector2(t[2], t[3]), new Vector2(t[4], t[5]));
 	private static Rect2 Rectangle(float[] r) => new(r[0], r[1], r[2], r[3]);
@@ -213,17 +259,27 @@ internal sealed class SpectatorView : IDisposable
 	private void DrawBackground(SpectatorSnapshot snapshot)
 		=> DrawArt(_background, snapshot.Background);
 
-	private void DrawArt(Node parent, List<ArtSnapshot> layers)
+	private List<ArtNode> DrawArt(Node parent, List<ArtSnapshot> layers)
 	{
+		var rendered = new List<ArtNode>();
 		var root = new Node2D();
 		parent.AddChild(root);
+		var ancestors = new Dictionary<string, (Node Node, Transform2D Matrix)>();
 		foreach (var art in layers)
 		{
-			var t = art.Transform; var r = art.Rect; var c = art.Tint;
-			var holder = new Node2D { Transform = Matrix(t), Modulate = new Color(c[0], c[1], c[2], c[3]) };
-			root.AddChild(holder);
-			if (art.Solid) { Solid(holder, new Rect2(r[0], r[1], r[2], r[3]), Colors.White); continue; }
-			if (art.Skeleton.Length > 0)
+			var matrix = Matrix(art.Transform); var r = art.Rect;
+			var ancestor = ancestors.TryGetValue(art.Parent, out var found) ? found : (Node: (Node)root, Matrix: Transform2D.Identity);
+			var holder = new Node2D { Transform = ancestor.Matrix.AffineInverse() * matrix, Modulate = ColorOf(art.Tint), ZIndex = art.Z, ZAsRelative = art.ZRelative, ShowBehindParent = art.BehindParent };
+			ancestor.Node.AddChild(holder);
+			CanvasItem drawing;
+			var texture = Asset<Texture2D>(art.Texture);
+			if (art.Region is { Length: 4 } region && texture != null) texture = new AtlasTexture { Atlas = texture, Region = Rectangle(region) };
+			if (art.Points != null)
+			{
+				var points = Enumerable.Range(0, art.Points.Length / 2).Select(i => new Vector2(art.Points[i * 2], art.Points[i * 2 + 1])).ToArray();
+				drawing = art.Polygon ? new Polygon2D { Polygon = points, Texture = texture } : new Line2D { Points = points, Width = art.LineWidth, DefaultColor = Colors.White, BeginCapMode = (Line2D.LineCapMode)art.BeginCap, EndCapMode = (Line2D.LineCapMode)art.EndCap, JointMode = (Line2D.LineJointMode)art.Joint, Antialiased = art.Antialiased };
+			}
+			else if (art.Skeleton.Length > 0)
 			{
 				var skeleton = Asset<Resource>(art.Skeleton);
 				if (skeleton == null) continue;
@@ -231,37 +287,41 @@ internal sealed class SpectatorView : IDisposable
 				// children, merchant logic, or gameplay objects are duplicated.
 				var spine = ClassDB.Instantiate("SpineSprite").As<Node2D>();
 				spine.Set("skeleton_data_res", skeleton);
-				holder.AddChild(spine);
+				drawing = spine;
 				if (art.Animation.Length > 0) Callable.From(() => { if (GodotObject.IsInstanceValid(spine)) new MegaSprite(spine).GetAnimationState().SetAnimation(art.Animation); }).CallDeferred();
-				continue;
 			}
-			var texture = Asset<Texture2D>(art.Texture);
-			if (texture == null) continue;
-			if (art.Region is { Length: 4 } region) texture = new AtlasTexture { Atlas = texture, Region = new Rect2(region[0], region[1], region[2], region[3]) };
-			if (art.PatchMargins is { Length: 4 } margins)
+			else if (art.PatchMargins is { Length: 4 } margins)
 			{
-				holder.AddChild(new NinePatchRect { Texture = texture, Position = new Vector2(r[0], r[1]), Size = new Vector2(r[2], r[3]), PatchMarginLeft = margins[0], PatchMarginTop = margins[1], PatchMarginRight = margins[2], PatchMarginBottom = margins[3], MouseFilter = Control.MouseFilterEnum.Ignore });
-				continue;
+				drawing = new NinePatchRect { PatchMarginLeft = margins[0], PatchMarginTop = margins[1], PatchMarginRight = margins[2], PatchMarginBottom = margins[3], Texture = texture, Size = new Vector2(r[2], r[3]) };
 			}
-			holder.AddChild(new TextureRect
+			else if (art.Group) drawing = new Control { Size = new Vector2(r[2], r[3]) };
+			else if (art.Solid) drawing = new ColorRect { Size = new Vector2(r[2], r[3]), Color = Colors.White };
+			else drawing = new TextureRect
 			{
 				// Set expansion before the texture/size: otherwise Godot clamps
 				// the requested native size to the asset's minimum dimensions.
 				ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
-				Texture = texture, Position = new Vector2(r[0], r[1]), Size = new Vector2(r[2], r[3]),
+				Texture = texture, Size = new Vector2(r[2], r[3]),
 				StretchMode = (TextureRect.StretchModeEnum)art.Stretch,
 				FlipH = art.FlipH, FlipV = art.FlipV,
-				Material = Asset<Material>(art.Material), MouseFilter = Control.MouseFilterEnum.Ignore
-			});
+			};
+			drawing.SelfModulate = ColorOf(art.SelfTint); drawing.Material = SnapshotMaterial(art);
+			drawing.ClipChildren = (CanvasItem.ClipChildrenMode)art.ClipChildren;
+			if (drawing is Control control) { control.Position = new Vector2(r[0], r[1]); control.ClipContents = art.ClipContents; control.MouseFilter = Control.MouseFilterEnum.Ignore; }
+			holder.AddChild(drawing);
+			rendered.Add(new ArtNode(art.Key, holder, drawing));
+			if (art.Key.Length > 0) ancestors[art.Key] = (drawing, matrix * new Transform2D(0, new Vector2(r[0], r[1])));
 		}
+		return rendered;
 	}
+	private static Color ColorOf(float[] c) => new(c[0], c[1], c[2], c[3]);
 
-	private void DrawCreatures(List<CreatureSnapshot> creatures)
+	private void DrawCreatureArt(List<CreatureSnapshot> creatures)
 	{
 		foreach (var c in creatures)
 		{
 			var holder = new Node2D { Transform = Matrix(c.Transform) };
-			_actors.AddChild(holder);
+			_actorSprites.AddChild(holder);
 			var packed = Asset<PackedScene>(c.VisualScene);
 			if (packed != null)
 			{
@@ -278,16 +338,23 @@ internal sealed class SpectatorView : IDisposable
 				}
 				catch (Exception ex) { visuals?.QueueFree(); Report(c.VisualScene, ex.Message); }
 			}
+		}
+	}
+	private void DrawCreatures(List<CreatureSnapshot> creatures)
+	{
+		foreach (var c in creatures)
+		{
 			var intents = Rectangle(c.IntentRect);
 			for (int j = 0; j < c.Intents.Count; j++)
 			{
 				var intent = c.Intents[j];
+				if (intent.Art.Count > 0) { DrawArt(_actorState, intent.Art); DrawLabels(_actorState, intent.Labels); continue; }
 				float ix = intents.Position.X + intents.Size.X * 0.5f + (j - c.Intents.Count * 0.5f) * 95;
-				Icon(_actors, intent.Icon, new Rect2(ix, intents.Position.Y, 70, 70));
-				Rich(_actors, intent.Text, new Rect2(ix + 52, intents.Position.Y + 42, 100, 44), 32);
+				Icon(_actorState, intent.Icon, new Rect2(ix, intents.Position.Y, 70, 70));
+				Rich(_actorState, intent.Text, new Rect2(ix + 52, intents.Position.Y + 42, 100, 44), 32);
 			}
-			DrawArt(_actors, c.StateArt);
-			DrawLabels(_actors, c.StateLabels);
+			DrawArt(_actorState, c.StateArt);
+			DrawLabels(_actorState, c.StateLabels);
 		}
 	}
 
@@ -323,19 +390,21 @@ internal sealed class SpectatorView : IDisposable
 		}
 	}
 
-	private void DrawLabels(Node parent, List<TextSnapshot> labels)
+	private void DrawLabels(Node parent, List<TextSnapshot> labels, bool nativeOrder = false)
 	{
 		foreach (var text in labels)
 		{
 			var holder = new Node2D { Transform = Matrix(text.Transform) };
-			parent.AddChild(holder);
+			Node destination = parent; var color = text.Color;
+			if (nativeOrder && PageAnchor(text.ArtKey) is { } anchor) { destination = anchor; holder.Transform = Transform2D.Identity; color = text.LocalColor; _mountedLabels.Add(holder); }
+			destination.AddChild(holder);
 			if (text.Rich)
 			{
-				var rich = new MegaRichTextLabel { Size = new Vector2(text.Size[0], text.Size[1]), BbcodeEnabled = true, ScrollActive = false, AutoSizeEnabled = false, MouseFilter = Control.MouseFilterEnum.Ignore };
+				var rich = new MegaRichTextLabel { Size = new Vector2(text.Size[0], text.Size[1]), HorizontalAlignment = (HorizontalAlignment)text.Alignment, VerticalAlignment = (VerticalAlignment)text.VerticalAlignment, AutowrapMode = (TextServer.AutowrapMode)text.WrapMode, BbcodeEnabled = true, ScrollActive = false, AutoSizeEnabled = false, MouseFilter = Control.MouseFilterEnum.Ignore };
 				var richFont = Asset<Font>(text.Font) ?? ThemeDB.FallbackFont;
 				foreach (var key in new[] { "normal_font", "bold_font", "italics_font" }) rich.AddThemeFontOverride(key, richFont);
 				foreach (var key in ThemeConstants.RichTextLabel.AllFontSizes) rich.AddThemeFontSizeOverride(key, text.FontSize);
-				rich.AddThemeColorOverride("default_color", new Color(text.Color[0], text.Color[1], text.Color[2], text.Color[3]));
+				rich.AddThemeColorOverride("default_color", ColorOf(color));
 				rich.AddThemeColorOverride("font_outline_color", new Color(text.OutlineColor[0], text.OutlineColor[1], text.OutlineColor[2], text.OutlineColor[3]));
 				rich.AddThemeConstantOverride("outline_size", text.OutlineSize);
 				holder.AddChild(rich); rich.SetTextAutoSize(text.Text); continue;
@@ -343,7 +412,7 @@ internal sealed class SpectatorView : IDisposable
 			var label = new Label { Text = text.Text, Size = new Vector2(text.Size[0], text.Size[1]), HorizontalAlignment = (HorizontalAlignment)text.Alignment, VerticalAlignment = (VerticalAlignment)text.VerticalAlignment, MouseFilter = Control.MouseFilterEnum.Ignore };
 			var font = Asset<Font>(text.Font); if (font != null) label.AddThemeFontOverride("font", font);
 			label.AddThemeFontSizeOverride("font_size", text.FontSize);
-			label.AddThemeColorOverride("font_color", new Color(text.Color[0], text.Color[1], text.Color[2], text.Color[3]));
+			label.AddThemeColorOverride("font_color", ColorOf(color));
 			label.AddThemeColorOverride("font_outline_color", new Color(text.OutlineColor[0], text.OutlineColor[1], text.OutlineColor[2], text.OutlineColor[3]));
 			label.AddThemeConstantOverride("outline_size", text.OutlineSize);
 			holder.AddChild(label);
@@ -379,9 +448,12 @@ internal sealed class SpectatorView : IDisposable
 		Visible("%StarIcon", c.StarCost.Length > 0); Visible("%StarLabel", c.StarCost.Length > 0);
 		foreach (var path in new[] { "%Lock", "%Highlight", "%UnplayableEnergyIcon", "%UnplayableStarIcon", "CardContainer/CardSparkles" }) Visible(path, false);
 		var title = node.GetNode<MegaLabel>("%TitleLabel"); title.SetTextAutoSize(c.Title);
-		title.AddThemeColorOverride("font_color", c.Upgraded ? new Color("74e894") : new Color("ffecd2"));
+		title.AddThemeColorOverride("font_color", c.Upgraded ? StsColors.green : StsColors.cream);
+		if (c.Upgraded) title.AddThemeColorOverride("font_outline_color", StsColors.cardTitleOutlineSpecial);
 		node.GetNode<MegaLabel>("%EnergyLabel").SetTextAutoSize(c.Cost);
 		node.GetNode<MegaLabel>("%StarLabel").SetTextAutoSize(c.StarCost);
+		foreach (var value in new[] { ("%EnergyLabel", c.CostColor, c.CostOutline), ("%StarLabel", c.StarColor, c.StarOutline) })
+		{ var label = node.GetNode<Label>(value.Item1); label.AddThemeColorOverride("font_color", ColorOf(value.Item2)); label.AddThemeColorOverride("font_outline_color", ColorOf(value.Item3)); }
 		node.GetNode<MegaLabel>("%TypeLabel").SetTextAutoSize(c.Type);
 		node.GetNode<MegaRichTextLabel>("%DescriptionLabel").SetTextAutoSize(c.Description.StartsWith("[center]") ? c.Description : "[center]" + c.Description + "[/center]");
 		if (node.GetNodeOrNull<NinePatchRect>("%TypePlaque") is { } plaque) plaque.Material = Asset<Material>(c.BannerMaterial);
@@ -394,8 +466,9 @@ internal sealed class SpectatorView : IDisposable
 	private TResource? Asset<TResource>(string path) where TResource : Resource
 	{
 		if (string.IsNullOrEmpty(path)) return null;
+		if (_assets.TryGetValue(path, out var cached)) { if (GodotObject.IsInstanceValid(cached)) return cached as TResource; _assets.Remove(path); }
 		if (!path.StartsWith("res://", StringComparison.Ordinal) || !ResourceLoader.Exists(path)) { Report(path, "resource not found"); return null; }
-		try { return ResourceLoader.Load<TResource>(path); }
+		try { var resource = ResourceLoader.Load<TResource>(path); if (resource != null) _assets[path] = resource; return resource; }
 		catch (Exception ex) { Report(path, ex.Message); return null; }
 	}
 	private void Report(string path, string error) { if (_reportedAssets.Add(path)) Log.Warn("[RMP:LiveSharing] Visual fallback: " + path + " — " + error); }

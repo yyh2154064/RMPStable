@@ -9,13 +9,21 @@ using MegaCrit.Sts2.Core.Entities.Creatures;
 using MegaCrit.Sts2.Core.Entities.CardRewardAlternatives;
 using MegaCrit.Sts2.Core.Entities.Merchant;
 using MegaCrit.Sts2.Core.Models;
+using MegaCrit.Sts2.Core.Helpers;
+using MegaCrit.Sts2.Core.HoverTips;
+using MegaCrit.Sts2.Core.Localization;
 using MegaCrit.Sts2.Core.MonsterMoves.Intents;
 using MegaCrit.Sts2.Core.Nodes;
 using MegaCrit.Sts2.Core.Nodes.Cards;
 using MegaCrit.Sts2.Core.Nodes.CommonUi;
 using MegaCrit.Sts2.Core.Nodes.Combat;
+using MegaCrit.Sts2.Core.Nodes.Events;
+using MegaCrit.Sts2.Core.Commands;
 using MegaCrit.Sts2.Core.Nodes.Rooms;
 using MegaCrit.Sts2.Core.Nodes.Screens.CardSelection;
+using MegaCrit.Sts2.Core.Nodes.Screens;
+using MegaCrit.Sts2.Core.Nodes.Screens.Capstones;
+using MegaCrit.Sts2.Core.Nodes.Screens.Map;
 using MegaCrit.Sts2.Core.Nodes.Screens.Overlays;
 using MegaCrit.Sts2.Core.Nodes.Screens.Shops;
 using MegaCrit.Sts2.Core.Runs;
@@ -32,6 +40,8 @@ internal sealed class LocalSpectatorSource
 	private static readonly FieldInfo? NativeFontSize = typeof(MegaLabel).GetField("_lastSetSize", BindingFlags.Instance | BindingFlags.NonPublic);
 	private string _backgroundRoom = "";
 	private List<ArtSnapshot> _background = new();
+	private readonly Dictionary<CardModel, (string Key, CardSnapshot Preview, CardSnapshot? Base)> _upgrades = new();
+	private static readonly Dictionary<string, string[]> UniformNames = new();
 
 	internal SpectatorSnapshot Capture(RunState run)
 	{
@@ -39,9 +49,20 @@ internal sealed class LocalSpectatorSource
 		var combat = NCombatRoom.Instance;
 		var merchant = NMerchantRoom.Instance;
 		var reward = NOverlayStack.Instance?.Peek() as NCardRewardSelectionScreen;
+		var overlay = NOverlayStack.Instance?.Peek() as Control;
+		if (overlay?.IsVisibleInTree() != true) { overlay = null; reward = null; }
+		var mapScreen = NMapScreen.Instance;
+		var capstone = NCapstoneContainer.Instance?.CurrentCapstoneScreen as Control;
+		var eventRoom = NEventRoom.Instance;
 		var state = player.PlayerCombatState;
 		string room = NRun.Instance.GetInstanceId() + ":" + (combat?.GetInstanceId() ?? merchant?.GetInstanceId() ?? 0) + ":" + run.CurrentRoom?.GetType().Name + ":" + merchant?.Inventory?.IsOpen;
 		string page = reward != null ? "reward" : merchant != null ? "shop" : combat != null ? "combat" : "run";
+		string underlayPage = merchant != null ? "shop" : combat != null ? "combat" : "";
+		Control? pageRoot = overlay ?? (mapScreen?.IsOpen == true ? mapScreen : eventRoom);
+		if (eventRoom?.IsVisibleInTree() == true) page = "event";
+		if (mapScreen?.IsOpen == true) page = "map";
+		if (overlay != null) page = reward != null ? "reward" : overlay is NRewardsScreen ? "loot" : "selection";
+		if (capstone != null) { pageRoot = capstone; page = capstone is NDeckViewScreen ? "deck" : "selection"; }
 		var viewSize = NRun.Instance.GetViewportRect().Size;
 		room += ":" + viewSize;
 		if (room != _backgroundRoom || _background.Count == 0)
@@ -51,8 +72,8 @@ internal sealed class LocalSpectatorSource
 		}
 		var snap = new SpectatorSnapshot
 		{
-			Session = NRun.Instance.GetInstanceId().ToString(), Room = room, Page = page,
-			Width = viewSize.X, Height = viewSize.Y, Background = _background,
+			Session = NRun.Instance.GetInstanceId().ToString(), Room = room, Page = page, UnderlayPage = underlayPage,
+			Width = viewSize.X, Height = viewSize.Y, Background = _background, Culture = LocManager.Instance.CultureInfo.Name,
 			Character = player.Character.Title.GetFormattedText(),
 			Summary = $"{T("生命", "HP")} {player.Creature.CurrentHp}/{player.Creature.MaxHp}   {T("格挡", "Block")} {player.Creature.Block}   {T("金币", "Gold")} {player.Gold}   {T("牌组", "Deck")} {player.Deck.Cards.Count}",
 			Detail = combat != null && state != null
@@ -62,7 +83,8 @@ internal sealed class LocalSpectatorSource
 		var top = Descendants<NTopBar>(NRun.Instance).FirstOrDefault();
 		var hudRoots = new List<Node?> { top, NRun.Instance.GlobalUi.RelicInventory };
 		if (top != null) snap.DeckButtonRect = GlobalRect(top.Deck);
-		if (combat != null) hudRoots.AddRange(new Node?[] { combat.Ui.EnergyCounterContainer, combat.Ui.DrawPile, combat.Ui.DiscardPile, combat.Ui.ExhaustPile, combat.Ui.EndTurnButton });
+		if (combat != null) foreach (var ui in new Node[] { combat.Ui.EnergyCounterContainer, combat.Ui.DrawPile, combat.Ui.DiscardPile, combat.Ui.ExhaustPile, combat.Ui.EndTurnButton })
+		{ snap.CombatHudArt.AddRange(CaptureBackground(ui, true)); snap.CombatHudLabels.AddRange(CaptureLabels(ui)); }
 		foreach (var hud in hudRoots) { snap.HudArt.AddRange(CaptureBackground(hud, includeButtons: true)); snap.HudLabels.AddRange(CaptureLabels(hud)); }
 		// Only traverse the actual run, never the separate spectator window.
 		var visibleCards = Descendants<NCard>(NRun.Instance).Where(c => c.Model != null && c.IsVisibleInTree())
@@ -103,7 +125,22 @@ internal sealed class LocalSpectatorSource
 						// Use a stable animation frame so the view is not rebuilt at animation FPS.
 						var model = DisplayedIntent?.GetValue(intent) as AbstractIntent;
 						string texture = Path(model?.GetTexture(new[] { player.Creature }, creature) ?? sprite?.Texture);
-						entry.Intents.Add(new ItemSnapshot { Icon = texture, Text = label?.Text ?? "" });
+						var nativeArt = CaptureBackground(holder);
+						if (sprite != null) foreach (var art in nativeArt.Where(a => a.Key == sprite.GetInstanceId().ToString())) art.Texture = texture;
+						var labels = CaptureLabels(holder);
+						// Intent labels are intentionally very short native rectangles.
+						// Leave room for the font's descent and outline on a separate
+						// viewport; preserve its original position and wrapping mode.
+						foreach (var value in labels) value.Size[1] = Math.Max(value.Size[1], value.FontSize * 2 + value.OutlineSize);
+						if (label != null) foreach (var value in labels.Where(l => l.Text == label.Text))
+						{
+							float extra = Math.Max(0, label.GetContentWidth() + value.OutlineSize - value.Size[0]);
+							value.Size[0] += extra;
+							// Preserve the native text anchor when its rectangle grows.
+							if (value.Alignment == (int)HorizontalAlignment.Center) value.Transform[4] -= extra / 2;
+							else if (value.Alignment == (int)HorizontalAlignment.Right) value.Transform[4] -= extra;
+						}
+						entry.Intents.Add(new ItemSnapshot { Icon = texture, Text = label?.Text ?? "", Art = nativeArt, Labels = labels });
 					}
 				}
 				snap.Creatures.Add(entry);
@@ -154,18 +191,55 @@ internal sealed class LocalSpectatorSource
 			if (RewardAlternatives?.GetValue(reward) is IReadOnlyList<CardRewardAlternative> alternatives)
 				snap.Choices = alternatives.Select(a => a.Title.GetFormattedText()).ToList();
 		}
+		if (pageRoot != null && page is not "combat" and not "shop" and not "run" and not "reward")
+		{
+			snap.UnderlayCards = snap.Cards; snap.Cards = new(); snap.Items.Clear();
+			if (pageRoot == overlay) snap.PageArt.AddRange(CaptureBackground(NOverlayStack.Instance?.GetNodeOrNull<Node>("OverlayBackstop")));
+			if (eventRoom?.IsVisibleInTree() == true && pageRoot != eventRoom)
+			{ snap.PageArt.AddRange(CaptureBackground(eventRoom, true, includeCards: true)); snap.PageLabels.AddRange(CaptureLabels(eventRoom)); }
+			var mapBounds = new Rect2(Vector2.Zero, viewSize).Grow(128);
+			if (page == "deck" && mapScreen?.IsOpen == true)
+			{ snap.PageArt.AddRange(CaptureBackground(mapScreen, true, mapBounds)); snap.PageLabels.AddRange(CaptureLabels(mapScreen)); snap.Drawings = CaptureDrawings(mapScreen.Drawings); }
+			if (page != "deck") { snap.PageArt.AddRange(CaptureBackground(pageRoot, true, page == "map" ? mapBounds : null, true)); snap.PageLabels.AddRange(CaptureLabels(pageRoot)); }
+			foreach (var card in Descendants<NCard>(pageRoot).Where(c => c.Model != null && c.IsVisibleInTree())) snap.Cards.Add(CaptureCard(card.Model!, PileType.None, card));
+			if (page == "map") snap.Drawings = CaptureDrawings(mapScreen!.Drawings);
+		}
+		if (page == "event")
+		{
+			foreach (Node previewRoot in new Node[] { NRun.Instance.GlobalUi.CardPreviewContainer, NRun.Instance.GlobalUi.EventCardPreviewContainer, NRun.Instance.GlobalUi.GridCardPreviewContainer, NRun.Instance.GlobalUi.MessyCardPreviewContainer })
+			{
+				snap.PageArt.AddRange(CaptureBackground(previewRoot, includeCards: true)); snap.PageLabels.AddRange(CaptureLabels(previewRoot));
+				foreach (var card in Descendants<NCard>(previewRoot).Where(c => c.Model != null && c.IsVisibleInTree())) snap.Cards.Add(CaptureCard(card.Model!, PileType.None, card));
+			}
+		}
+		if (page == "event" && eventRoom?.IsVisibleInTree() == true) foreach (var option in Descendants<NEventOptionButton>(eventRoom).Where(n => n.IsVisibleInTree()))
+			snap.Hovers.Add(new HoverSnapshot { Rect = GlobalRect(option), Tips = CaptureTips(option.Option.HoverTips) });
+		// Evict detached previews for cards that have left the player's run.
+		var present = new HashSet<CardModel>(visibleCards.Keys.Concat(player.Deck.Cards));
+		foreach (var old in _upgrades.Keys.Where(c => !present.Contains(c)).ToList()) _upgrades.Remove(old);
 		return snap;
 	}
+	private List<TipSnapshot> CaptureTips(IEnumerable<IHoverTip> tips)
+	{
+		var result = new List<TipSnapshot>();
+		foreach (var tip in IHoverTip.RemoveDupes(tips))
+		{
+			if (tip is HoverTip text) result.Add(new TipSnapshot { Title = text.Title ?? "", Description = text.Description, Icon = Path(text.Icon), Debuff = text.IsDebuff });
+			else if (tip is CardHoverTip card) result.Add(new TipSnapshot { Card = CaptureCard(card.Card, PileType.None, null, tips: false) });
+		}
+		return result;
+	}
 
-	private static CardSnapshot CaptureCard(CardModel c, PileType pile, NCard? visual)
+	private CardSnapshot CaptureCard(CardModel c, PileType pile, NCard? visual, bool preview = false, bool tips = true)
 	{
 		bool ancient = c.Rarity == CardRarity.Ancient;
 		int cost = c.EnergyCost.GetWithModifiers(pile == PileType.Hand ? CostModifiers.All : CostModifiers.Local);
-		return new CardSnapshot
+		var result = new CardSnapshot
 		{
+			ArtKey = visual?.GetInstanceId().ToString() ?? "",
 			Transform = visual == null ? null : Transform(visual.Body.GetGlobalTransform()),
 			Id = c.Id.ToString(), Title = c.Title, Type = c.Type.ToLocString().GetFormattedText(),
-			Description = visual?.GetNodeOrNull<MegaRichTextLabel>("%DescriptionLabel")?.Text ?? c.GetDescriptionForPile(pile),
+			Description = preview ? c.GetDescriptionForUpgradePreview() : visual?.GetNodeOrNull<MegaRichTextLabel>("%DescriptionLabel")?.Text ?? c.GetDescriptionForPile(pile),
 			Cost = c.EnergyCost.CostsX ? "X" : cost < 0 ? "" : cost.ToString(),
 			StarCost = c.HasStarCostX ? "X" : c.CurrentStarCost < 0 ? "" : (pile == PileType.Hand ? c.GetStarCostWithModifiers() : c.CurrentStarCost).ToString(),
 			Upgraded = c.IsUpgraded, Ancient = ancient, Portrait = Path(c.Portrait), Frame = Path(c.Frame),
@@ -173,25 +247,66 @@ internal sealed class LocalSpectatorSource
 			FrameMaterial = Path(c.FrameMaterial), BannerMaterial = Path(c.BannerMaterial),
 			AncientBorder = ancient ? Path(c.AncientBorder) : "", AncientText = ancient ? Path(c.AncientTextBg) : "",
 			EnchantmentIcon = Path(c.Enchantment?.Icon),
-			EnchantmentAmount = c.Enchantment?.ShowAmount == true ? c.Enchantment.DisplayAmount.ToString() : ""
+			EnchantmentAmount = c.Enchantment?.ShowAmount == true ? c.Enchantment.DisplayAmount.ToString() : "",
+			SortCost = c.EnergyCost.GetResolved(), SortType = (int)c.Type,
+			CostColor = ColorValues(visual?.GetNodeOrNull<Label>("%EnergyLabel")?.GetThemeColor("font_color") ?? (preview && c.EnergyCost.WasJustUpgraded ? StsColors.green : StsColors.cream)),
+			CostOutline = ColorValues(visual?.GetNodeOrNull<Label>("%EnergyLabel")?.GetThemeColor("font_outline_color") ?? c.Pool.EnergyOutlineColor),
+			StarColor = ColorValues(visual?.GetNodeOrNull<Label>("%StarLabel")?.GetThemeColor("font_color") ?? StsColors.cream),
+			StarOutline = ColorValues(visual?.GetNodeOrNull<Label>("%StarLabel")?.GetThemeColor("font_outline_color") ?? StsColors.defaultStarCostOutline)
 		};
+		if (tips) result.Tips = CaptureTips(c.HoverTips);
+		if (!preview && tips && (c.IsUpgradable || c.IsUpgraded))
+		{
+			string key = c.CurrentUpgradeLevel + ":" + c.EnergyCost.GetResolved() + ":" + result.Description + ":" + c.Enchantment?.Amount;
+			if (!_upgrades.TryGetValue(c, out var cached) || cached.Key != key)
+			{
+				// Same detached preview procedure as NInspectCardScreen. MutableClone
+				// clears the live card's event delegates; never upgrade the live model.
+				var copy = (CardModel)c.MutableClone(); copy.UpgradePreviewType = CardUpgradePreviewType.Deck;
+				if (!copy.IsUpgraded) copy.UpgradeInternal();
+				var upgraded = CaptureCard(copy, PileType.None, null, preview: true);
+				CardSnapshot? baseCard = null;
+				if (c.IsUpgraded) { var normal = (CardModel)c.MutableClone(); CardCmd.Downgrade(normal); baseCard = CaptureCard(normal, PileType.None, null, preview: true); baseCard.Description = normal.GetDescriptionForPile(PileType.None); }
+				cached = (key, upgraded, baseCard); _upgrades[c] = cached;
+			}
+			result.Upgrade = cached.Preview;
+			result.Base = cached.Base;
+		}
+		return result;
 	}
 
-	internal static List<ArtSnapshot> CaptureBackground(Node? root, bool includeButtons = false)
+	private static float[] ColorValues(Color c) => new[] { c.R, c.G, c.B, c.A };
+	private static List<DrawingSnapshot> CaptureDrawings(NMapDrawings drawings)
+	{
+		var result = new List<DrawingSnapshot>();
+		foreach (var surface in Descendants<TextureRect>(drawings).Where(t => t.Texture is ViewportTexture && t.IsVisibleInTree()))
+		{
+			var viewport = surface.GetParent().GetChildren().OfType<SubViewport>().FirstOrDefault();
+			if (viewport == null) continue;
+			var lines = new List<ArtSnapshot>();
+			foreach (Node child in viewport.GetChildren()) lines.AddRange(CaptureBackground(child));
+			result.Add(new DrawingSnapshot { Transform = Transform(surface.GetGlobalTransform()), Size = new[] { surface.Size.X, surface.Size.Y }, ViewportSize = new[] { viewport.Size.X, viewport.Size.Y }, Lines = lines });
+		}
+		return result;
+	}
+
+	internal static List<ArtSnapshot> CaptureBackground(Node? root, bool includeButtons = false, Rect2? visibleRegion = null, bool includeCards = false)
 	{
 		var result = new List<ArtSnapshot>();
 		if (root == null) return result;
-		void Visit(Node node, Color inherited, int z)
+		void Visit(Node node, string parentKey)
 		{
-			if (node is NMerchantSlot && node != root || node is NCreature || node is NCard || !includeButtons && node.GetType().Name.Contains("Button") && node.GetType().Name != "NMerchantButton" || node.Name == "MerchantHandContainer" || node.Name == "Dialogue") return;
+			if (node is SubViewport || node is NMerchantSlot && node != root || node is NCreature || node is NCard && !includeCards || !includeButtons && node.GetType().Name.Contains("Button") && node.GetType().Name != "NMerchantButton" || node.Name == "MerchantHandContainer") return;
 			if (node is CanvasItem item)
 			{
 				if (!item.Visible) return;
-				inherited *= item.Modulate;
-				z = item.ZAsRelative ? z + item.ZIndex : item.ZIndex;
+				// Map content spans several screen heights. Omit room points and
+				// texture leaves outside the current viewport, with a glow margin.
+				// Camera scroll captures newly visible content on the next snapshot.
+				if (visibleRegion is { } viewport && item is Control boundsToCull && (item is NMapPoint || item.GetClass() == "TextureRect") && boundsToCull.Size.X > 0 && boundsToCull.Size.Y > 0 && !viewport.Intersects(boundsToCull.GetGlobalRect())) return;
 				Texture2D? texture = null;
-				Rect2 rect = default;
-				var art = new ArtSnapshot();
+				Rect2 rect = item is Control bounds ? new Rect2(Vector2.Zero, bounds.Size) : default;
+				var art = new ArtSnapshot { Key = item.GetInstanceId().ToString(), Parent = parentKey, Z = item.ZIndex, ZRelative = item.ZAsRelative, BehindParent = item.ShowBehindParent, ClipChildren = (int)item.ClipChildren, ClipContents = item is Control clipping && clipping.ClipContents };
 				if (item.GetClass() == "SpineSprite")
 				{
 					art.Skeleton = Path(item.Get("skeleton_data_res").As<Resource>());
@@ -223,23 +338,72 @@ internal sealed class LocalSpectatorSource
 				else if (item is Control rectangle && item.GetClass() == "ColorRect") { art.Solid = true; rect = new Rect2(Vector2.Zero, rectangle.Size); }
 				else if (item is NinePatchRect patch) { texture = patch.Texture; rect = new Rect2(Vector2.Zero, patch.Size); art.PatchMargins = new[] { patch.PatchMarginLeft, patch.PatchMarginTop, patch.PatchMarginRight, patch.PatchMarginBottom }; }
 				else if (item is ColorRect solid) { art.Solid = true; rect = new Rect2(Vector2.Zero, solid.Size); }
-				if ((texture != null && !string.IsNullOrEmpty(texture.ResourcePath) || art.Skeleton.Length > 0 || art.Solid) && result.Count < 512)
+				else if (item is Line2D line)
 				{
+					art.Points = line.Points.SelectMany(p => new[] { p.X, p.Y }).ToArray(); art.LineWidth = line.Width;
+					art.BeginCap = (int)line.BeginCapMode; art.EndCap = (int)line.EndCapMode; art.Joint = (int)line.JointMode; art.Antialiased = line.Antialiased;
+				}
+				else if (item is Polygon2D polygon) { art.Polygon = true; art.Points = polygon.Polygon.SelectMany(p => new[] { p.X, p.Y }).ToArray(); texture = polygon.Texture; }
+				if (result.Count < 8192)
+				{
+					// AtlasManager creates pathless AtlasTexture instances for map
+					// icons and other packed UI. Send the underlying atlas + region.
+					if (texture is AtlasTexture atlas && texture.ResourcePath.Length == 0) { art.Region = Rect(atlas.Region); texture = atlas.Atlas; }
 					var transform = item.GetGlobalTransform();
-					var color = inherited * item.SelfModulate;
+					var color = item.SelfModulate;
+					var modulation = item.Modulate;
+					if (parentKey.Length == 0) for (Node? p = item.GetParent(); p != null; p = p.GetParent()) if (p is CanvasItem ancestor) modulation *= ancestor.Modulate;
 					if (item is ColorRect solid) color *= solid.Color;
 					else if (art.Solid) color *= item.Get("color").AsColor();
+					else if (item is Line2D line) color *= line.DefaultColor;
+					else if (item is Polygon2D polygon) color *= polygon.Color;
 					art.Texture = Path(texture); art.Material = Path(item.Material);
-					art.Rect = Rect(rect); art.Z = z;
+					if (item.Material is ShaderMaterial shader) { art.Shader = Path(shader.Shader); art.ShaderValues = CaptureShaderValues(shader); }
+					art.Group = art.Texture.Length == 0 && art.Skeleton.Length == 0 && !art.Solid && art.Points == null;
+					art.Rect = Rect(rect);
 					art.Transform = new[] { transform.X.X, transform.X.Y, transform.Y.X, transform.Y.Y, transform.Origin.X, transform.Origin.Y };
-					art.Tint = new[] { color.R, color.G, color.B, color.A };
+					art.Tint = ColorValues(modulation); art.SelfTint = ColorValues(color);
 					result.Add(art);
+					parentKey = art.Key;
 				}
 			}
-			foreach (Node child in node.GetChildren()) Visit(child, inherited, z);
+			// A card placeholder preserves the native mask/order. Its visual
+			// children are rebuilt from DTOs, never copied as game models.
+			if (node is NCard) return;
+			foreach (Node child in node.GetChildren()) Visit(child, parentKey);
 		}
-		Visit(root, Colors.White, 0);
-		return result.OrderBy(a => a.Z).ToList();
+		Visit(root, "");
+		return result;
+	}
+	private static List<ShaderValueSnapshot> CaptureShaderValues(ShaderMaterial material)
+	{
+		var result = new List<ShaderValueSnapshot>();
+		if (material.Shader == null) return result;
+		string shaderPath = Path(material.Shader);
+		if (!UniformNames.TryGetValue(shaderPath, out var names))
+		{
+			names = material.Shader.GetShaderUniformList().Select(u => u.AsGodotDictionary()["name"].AsString()).ToArray();
+			if (shaderPath.Length > 0) UniformNames[shaderPath] = names;
+		}
+		foreach (string name in names)
+		{
+			var value = material.GetShaderParameter(name);
+			var entry = new ShaderValueSnapshot { Name = name, Kind = value.VariantType.ToString() };
+			switch (value.VariantType)
+			{
+				case Variant.Type.Bool: entry.Values = new[] { value.AsBool() ? 1f : 0f }; break;
+				case Variant.Type.Int: entry.Values = new[] { (float)value.AsInt32() }; break;
+				case Variant.Type.Float: entry.Values = new[] { value.AsSingle() }; break;
+				case Variant.Type.Color: entry.Values = ColorValues(value.AsColor()); break;
+				case Variant.Type.Vector2: var v2 = value.AsVector2(); entry.Values = new[] { v2.X, v2.Y }; break;
+				case Variant.Type.Vector3: var v3 = value.AsVector3(); entry.Values = new[] { v3.X, v3.Y, v3.Z }; break;
+				case Variant.Type.Vector4: var v4 = value.AsVector4(); entry.Values = new[] { v4.X, v4.Y, v4.Z, v4.W }; break;
+				case Variant.Type.Object when value.AsGodotObject() is Texture2D tex: entry.Texture = Path(tex); if (entry.Texture.Length == 0) continue; break;
+				default: continue;
+			}
+			result.Add(entry);
+		}
+		return result;
 	}
 
 	// Copy the already formatted native labels, including the game's hp/block
@@ -259,6 +423,7 @@ internal sealed class LocalSpectatorSource
 			int fontSize = settings?.FontSize ?? label.GetThemeFontSize("font_size", "Label");
 			if (settings == null && label is MegaLabel && NativeFontSize?.GetValue(label) is int actual && actual > 0) fontSize = actual;
 			result.Add(new TextSnapshot { Text = label.Text, Font = Path(settings?.Font ?? label.GetThemeFont("font", "Label")), FontSize = fontSize, OutlineSize = settings?.OutlineSize ?? label.GetThemeConstant("outline_size", "Label"), Transform = Transform(label.GetGlobalTransform()), Size = new[] { label.Size.X, label.Size.Y }, Color = new[] { tint.R, tint.G, tint.B, tint.A }, OutlineColor = new[] { outline.R, outline.G, outline.B, outline.A }, Alignment = (int)label.HorizontalAlignment, VerticalAlignment = (int)label.VerticalAlignment });
+			result[^1].ArtKey = label.GetInstanceId().ToString(); result[^1].LocalColor = ColorValues((settings?.FontColor ?? label.GetThemeColor("font_color")) * label.SelfModulate);
 		}
 		foreach (var label in Descendants<RichTextLabel>(root).Where(l => l.IsVisibleInTree() && !InsideCard(l)))
 		{
@@ -266,7 +431,8 @@ internal sealed class LocalSpectatorSource
 			for (Node? parent = label; parent != null; parent = parent.GetParent()) if (parent is CanvasItem item) color *= item.Modulate;
 			if (color.A < 0.01f) continue;
 			var outline = label.GetThemeColor("font_outline_color");
-			result.Add(new TextSnapshot { Rich = true, Text = label.Text, Font = Path(label.GetThemeFont("normal_font")), FontSize = label.GetThemeFontSize("normal_font_size"), OutlineSize = label.GetThemeConstant("outline_size"), Transform = Transform(label.GetGlobalTransform()), Size = new[] { label.Size.X, label.Size.Y }, Color = new[] { color.R, color.G, color.B, color.A }, OutlineColor = new[] { outline.R, outline.G, outline.B, outline.A } });
+			result.Add(new TextSnapshot { Rich = true, Text = label.Text.Replace("[ancient_banner]", "").Replace("[/ancient_banner]", ""), Font = Path(label.GetThemeFont("normal_font")), FontSize = label.GetThemeFontSize("normal_font_size"), OutlineSize = label.GetThemeConstant("outline_size"), Transform = Transform(label.GetGlobalTransform()), Size = new[] { label.Size.X, label.Size.Y }, Color = new[] { color.R, color.G, color.B, color.A }, OutlineColor = new[] { outline.R, outline.G, outline.B, outline.A }, Alignment = (int)label.HorizontalAlignment, VerticalAlignment = (int)label.VerticalAlignment, WrapMode = (int)label.AutowrapMode });
+			result[^1].ArtKey = label.GetInstanceId().ToString(); result[^1].LocalColor = ColorValues(label.GetThemeColor("default_color") * label.SelfModulate);
 		}
 		return result;
 	}

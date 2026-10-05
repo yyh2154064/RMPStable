@@ -31,6 +31,14 @@ internal sealed class SpectatorSnapshot
 	public List<ItemSnapshot> UnderlayItems { get; set; } = new();
 	public List<ArtSnapshot> RewardArt { get; set; } = new();
 	public List<TextSnapshot> RewardLabels { get; set; } = new();
+	public List<ArtSnapshot> PageArt { get; set; } = new();
+	public List<TextSnapshot> PageLabels { get; set; } = new();
+	public List<DrawingSnapshot> Drawings { get; set; } = new();
+	public List<HoverSnapshot> Hovers { get; set; } = new();
+	public string UnderlayPage { get; set; } = "";
+	public List<ArtSnapshot> CombatHudArt { get; set; } = new();
+	public List<TextSnapshot> CombatHudLabels { get; set; } = new();
+	public string Culture { get; set; } = "en-US";
 
 	internal static SpectatorSnapshot RoundTrip(SpectatorSnapshot source) =>
 		JsonSerializer.Deserialize<SpectatorSnapshot>(JsonSerializer.Serialize(source))
@@ -39,6 +47,7 @@ internal sealed class SpectatorSnapshot
 
 internal sealed class CardSnapshot
 {
+	public string ArtKey { get; set; } = "";
 	public List<ArtSnapshot> Art { get; set; } = new();
 	public List<TextSnapshot> Labels { get; set; } = new();
 	public float[]? Transform { get; set; }
@@ -63,6 +72,15 @@ internal sealed class CardSnapshot
 	public string AncientText { get; set; } = "";
 	public string EnchantmentIcon { get; set; } = "";
 	public string EnchantmentAmount { get; set; } = "";
+	public int SortCost { get; set; }
+	public int SortType { get; set; }
+	public float[] CostColor { get; set; } = { 1, 0.965f, 0.886f, 1 };
+	public float[] CostOutline { get; set; } = { 0, 0, 0, 1 };
+	public float[] StarColor { get; set; } = { 1, 0.965f, 0.886f, 1 };
+	public float[] StarOutline { get; set; } = { 0, 0, 0, 1 };
+	public List<TipSnapshot> Tips { get; set; } = new();
+	public CardSnapshot? Upgrade { get; set; }
+	public CardSnapshot? Base { get; set; }
 }
 
 internal sealed class ItemSnapshot
@@ -97,6 +115,8 @@ internal sealed class CreatureSnapshot
 
 internal sealed class TextSnapshot
 {
+	public string ArtKey { get; set; } = "";
+	public float[] LocalColor { get; set; } = { 1, 1, 1, 1 };
 	public bool Rich { get; set; }
 	public string Text { get; set; } = "";
 	public string Font { get; set; } = "";
@@ -108,24 +128,73 @@ internal sealed class TextSnapshot
 	public int OutlineSize { get; set; }
 	public int Alignment { get; set; }
 	public int VerticalAlignment { get; set; }
+	public int WrapMode { get; set; }
 }
 
 // Static decorative texture layers, not framebuffer captures. Transforms and
 // resource paths let another client draw the same background from its own assets.
 internal sealed class ArtSnapshot
 {
+	public string Key { get; set; } = "";
+	public string Parent { get; set; } = "";
+	public bool Group { get; set; }
+	public int ClipChildren { get; set; }
+	public bool ClipContents { get; set; }
+	public bool ZRelative { get; set; } = true;
+	public bool BehindParent { get; set; }
+	public float[]? Points { get; set; }
+	public bool Polygon { get; set; }
+	public float LineWidth { get; set; }
+	public int BeginCap { get; set; }
+	public int EndCap { get; set; }
+	public int Joint { get; set; }
+	public bool Antialiased { get; set; }
 	public bool Solid { get; set; }
 	public string Skeleton { get; set; } = "";
 	public string Animation { get; set; } = "";
 	public string Texture { get; set; } = "";
 	public string Material { get; set; } = "";
+	public string Shader { get; set; } = "";
+	public List<ShaderValueSnapshot> ShaderValues { get; set; } = new();
 	public float[] Transform { get; set; } = { 1, 0, 0, 1, 0, 0 };
 	public float[] Rect { get; set; } = { 0, 0, 0, 0 };
 	public float[] Tint { get; set; } = { 1, 1, 1, 1 };
+	public float[] SelfTint { get; set; } = { 1, 1, 1, 1 };
 	public int Z { get; set; }
 	public bool FlipH { get; set; }
 	public bool FlipV { get; set; }
 	public int Stretch { get; set; }
 	public float[]? Region { get; set; }
 	public int[]? PatchMargins { get; set; }
+}
+
+internal sealed class TipSnapshot
+{
+	public string Title { get; set; } = "";
+	public string Description { get; set; } = "";
+	public string Icon { get; set; } = "";
+	public bool Debuff { get; set; }
+	public CardSnapshot? Card { get; set; }
+}
+
+internal sealed class DrawingSnapshot
+{
+	public float[] Transform { get; set; } = { 1, 0, 0, 1, 0, 0 };
+	public float[] Size { get; set; } = { 1, 1 };
+	public int[] ViewportSize { get; set; } = { 1, 1 };
+	public List<ArtSnapshot> Lines { get; set; } = new();
+}
+
+internal sealed class ShaderValueSnapshot
+{
+	public string Name { get; set; } = "";
+	public string Kind { get; set; } = "";
+	public float[] Values { get; set; } = Array.Empty<float>();
+	public string Texture { get; set; } = "";
+}
+
+internal sealed class HoverSnapshot
+{
+	public float[] Rect { get; set; } = { 0, 0, 1, 1 };
+	public List<TipSnapshot> Tips { get; set; } = new();
 }
