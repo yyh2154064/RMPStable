@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text.Json;
 using Godot;
 using MegaCrit.Sts2.Core.Bindings.MegaSpine;
 using MegaCrit.Sts2.Core.Logging;
@@ -49,11 +48,15 @@ internal sealed partial class SpectatorView : IDisposable
 	private bool _showDeck;
 	private string _roomKey = "", _actorKey = "", _cardKey = "", _itemKey = "", _offerKey = "", _hudKey = "";
 	private string _screenKey = "", _sourcePage = "";
-	private string _spriteKey = "";
+	private string _revisionSession = "";
+	private readonly List<(Node2D Holder, Node2D Hitbox, CardSnapshot Card)> _handNodes = new();
+	private readonly List<(Node2D Holder, Node2D Hitbox, CardSnapshot Card)> _underlayHandNodes = new();
 	private readonly HashSet<string> _reportedAssets = new();
 
-	internal SpectatorView(Action close)
+	internal bool WantsDeck => _showDeck || _snapshot?.Page == "deck";
+	internal SpectatorView(Action close, Action? requestDeck = null, Action<string>? selectSource = null)
 	{
+		_selectSource = selectSource;
 		(_overlay, _panel, _viewport) = CreatePanel(close);
 		try
 		{
@@ -85,7 +88,7 @@ internal sealed partial class SpectatorView : IDisposable
 		_inventory = Area(_canvas, new Vector2(24, 83), new Vector2(1840, 58));
 		_deck = new Button { Text = T("查看牌组", "View deck"), Position = new Vector2(1665, 12), Size = new Vector2(230, 45), FocusMode = Control.FocusModeEnum.None };
 		_canvas.AddChild(_deck);
-		_deck.Pressed += () => { _showDeck = !_showDeck; _cardKey = ""; if (_snapshot != null) Update(_snapshot); };
+		_deck.Pressed += () => { _showDeck = !_showDeck; _cardKey = ""; if (_showDeck) requestDeck?.Invoke(); if (_snapshot != null) Update(_snapshot); };
 		_status = Text(_canvas, "", new Rect2(24, 1055, 1840, 25), 18);
 		_preview = Area(_canvas, Vector2.Zero, new Vector2(1920, 1080));
 		_inspect = Area(_canvas, Vector2.Zero, new Vector2(1920, 1080));
@@ -96,6 +99,10 @@ internal sealed partial class SpectatorView : IDisposable
 	internal void Update(SpectatorSnapshot snapshot)
 	{
 		if (snapshot.Schema != 1) throw new InvalidOperationException("Unsupported spectator snapshot version.");
+		string revisionSession = snapshot.Session + ":" + snapshot.SourceId;
+		if (_revisionSession != revisionSession)
+		{ _revisionSession = revisionSession; CloseInspect(); _showDeck = false; _hudKey = _roomKey = _actorKey = _itemKey = _offerKey = _cardKey = _screenKey = ""; }
+		UpdateSources(snapshot.Sources, snapshot.SourceId);
 		if (_sourcePage != snapshot.Page) { CloseInspect(); _showDeck = false; _cardKey = ""; _sourcePage = snapshot.Page; }
 		_snapshot = snapshot;
 		_deck.Disabled = false;
@@ -114,47 +121,47 @@ internal sealed partial class SpectatorView : IDisposable
 		_deck.Text = nativeHud ? "" : (_showDeck ? T("返回当前页面", "Current page") : T("查看牌组", "View deck"));
 		_deck.TooltipText = _showDeck ? T("返回当前页面", "Current page") : T("查看牌组（只读）", "View deck (read only)");
 		if (nativeHud && snapshot.DeckButtonRect != null) { var rect = Rectangle(snapshot.DeckButtonRect); _deck.Position = rect.Position * _page.Scale; _deck.Size = rect.Size * _page.Scale; }
-		string hudKey = JsonSerializer.Serialize(snapshot.HudArt) + JsonSerializer.Serialize(snapshot.HudLabels);
-		if (_hudKey != hudKey) { _hudKey = hudKey; Clear(_hud); DrawArt(_hud, snapshot.HudArt); DrawLabels(_hud, snapshot.HudLabels); }
-		string roomKey = snapshot.Room + JsonSerializer.Serialize(snapshot.Background);
+		string hudKey = snapshot.Revisions.Hud.ToString();
+		if (_hudKey != hudKey) { _hudKey = hudKey; RetainArt(_hud, snapshot.HudArt); RetainLabels(_hud, snapshot.HudLabels); }
+		string roomKey = snapshot.Revisions.Background.ToString();
 		if (_roomKey != roomKey)
 		{
 			_roomKey = roomKey;
 			Clear(_background);
 			DrawBackground(snapshot);
 		}
-		string actorKey = JsonSerializer.Serialize(snapshot.Creatures);
-		string spriteKey = JsonSerializer.Serialize(snapshot.Creatures.Select(c => new { c.VisualScene, c.Animation, c.Transform }));
-		if (_spriteKey != spriteKey) { _spriteKey = spriteKey; Clear(_actorSprites); DrawCreatureArt(snapshot.Creatures); }
+		string actorKey = snapshot.Revisions.Creatures.ToString();
+		RetainCreatureArt(snapshot.Creatures);
 		if (_actorKey != actorKey)
 		{
 			_actorKey = actorKey;
-			Clear(_actorState);
-			DrawCreatures(snapshot.Creatures);
+			RetainCreatureState(snapshot.Creatures);
 		}
 		_actors.Visible = snapshot.Creatures.Count > 0;
 		bool screenRebuilt = RetainArt(_screenArt, snapshot.PageArt);
 		RetainArt(_combatHud, snapshot.CombatHudArt);
 		UpdateDrawings(snapshot.Drawings);
-		string screenKey = snapshot.Page + JsonSerializer.Serialize(snapshot.PageLabels) + JsonSerializer.Serialize(snapshot.Hovers) + JsonSerializer.Serialize(snapshot.CombatHudLabels);
+		string screenKey = snapshot.Revisions.Screen.ToString();
 		if (_screenKey != screenKey || screenRebuilt)
-		{ _screenKey = screenKey; ClearMounted(_mountedLabels); Clear(_screenText); DrawLabels(_screenText, snapshot.PageLabels, nativeOrder: true); Clear(_combatHudText); DrawLabels(_combatHudText, snapshot.CombatHudLabels); Clear(_screenHovers); DrawHovers(snapshot.Hovers); }
-		string itemKey = JsonSerializer.Serialize(snapshot.Inventory);
+		{ _screenKey = screenKey; RetainLabels(_screenText, snapshot.PageLabels, nativeOrder: true); RetainLabels(_combatHudText, snapshot.CombatHudLabels); Clear(_screenHovers); DrawHovers(snapshot.Hovers); }
+		string itemKey = snapshot.Revisions.Inventory.ToString();
 		if (_itemKey != itemKey)
 		{
 			_itemKey = itemKey; Clear(_inventory);
 			DrawItems(_inventory, snapshot.Inventory, false);
 		}
-		string offerKey = snapshot.Page + JsonSerializer.Serialize(snapshot.Items) + JsonSerializer.Serialize(snapshot.Choices);
+		string offerKey = snapshot.Revisions.Offers.ToString();
 		if (_offerKey != offerKey)
 		{
 			_offerKey = offerKey; Clear(_offers);
 			if (snapshot.Page == "shop") DrawItems(_offers, snapshot.Items, true);
 		}
 		var cards = _showDeck || snapshot.Page == "deck" ? snapshot.Deck : snapshot.Cards;
-		string cardKey = _showDeck + snapshot.Page + JsonSerializer.Serialize(cards) + JsonSerializer.Serialize(snapshot.UnderlayCards) + JsonSerializer.Serialize(snapshot.UnderlayItems) + JsonSerializer.Serialize(snapshot.RewardArt) + JsonSerializer.Serialize(snapshot.RewardLabels);
+		string cardKey = _showDeck + snapshot.Page + ":" + (_showDeck || snapshot.Page == "deck" ? snapshot.Revisions.Deck : snapshot.Revisions.Cards);
 		if (_cardKey != cardKey || screenRebuilt)
 		{
+			if ((!screenRebuilt || snapshot.Page == "map") && TryMoveHand(snapshot, cards)) { _cardKey = cardKey; return; }
+			_handNodes.Clear(); _underlayHandNodes.Clear();
 			_cardKey = cardKey; ClearMounted(_mountedCards); Clear(_preview); Clear(_cards); Clear(_underlay);
 			if (snapshot.Page is not "combat" and not "shop" && snapshot.UnderlayPage.Length > 0 && !_showDeck)
 			{
@@ -172,8 +179,9 @@ internal sealed partial class SpectatorView : IDisposable
 		ClearMounted(_mountedCards); ClearMounted(_mountedLabels);
 		Clear(_preview); Clear(_cards); Clear(_actorSprites); Clear(_actorState); Clear(_offers); Clear(_inventory); Clear(_background); Clear(_hud); Clear(_underlay);
 		foreach (var pane in new[] { _screenArt, _screenDrawings, _screenText, _screenHovers, _combatHud, _combatHudText }) Clear(pane);
-		_retainedArt.Clear(); _drawingSurfaces.Clear(); CloseInspect();
-		_cardKey = _actorKey = _offerKey = _itemKey = _roomKey = _hudKey = _screenKey = _spriteKey = "";
+		_retainedArt.Clear(); _retainedLabels.Clear(); _creatureSprites.Clear(); _creatureStates.Clear(); _drawingSurfaces.Clear(); CloseInspect();
+		_handNodes.Clear(); _underlayHandNodes.Clear();
+		_cardKey = _actorKey = _offerKey = _itemKey = _roomKey = _hudKey = _screenKey = "";
 		_header.Visible = _title.Visible = _summary.Visible = true;
 		_status.Text = T("状态暂不可用：", "State unavailable: ") + message;
 		_summary.Text = T("等待有效的单人游戏状态", "Waiting for a valid singleplayer state");
@@ -215,6 +223,8 @@ internal sealed partial class SpectatorView : IDisposable
 			drawingParent.AddChild(holder);
 			DrawCard(holder, card, Vector2.Zero, 1, centered: true);
 			var hitboxHolder = new Node2D { Transform = transform }; cardRoot.AddChild(hitboxHolder);
+			if (destination == null && snapshot.Page == "combat") _handNodes.Add((holder, hitboxHolder, card));
+			else if (destination == _underlay && snapshot.Page == "combat") _underlayHandNodes.Add((holder, hitboxHolder, card));
 			var hitbox = Area(hitboxHolder, new Vector2(-160, -230), new Vector2(320, 450));
 			hitbox.MouseFilter = Control.MouseFilterEnum.Stop;
 			Hover(hitbox, card, cards);
@@ -236,22 +246,49 @@ internal sealed partial class SpectatorView : IDisposable
 		slot.MouseExited += () => { if (_inspectIndex < 0) Clear(_preview); };
 		slot.GuiInput += input => { if (input is InputEventMouseButton { ButtonIndex: MouseButton.Left, Pressed: true }) { OpenInspect(cards, index ?? cards.IndexOf(card), upgraded); slot.AcceptEvent(); } };
 	}
+	private bool TryMoveHand(SpectatorSnapshot snapshot, List<CardSnapshot> cards)
+	{
+		var nodes = _handNodes;
+		if (_showDeck) return false;
+		if (snapshot.Page == "map" && cards.Count == 0 && snapshot.UnderlayPage == "combat" && snapshot.UnderlayItems.Count == 0)
+		{ nodes = _underlayHandNodes; cards = snapshot.UnderlayCards; }
+		else if (snapshot.Page != "combat") return false;
+		if (nodes.Count != cards.Count) return false;
+		for (int i = 0; i < cards.Count; i++)
+			if (cards[i].Transform == null || !SnapshotEquality.SameCardFace(nodes[i].Card, cards[i])) return false;
+		for (int i = 0; i < cards.Count; i++)
+		{
+			var entry = nodes[i]; var transform = Matrix(cards[i].Transform!);
+			entry.Holder.Transform = transform; entry.Hitbox.Transform = transform;
+			nodes[i] = (entry.Holder, entry.Hitbox, cards[i]);
+		}
+		return true;
+	}
 	private static Transform2D Matrix(float[] t) => new(new Vector2(t[0], t[1]), new Vector2(t[2], t[3]), new Vector2(t[4], t[5]));
 	private static Rect2 Rectangle(float[] r) => new(r[0], r[1], r[2], r[3]);
 
 	private void DrawBackground(SpectatorSnapshot snapshot)
 		=> DrawArt(_background, snapshot.Background);
 
-	private List<ArtNode> DrawArt(Node parent, List<ArtSnapshot> layers)
+	private List<ArtNode> DrawArt(Node parent, List<ArtSnapshot> layers, Node2D? retainedRoot = null, Dictionary<string, ArtNode>? existing = null)
 	{
 		var rendered = new List<ArtNode>();
-		var root = new Node2D();
-		parent.AddChild(root);
+		var root = retainedRoot ?? new Node2D();
+		if (root.GetParent() == null) parent.AddChild(root);
 		var ancestors = new Dictionary<string, (Node Node, Transform2D Matrix)>();
 		foreach (var art in layers)
 		{
 			var matrix = Matrix(art.Transform); var r = art.Rect;
 			var ancestor = ancestors.TryGetValue(art.Parent, out var found) ? found : (Node: (Node)root, Matrix: Transform2D.Identity);
+			if (existing != null && existing.TryGetValue(art.Key, out var old) && SameArtStructure(old.Snapshot, art))
+			{
+				if (old.Holder.GetParent() != ancestor.Node) { old.Holder.GetParent()?.RemoveChild(old.Holder); ancestor.Node.AddChild(old.Holder); }
+				ancestor.Node.MoveChild(old.Holder, ancestor.Node.GetChildCount() - 1);
+				UpdateArtNode(old, art, ancestor.Matrix.AffineInverse() * matrix);
+				rendered.Add(old);
+				if (art.Key.Length > 0) ancestors[art.Key] = (old.Drawing, matrix * new Transform2D(0, new Vector2(r[0], r[1])));
+				continue;
+			}
 			var holder = new Node2D { Transform = ancestor.Matrix.AffineInverse() * matrix, Modulate = ColorOf(art.Tint), ZIndex = art.Z, ZAsRelative = art.ZRelative, ShowBehindParent = art.BehindParent };
 			ancestor.Node.AddChild(holder);
 			CanvasItem drawing;
@@ -292,19 +329,19 @@ internal sealed partial class SpectatorView : IDisposable
 			drawing.ClipChildren = (CanvasItem.ClipChildrenMode)art.ClipChildren;
 			if (drawing is Control control) { control.Position = new Vector2(r[0], r[1]); control.ClipContents = art.ClipContents; control.MouseFilter = Control.MouseFilterEnum.Ignore; }
 			holder.AddChild(drawing);
-			rendered.Add(new ArtNode(art.Key, holder, drawing));
+			rendered.Add(new ArtNode(art.Key, holder, drawing, art));
 			if (art.Key.Length > 0) ancestors[art.Key] = (drawing, matrix * new Transform2D(0, new Vector2(r[0], r[1])));
 		}
 		return rendered;
 	}
 	private static Color ColorOf(float[] c) => new(c[0], c[1], c[2], c[3]);
 
-	private void DrawCreatureArt(List<CreatureSnapshot> creatures)
+	private void DrawCreatureArt(List<CreatureSnapshot> creatures, Node? destination = null)
 	{
 		foreach (var c in creatures)
 		{
 			var holder = new Node2D { Transform = Matrix(c.Transform) };
-			_actorSprites.AddChild(holder);
+			(destination ?? _actorSprites).AddChild(holder);
 			var packed = Asset<PackedScene>(c.VisualScene);
 			if (packed != null)
 			{
@@ -323,21 +360,22 @@ internal sealed partial class SpectatorView : IDisposable
 			}
 		}
 	}
-	private void DrawCreatures(List<CreatureSnapshot> creatures)
+	private void DrawCreatures(List<CreatureSnapshot> creatures, Node? destination = null)
 	{
+		var parent = destination ?? _actorState;
 		foreach (var c in creatures)
 		{
 			var intents = Rectangle(c.IntentRect);
 			for (int j = 0; j < c.Intents.Count; j++)
 			{
 				var intent = c.Intents[j];
-				if (intent.Art.Count > 0) { DrawArt(_actorState, intent.Art); DrawLabels(_actorState, intent.Labels); continue; }
+				if (intent.Art.Count > 0) { DrawArt(parent, intent.Art); DrawLabels(parent, intent.Labels); continue; }
 				float ix = intents.Position.X + intents.Size.X * 0.5f + (j - c.Intents.Count * 0.5f) * 95;
-				Icon(_actorState, intent.Icon, new Rect2(ix, intents.Position.Y, 70, 70));
-				Rich(_actorState, intent.Text, new Rect2(ix + 52, intents.Position.Y + 42, 100, 44), 32);
+				Icon(parent, intent.Icon, new Rect2(ix, intents.Position.Y, 70, 70));
+				Rich(parent, intent.Text, new Rect2(ix + 52, intents.Position.Y + 42, 100, 44), 32);
 			}
-			DrawArt(_actorState, c.StateArt);
-			DrawLabels(_actorState, c.StateLabels);
+			DrawArt(parent, c.StateArt);
+			DrawLabels(parent, c.StateLabels);
 		}
 	}
 
@@ -373,14 +411,16 @@ internal sealed partial class SpectatorView : IDisposable
 		}
 	}
 
-	private void DrawLabels(Node parent, List<TextSnapshot> labels, bool nativeOrder = false)
+	private List<Node2D> DrawLabels(Node parent, List<TextSnapshot> labels, bool nativeOrder = false)
 	{
+		var rendered = new List<Node2D>();
 		foreach (var text in labels)
 		{
 			var holder = new Node2D { Transform = Matrix(text.Transform) };
 			Node destination = parent; var color = text.Color;
 			if (nativeOrder && PageAnchor(text.ArtKey) is { } anchor) { destination = anchor; holder.Transform = Transform2D.Identity; color = text.LocalColor; _mountedLabels.Add(holder); }
 			destination.AddChild(holder);
+			rendered.Add(holder);
 			if (text.Rich)
 			{
 				var rich = new MegaRichTextLabel { Size = new Vector2(text.Size[0], text.Size[1]), HorizontalAlignment = (HorizontalAlignment)text.Alignment, VerticalAlignment = (VerticalAlignment)text.VerticalAlignment, AutowrapMode = (TextServer.AutowrapMode)text.WrapMode, BbcodeEnabled = true, ScrollActive = false, AutoSizeEnabled = false, MouseFilter = Control.MouseFilterEnum.Ignore };
@@ -400,6 +440,7 @@ internal sealed partial class SpectatorView : IDisposable
 			label.AddThemeConstantOverride("outline_size", text.OutlineSize);
 			holder.AddChild(label);
 		}
+		return rendered;
 	}
 
 	private void DrawCard(Node parent, CardSnapshot c, Vector2 position, float scale, bool centered = false)

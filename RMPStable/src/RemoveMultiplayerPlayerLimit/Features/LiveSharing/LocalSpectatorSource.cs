@@ -27,12 +27,13 @@ using MegaCrit.Sts2.Core.Nodes.Screens.Map;
 using MegaCrit.Sts2.Core.Nodes.Screens.Overlays;
 using MegaCrit.Sts2.Core.Nodes.Screens.Shops;
 using MegaCrit.Sts2.Core.Runs;
+using MegaCrit.Sts2.Core.Platform;
 using MegaCrit.Sts2.addons.mega_text;
 using RemoveMultiplayerPlayerLimit.Infrastructure;
 
 namespace RemoveMultiplayerPlayerLimit.Features.LiveSharing;
 
-internal sealed class LocalSpectatorSource
+internal sealed partial class LocalSpectatorSource : IDisposable
 {
 	private static readonly FieldInfo? RewardOptions = typeof(NCardRewardSelectionScreen).GetField("_options", BindingFlags.Instance | BindingFlags.NonPublic);
 	private static readonly FieldInfo? RewardAlternatives = typeof(NCardRewardSelectionScreen).GetField("_extraOptions", BindingFlags.Instance | BindingFlags.NonPublic);
@@ -42,9 +43,32 @@ internal sealed class LocalSpectatorSource
 	private List<ArtSnapshot> _background = new();
 	private readonly Dictionary<CardModel, (string Key, CardSnapshot Preview, CardSnapshot? Base)> _upgrades = new();
 	private static readonly Dictionary<string, string[]> UniformNames = new();
+	private readonly Dictionary<ulong, List<ShaderValueSnapshot>> _materialSamples = new();
+	private readonly Dictionary<ulong, List<ShaderValueSnapshot>> _drawingSamples = new();
+	private bool _drawingCapture;
+	private readonly Dictionary<string, Transform2D> _capturedTransforms = new();
+	private NTopBar? _top;
+	private ulong _topRun;
+	private ParticipantSnapshot? _participant;
+	private ulong _participantExpires;
+	private readonly SpectatorCaptureMetrics? _metrics = System.Environment.GetEnvironmentVariable("RMP_SPECTATOR_METRICS") == "1" || System.Environment.GetEnvironmentVariable("RMP_SMOKE_OUTPUT") != null ? new SpectatorCaptureMetrics() : null;
 
 	internal SpectatorSnapshot Capture(RunState run)
 	{
+		SpectatorSnapshot? result = null;
+		foreach (var step in CaptureSteps(run, snapshot => result = snapshot)) { }
+		return result ?? throw new InvalidOperationException("Incomplete spectator capture");
+	}
+
+	// Both entry points use the same capture logic. The controller advances this
+	// iterator within a per-frame budget; integration tests can drain it directly.
+	internal IEnumerable<byte> CaptureSteps(RunState run, Action<SpectatorSnapshot> publish)
+	{
+		_metrics?.Begin();
+		// Read each material instance once per capture, preserving overrides.
+		_materialSamples.Clear();
+		_capturedTransforms.Clear();
+		BindDeck(run.Players[0].Deck);
 		var player = run.Players[0];
 		var combat = NCombatRoom.Instance;
 		var merchant = NMerchantRoom.Instance;
@@ -64,14 +88,22 @@ internal sealed class LocalSpectatorSource
 		if (overlay != null) page = reward != null ? "reward" : overlay is NRewardsScreen ? "loot" : "selection";
 		if (capstone != null) { pageRoot = capstone; page = capstone is NDeckViewScreen ? "deck" : "selection"; }
 		var viewSize = NRun.Instance.GetViewportRect().Size;
+		string sourceId = player.NetId.ToString();
+		if (_participant?.Id != sourceId || Time.GetTicksMsec() >= _participantExpires)
+		{
+			_participant = new ParticipantSnapshot { Id = sourceId, Name = PlatformUtil.GetPlayerNameRaw(RunManager.Instance.NetService.Platform, player.NetId) };
+			_participantExpires = Time.GetTicksMsec() + 5000;
+		}
 		room += ":" + viewSize;
 		if (room != _backgroundRoom || _background.Count == 0)
 		{
 			_backgroundRoom = room;
-			_background = CaptureBackground(combat?.Background ?? (Node?)merchant);
+			_background = new();
+			foreach (var step in CaptureArtSteps(combat?.Background ?? (Node?)merchant, _background)) yield return step;
 		}
 		var snap = new SpectatorSnapshot
 		{
+			SourceId = _previewSourceId.Length > 0 ? _previewSourceId : sourceId, Sources = new() { _participant },
 			Session = NRun.Instance.GetInstanceId().ToString(), Room = room, Page = page, UnderlayPage = underlayPage,
 			Width = viewSize.X, Height = viewSize.Y, Background = _background, Culture = LocManager.Instance.CultureInfo.Name,
 			Character = player.Character.Title.GetFormattedText(),
@@ -80,27 +112,45 @@ internal sealed class LocalSpectatorSource
 				? $"{T("能量", "Energy")} {state.Energy}/{state.MaxEnergy}   {T("星星", "Stars")} {state.Stars}   {T("抽牌堆", "Draw")} {state.DrawPile.Cards.Count}   {T("弃牌堆", "Discard")} {state.DiscardPile.Cards.Count}   {T("消耗", "Exhaust")} {state.ExhaustPile.Cards.Count}   {T("回合", "Turn")} {state.TurnNumber}"
 				: T("单人本地模拟 · 仅展示，不操作游戏", "Local singleplayer preview · read only")
 		};
-		var top = Descendants<NTopBar>(NRun.Instance).FirstOrDefault();
+		// Five selectable local preview entries are requested for this test build.
+		// Their content always comes from the same real singleplayer run.
+		snap.Sources.AddRange(_previewParticipants);
+		if (_topRun != NRun.Instance.GetInstanceId() || !GodotObject.IsInstanceValid(_top) || !_top!.IsInsideTree())
+		{ _topRun = NRun.Instance.GetInstanceId(); _top = Descendants<NTopBar>(NRun.Instance).FirstOrDefault(); }
+		var top = _top;
+		_metrics?.Mark("room");
 		var hudRoots = new List<Node?> { top, NRun.Instance.GlobalUi.RelicInventory };
 		if (top != null) snap.DeckButtonRect = GlobalRect(top.Deck);
 		if (combat != null) foreach (var ui in new Node[] { combat.Ui.EnergyCounterContainer, combat.Ui.DrawPile, combat.Ui.DiscardPile, combat.Ui.ExhaustPile, combat.Ui.EndTurnButton })
-		{ snap.CombatHudArt.AddRange(CaptureBackground(ui, true)); snap.CombatHudLabels.AddRange(CaptureLabels(ui)); }
-		foreach (var hud in hudRoots) { snap.HudArt.AddRange(CaptureBackground(hud, includeButtons: true)); snap.HudLabels.AddRange(CaptureLabels(hud)); }
+		{ foreach (var step in CaptureArtSteps(ui, snap.CombatHudArt, true)) yield return step; foreach (var step in CaptureLabelSteps(ui, snap.CombatHudLabels)) yield return step; yield return 0; }
+		foreach (var hud in hudRoots) { foreach (var step in CaptureArtSteps(hud, snap.HudArt, includeButtons: true)) yield return step; foreach (var step in CaptureLabelSteps(hud, snap.HudLabels)) yield return step; yield return 0; }
+		_metrics?.Mark("hud");
 		// Only traverse the actual run, never the separate spectator window.
-		var visibleCards = Descendants<NCard>(NRun.Instance).Where(c => c.Model != null && c.IsVisibleInTree())
-			.GroupBy(c => c.Model!).ToDictionary(g => g.Key, g => g.First());
+		var visibleCards = new Dictionary<CardModel, NCard>();
+		foreach (var step in WalkVisibleSteps(NRun.Instance, node => { if (node is NCard card && card.Model != null) visibleCards.TryAdd(card.Model, card); })) yield return step;
 		CardSnapshot Card(CardModel model, PileType pile) => CaptureCard(model, pile, visibleCards.TryGetValue(model, out var visual) ? visual : null);
-		snap.Deck = player.Deck.Cards.Select(c => Card(c, PileType.Deck)).ToList();
+		bool deckVisible = WantDeck || page is "deck" or "run" or "event" or "selection";
+		if (_deckDirty || deckVisible || _deckRoom != room || _deckCulture != snap.Culture || Time.GetTicksMsec() >= _deckExpires)
+		{
+			long generation = _deckGeneration;
+			var capturedDeck = new List<CardSnapshot>();
+			foreach (var card in player.Deck.Cards.ToArray()) { capturedDeck.Add(Card(card, PileType.Deck)); yield return 0; }
+			_deckCache = capturedDeck;
+			_deckDirty = generation != _deckGeneration; _deckRoom = room; _deckCulture = snap.Culture; _deckExpires = Time.GetTicksMsec() + 750;
+		}
+		snap.Deck = _deckCache;
 		snap.Inventory.AddRange(player.Relics.Select(r => new ItemSnapshot { Name = r.Title.GetFormattedText(), Icon = Path(r.Icon) }));
 		snap.Inventory.AddRange(player.Potions.Select(p => new ItemSnapshot { Name = p.Title.GetFormattedText(), Icon = Path(p.Image) }));
+		_metrics?.Mark("deck");
 		if (combat != null)
 		{
-			foreach (var node in combat.CreatureNodes)
+			foreach (var node in combat.CreatureNodes.ToArray())
 			{
 				var creature = node.Entity;
 				var display = node.GetNodeOrNull<Control>("%HealthBar");
 				var entry = new CreatureSnapshot
 				{
+					EntityKey = node.GetInstanceId().ToString(),
 					Name = creature.Name, Player = creature.IsPlayer || creature.IsPet,
 					Hp = creature.CurrentHp, MaxHp = creature.MaxHp, Block = creature.Block,
 					VisualScene = node.Visuals?.SceneFilePath ?? "",
@@ -109,9 +159,10 @@ internal sealed class LocalSpectatorSource
 					Transform = Transform(node.Visuals?.GetGlobalTransform() ?? node.GetGlobalTransform()),
 					HealthRect = GlobalRect(Descendants<NHealthBar>(node).FirstOrDefault()?.HpBarContainer),
 					IntentRect = GlobalRect(node.IntentContainer),
-					StateArt = CaptureBackground(display), StateLabels = CaptureLabels(display),
 					Powers = creature.Powers.Select(p => new ItemSnapshot { Name = p.Title.GetFormattedText(), Icon = p.IconPath, Text = p.DisplayAmount.ToString() }).ToList()
 				};
+				foreach (var step in CaptureArtSteps(display, entry.StateArt)) yield return step;
+				foreach (var step in CaptureLabelSteps(display, entry.StateLabels)) yield return step;
 				if (creature.Monster != null && creature.IsAlive)
 				{
 					// Read displayed intent, including the game's final damage calculation.
@@ -125,9 +176,11 @@ internal sealed class LocalSpectatorSource
 						// Use a stable animation frame so the view is not rebuilt at animation FPS.
 						var model = DisplayedIntent?.GetValue(intent) as AbstractIntent;
 						string texture = Path(model?.GetTexture(new[] { player.Creature }, creature) ?? sprite?.Texture);
-						var nativeArt = CaptureBackground(holder);
+						var nativeArt = new List<ArtSnapshot>();
+						foreach (var step in CaptureArtSteps(holder, nativeArt)) yield return step;
 						if (sprite != null) foreach (var art in nativeArt.Where(a => a.Key == sprite.GetInstanceId().ToString())) art.Texture = texture;
-						var labels = CaptureLabels(holder);
+						var labels = new List<TextSnapshot>();
+						foreach (var step in CaptureLabelSteps(holder, labels)) yield return step;
 						// Intent labels are intentionally very short native rectangles.
 						// Leave room for the font's descent and outline on a separate
 						// viewport; preserve its original position and wrapping mode.
@@ -144,9 +197,11 @@ internal sealed class LocalSpectatorSource
 					}
 				}
 				snap.Creatures.Add(entry);
+				yield return 0;
 			}
-			if (state != null) snap.Cards = state.Hand.Cards.Select(c => Card(c, PileType.Hand)).ToList();
+			if (state != null) foreach (var card in state.Hand.Cards.ToArray()) { snap.Cards.Add(Card(card, PileType.Hand)); yield return 0; }
 		}
+		_metrics?.Mark("combat");
 		if (merchant != null)
 		{
 			snap.Cards.Clear();
@@ -163,8 +218,9 @@ internal sealed class LocalSpectatorSource
 					var item = card == null ? new CardSnapshot { Title = T("已售出", "Sold out"), Sold = true } : Card(card, PileType.None);
 					item.Price = offer.Cost; item.Sold = !offer.IsStocked;
 					var slot = slots.FirstOrDefault(s => s.Entry == offer);
-					if (slot != null) { item.Art = CaptureBackground(slot); item.Labels = CaptureLabels(slot); }
+					if (slot != null) { foreach (var step in CaptureArtSteps(slot, item.Art)) yield return step; foreach (var step in CaptureLabelSteps(slot, item.Labels)) yield return step; }
 					snap.Cards.Add(item);
+					yield return 0;
 				}
 				foreach (var offer in inventory.RelicEntries)
 					snap.Items.Add(new ItemSnapshot { Name = offer.Model?.Title.GetFormattedText() ?? T("已售出", "Sold out"), Icon = Path(offer.Model?.Icon), Price = offer.Cost, Sold = !offer.IsStocked });
@@ -175,7 +231,8 @@ internal sealed class LocalSpectatorSource
 				foreach (var item in snap.Items)
 				{
 					var slot = slots.FirstOrDefault(s => s.Entry is MerchantRelicEntry r && r.Model?.Title.GetFormattedText() == item.Name || s.Entry is MerchantPotionEntry p && p.Model?.Title.GetFormattedText() == item.Name || s.Entry == inventory.CardRemovalEntry && item.Name == T("移除卡牌", "Remove card"));
-					if (slot != null) { item.Rect = GlobalRect(slot.Hitbox); item.Art = CaptureBackground(slot); item.Labels = CaptureLabels(slot); }
+					if (slot != null) { item.Rect = GlobalRect(slot.Hitbox); foreach (var step in CaptureArtSteps(slot, item.Art)) yield return step; foreach (var step in CaptureLabelSteps(slot, item.Labels)) yield return step; }
+					yield return 0;
 				}
 			}
 		}
@@ -185,31 +242,37 @@ internal sealed class LocalSpectatorSource
 			if (RewardOptions?.GetValue(reward) is not IReadOnlyList<CardCreationResult> options)
 				throw new InvalidOperationException("Card reward options are unavailable in this game version.");
 			snap.UnderlayCards = snap.Cards; snap.UnderlayItems = snap.Items; snap.Items = new();
-			snap.Cards = options.Select(o => Card(o.Card, PileType.None)).ToList();
-			snap.RewardArt = CaptureBackground(NOverlayStack.Instance?.GetNodeOrNull<Node>("OverlayBackstop"));
-			snap.RewardArt.AddRange(CaptureBackground(reward)); snap.RewardLabels = CaptureLabels(reward);
+			snap.Cards = new();
+			foreach (var option in options) { snap.Cards.Add(Card(option.Card, PileType.None)); yield return 0; }
+			foreach (var step in CaptureArtSteps(NOverlayStack.Instance?.GetNodeOrNull<Node>("OverlayBackstop"), snap.RewardArt)) yield return step;
+			foreach (var step in CaptureArtSteps(reward, snap.RewardArt)) yield return step; foreach (var step in CaptureLabelSteps(reward, snap.RewardLabels)) yield return step;
 			if (RewardAlternatives?.GetValue(reward) is IReadOnlyList<CardRewardAlternative> alternatives)
 				snap.Choices = alternatives.Select(a => a.Title.GetFormattedText()).ToList();
 		}
+		_metrics?.Mark("shopReward");
 		if (pageRoot != null && page is not "combat" and not "shop" and not "run" and not "reward")
 		{
 			snap.UnderlayCards = snap.Cards; snap.Cards = new(); snap.Items.Clear();
-			if (pageRoot == overlay) snap.PageArt.AddRange(CaptureBackground(NOverlayStack.Instance?.GetNodeOrNull<Node>("OverlayBackstop")));
+			if (pageRoot == overlay) foreach (var step in CaptureArtSteps(NOverlayStack.Instance?.GetNodeOrNull<Node>("OverlayBackstop"), snap.PageArt)) yield return step;
 			if (eventRoom?.IsVisibleInTree() == true && pageRoot != eventRoom)
-			{ snap.PageArt.AddRange(CaptureBackground(eventRoom, true, includeCards: true)); snap.PageLabels.AddRange(CaptureLabels(eventRoom)); }
+			{ foreach (var step in CaptureArtSteps(eventRoom, snap.PageArt, true, includeCards: true)) yield return step; foreach (var step in CaptureLabelSteps(eventRoom, snap.PageLabels)) yield return step; yield return 0; }
 			var mapBounds = new Rect2(Vector2.Zero, viewSize).Grow(128);
 			if (page == "deck" && mapScreen?.IsOpen == true)
-			{ snap.PageArt.AddRange(CaptureBackground(mapScreen, true, mapBounds)); snap.PageLabels.AddRange(CaptureLabels(mapScreen)); snap.Drawings = CaptureDrawings(mapScreen.Drawings); }
-			if (page != "deck") { snap.PageArt.AddRange(CaptureBackground(pageRoot, true, page == "map" ? mapBounds : null, true)); snap.PageLabels.AddRange(CaptureLabels(pageRoot)); }
-			foreach (var card in Descendants<NCard>(pageRoot).Where(c => c.Model != null && c.IsVisibleInTree())) snap.Cards.Add(CaptureCard(card.Model!, PileType.None, card));
+			{ foreach (var step in CaptureArtSteps(mapScreen, snap.PageArt, true, mapBounds)) yield return step; foreach (var step in CaptureLabelSteps(mapScreen, snap.PageLabels)) yield return step; snap.Drawings = CaptureDrawings(mapScreen.Drawings); yield return 0; }
+			if (page != "deck") { foreach (var step in CaptureArtSteps(pageRoot, snap.PageArt, true, page == "map" ? mapBounds : null, true)) yield return step; foreach (var step in CaptureLabelSteps(pageRoot, snap.PageLabels)) yield return step; yield return 0; }
+			var pageCards = new List<NCard>();
+			foreach (var step in WalkVisibleSteps(pageRoot, node => { if (node is NCard card && card.Model != null) pageCards.Add(card); })) yield return step;
+			foreach (var card in pageCards) { snap.Cards.Add(CaptureCard(card.Model!, PileType.None, card)); yield return 0; }
 			if (page == "map") snap.Drawings = CaptureDrawings(mapScreen!.Drawings);
 		}
 		if (page == "event")
 		{
 			foreach (Node previewRoot in new Node[] { NRun.Instance.GlobalUi.CardPreviewContainer, NRun.Instance.GlobalUi.EventCardPreviewContainer, NRun.Instance.GlobalUi.GridCardPreviewContainer, NRun.Instance.GlobalUi.MessyCardPreviewContainer })
 			{
-				snap.PageArt.AddRange(CaptureBackground(previewRoot, includeCards: true)); snap.PageLabels.AddRange(CaptureLabels(previewRoot));
-				foreach (var card in Descendants<NCard>(previewRoot).Where(c => c.Model != null && c.IsVisibleInTree())) snap.Cards.Add(CaptureCard(card.Model!, PileType.None, card));
+				foreach (var step in CaptureArtSteps(previewRoot, snap.PageArt, includeCards: true)) yield return step; foreach (var step in CaptureLabelSteps(previewRoot, snap.PageLabels)) yield return step; yield return 0;
+				var previewCards = new List<NCard>();
+			foreach (var step in WalkVisibleSteps(previewRoot, node => { if (node is NCard card && card.Model != null) previewCards.Add(card); })) yield return step;
+			foreach (var card in previewCards) { snap.Cards.Add(CaptureCard(card.Model!, PileType.None, card)); yield return 0; }
 			}
 		}
 		if (page == "event" && eventRoom?.IsVisibleInTree() == true) foreach (var option in Descendants<NEventOptionButton>(eventRoom).Where(n => n.IsVisibleInTree()))
@@ -217,7 +280,8 @@ internal sealed class LocalSpectatorSource
 		// Evict detached previews for cards that have left the player's run.
 		var present = new HashSet<CardModel>(visibleCards.Keys.Concat(player.Deck.Cards));
 		foreach (var old in _upgrades.Keys.Where(c => !present.Contains(c)).ToList()) _upgrades.Remove(old);
-		return snap;
+		_metrics?.Mark("page");
+		var frozen = Freeze(snap); _metrics?.Mark("compare"); publish(frozen);
 	}
 	private List<TipSnapshot> CaptureTips(IEnumerable<IHoverTip> tips)
 	{
@@ -276,7 +340,7 @@ internal sealed class LocalSpectatorSource
 	}
 
 	private static float[] ColorValues(Color c) => new[] { c.R, c.G, c.B, c.A };
-	private static List<DrawingSnapshot> CaptureDrawings(NMapDrawings drawings)
+	private List<DrawingSnapshot> CaptureDrawings(NMapDrawings drawings)
 	{
 		var result = new List<DrawingSnapshot>();
 		foreach (var surface in Descendants<TextureRect>(drawings).Where(t => t.Texture is ViewportTexture && t.IsVisibleInTree()))
@@ -290,20 +354,25 @@ internal sealed class LocalSpectatorSource
 		return result;
 	}
 
-	internal static List<ArtSnapshot> CaptureBackground(Node? root, bool includeButtons = false, Rect2? visibleRegion = null, bool includeCards = false)
+	internal List<ArtSnapshot> CaptureBackground(Node? root, bool includeButtons = false, Rect2? visibleRegion = null, bool includeCards = false)
 	{
 		var result = new List<ArtSnapshot>();
-		if (root == null) return result;
-		void Visit(Node node, string parentKey)
+		foreach (var step in CaptureArtSteps(root, result, includeButtons, visibleRegion, includeCards)) { }
+		return result;
+	}
+	private IEnumerable<byte> CaptureArtSteps(Node? root, List<ArtSnapshot> result, bool includeButtons = false, Rect2? visibleRegion = null, bool includeCards = false)
+	{
+		if (root == null) yield break;
+		IEnumerable<byte> Visit(Node node, string parentKey)
 		{
-			if (node is SubViewport || node is NMerchantSlot && node != root || node is NCreature || node is NCard && !includeCards || !includeButtons && node.GetType().Name.Contains("Button") && node.GetType().Name != "NMerchantButton" || node.Name == "MerchantHandContainer") return;
+			if (!GodotObject.IsInstanceValid(node) || node.IsQueuedForDeletion() || node is SubViewport || node is NMerchantSlot && node != root || node is NCreature || node is NCard && !includeCards || !includeButtons && node.GetType().Name.Contains("Button") && node.GetType().Name != "NMerchantButton" || node.Name == "MerchantHandContainer") yield break;
 			if (node is CanvasItem item)
 			{
-				if (!item.Visible) return;
+				if (!item.Visible) yield break;
 				// Map content spans several screen heights. Omit room points and
 				// texture leaves outside the current viewport, with a glow margin.
 				// Camera scroll captures newly visible content on the next snapshot.
-				if (visibleRegion is { } viewport && item is Control boundsToCull && (item is NMapPoint || item.GetClass() == "TextureRect") && boundsToCull.Size.X > 0 && boundsToCull.Size.Y > 0 && !viewport.Intersects(boundsToCull.GetGlobalRect())) return;
+				if (visibleRegion is { } viewport && item is Control boundsToCull && (item is NMapPoint || item.GetClass() == "TextureRect") && boundsToCull.Size.X > 0 && boundsToCull.Size.Y > 0 && !viewport.Intersects(boundsToCull.GetGlobalRect())) yield break;
 				Texture2D? texture = null;
 				Rect2 rect = item is Control bounds ? new Rect2(Vector2.Zero, bounds.Size) : default;
 				var art = new ArtSnapshot { Key = item.GetInstanceId().ToString(), Parent = parentKey, Z = item.ZIndex, ZRelative = item.ZAsRelative, BehindParent = item.ShowBehindParent, ClipChildren = (int)item.ClipChildren, ClipContents = item is Control clipping && clipping.ClipContents };
@@ -349,7 +418,10 @@ internal sealed class LocalSpectatorSource
 					// AtlasManager creates pathless AtlasTexture instances for map
 					// icons and other packed UI. Send the underlying atlas + region.
 					if (texture is AtlasTexture atlas && texture.ResourcePath.Length == 0) { art.Region = Rect(atlas.Region); texture = atlas.Atlas; }
-					var transform = item.GetGlobalTransform();
+					// A capture may span frames. Compose child local transforms from
+					// the captured parent so camera motion cannot shear the hierarchy.
+					var transform = parentKey.Length > 0 && !item.IsSetAsTopLevel() && _capturedTransforms.TryGetValue(parentKey, out var capturedParent)
+						? capturedParent * item.GetTransform() : item.GetGlobalTransform();
 					var color = item.SelfModulate;
 					var modulation = item.Modulate;
 					if (parentKey.Length == 0) for (Node? p = item.GetParent(); p != null; p = p.GetParent()) if (p is CanvasItem ancestor) modulation *= ancestor.Modulate;
@@ -364,20 +436,32 @@ internal sealed class LocalSpectatorSource
 					art.Transform = new[] { transform.X.X, transform.X.Y, transform.Y.X, transform.Y.Y, transform.Origin.X, transform.Origin.Y };
 					art.Tint = ColorValues(modulation); art.SelfTint = ColorValues(color);
 					result.Add(art);
+					_capturedTransforms[art.Key] = transform;
 					parentKey = art.Key;
 				}
 			}
+			yield return 0;
 			// A card placeholder preserves the native mask/order. Its visual
 			// children are rebuilt from DTOs, never copied as game models.
-			if (node is NCard) return;
-			foreach (Node child in node.GetChildren()) Visit(child, parentKey);
+			if (node is NCard || !GodotObject.IsInstanceValid(node) || node.IsQueuedForDeletion()) yield break;
 		}
-		Visit(root, "");
-		return result;
+		var pending = new Stack<(Node Node, string Parent)>(); pending.Push((root, ""));
+		while (pending.Count > 0)
+		{
+			var frame = pending.Pop(); int count = result.Count; bool visited = false;
+			foreach (var step in Visit(frame.Node, frame.Parent)) { visited = true; yield return step; }
+			if (!visited || frame.Node is NCard || !GodotObject.IsInstanceValid(frame.Node) || frame.Node.IsQueuedForDeletion()) continue;
+			string parent = result.Count > count ? result[^1].Key : frame.Parent;
+			for (int i = frame.Node.GetChildCount() - 1; i >= 0; i--) pending.Push((frame.Node.GetChild(i), parent));
+		}
 	}
-	private static List<ShaderValueSnapshot> CaptureShaderValues(ShaderMaterial material)
+	private List<ShaderValueSnapshot> CaptureShaderValues(ShaderMaterial material)
 	{
+		ulong id = material.GetInstanceId();
+		var samples = _drawingCapture ? _drawingSamples : _materialSamples;
+		if (samples.TryGetValue(id, out var sample)) return sample;
 		var result = new List<ShaderValueSnapshot>();
+		samples[id] = result;
 		if (material.Shader == null) return result;
 		string shaderPath = Path(material.Shader);
 		if (!UniformNames.TryGetValue(shaderPath, out var names))
@@ -408,39 +492,60 @@ internal sealed class LocalSpectatorSource
 
 	// Copy the already formatted native labels, including the game's hp/block
 	// fonts and colors. No Creature is bound to the spectator health display.
-	private static List<TextSnapshot> CaptureLabels(Node? root)
+	private IEnumerable<byte> CaptureLabelSteps(Node? root, List<TextSnapshot> result)
 	{
-		var result = new List<TextSnapshot>();
-		if (root == null) return result;
-		bool InsideCard(Node node) { for (Node? p = node; p != null && p != root; p = p.GetParent()) if (p is NCard) return true; return false; }
-		foreach (var label in Descendants<Label>(root).Where(l => l.IsVisibleInTree() && !InsideCard(l)))
+		return WalkVisibleSteps(root, node =>
 		{
+			if (node is Label label)
+			{
 			var settings = label.LabelSettings;
 			var tint = (settings?.FontColor ?? label.GetThemeColor("font_color")) * label.SelfModulate;
 			for (Node? parent = label; parent != null; parent = parent.GetParent()) if (parent is CanvasItem item) tint *= item.Modulate;
-			if (tint.A < 0.01f) continue;
+			if (tint.A < 0.01f) return;
 			var outline = settings?.OutlineColor ?? label.GetThemeColor("font_outline_color");
 			int fontSize = settings?.FontSize ?? label.GetThemeFontSize("font_size", "Label");
 			if (settings == null && label is MegaLabel && NativeFontSize?.GetValue(label) is int actual && actual > 0) fontSize = actual;
 			result.Add(new TextSnapshot { Text = label.Text, Font = Path(settings?.Font ?? label.GetThemeFont("font", "Label")), FontSize = fontSize, OutlineSize = settings?.OutlineSize ?? label.GetThemeConstant("outline_size", "Label"), Transform = Transform(label.GetGlobalTransform()), Size = new[] { label.Size.X, label.Size.Y }, Color = new[] { tint.R, tint.G, tint.B, tint.A }, OutlineColor = new[] { outline.R, outline.G, outline.B, outline.A }, Alignment = (int)label.HorizontalAlignment, VerticalAlignment = (int)label.VerticalAlignment });
 			result[^1].ArtKey = label.GetInstanceId().ToString(); result[^1].LocalColor = ColorValues((settings?.FontColor ?? label.GetThemeColor("font_color")) * label.SelfModulate);
-		}
-		foreach (var label in Descendants<RichTextLabel>(root).Where(l => l.IsVisibleInTree() && !InsideCard(l)))
+			}
+			else if (node is RichTextLabel richLabel)
+			{
+			var color = richLabel.GetThemeColor("default_color") * richLabel.SelfModulate;
+			for (Node? parent = richLabel; parent != null; parent = parent.GetParent()) if (parent is CanvasItem item) color *= item.Modulate;
+			if (color.A < 0.01f) return;
+			var outline = richLabel.GetThemeColor("font_outline_color");
+			result.Add(new TextSnapshot { Rich = true, Text = richLabel.Text.Replace("[ancient_banner]", "").Replace("[/ancient_banner]", ""), Font = Path(richLabel.GetThemeFont("normal_font")), FontSize = richLabel.GetThemeFontSize("normal_font_size"), OutlineSize = richLabel.GetThemeConstant("outline_size"), Transform = Transform(richLabel.GetGlobalTransform()), Size = new[] { richLabel.Size.X, richLabel.Size.Y }, Color = new[] { color.R, color.G, color.B, color.A }, OutlineColor = new[] { outline.R, outline.G, outline.B, outline.A }, Alignment = (int)richLabel.HorizontalAlignment, VerticalAlignment = (int)richLabel.VerticalAlignment, WrapMode = (int)richLabel.AutowrapMode });
+			result[^1].ArtKey = richLabel.GetInstanceId().ToString(); result[^1].LocalColor = ColorValues(richLabel.GetThemeColor("default_color") * richLabel.SelfModulate);
+			}
+		}, skipCards: true);
+	}
+
+	private static IEnumerable<byte> WalkVisibleSteps(Node? root, Action<Node> read, bool skipCards = false)
+	{
+		if (root == null) yield break;
+		var pending = new Stack<Node>(); pending.Push(root);
+		while (pending.Count > 0)
 		{
-			var color = label.GetThemeColor("default_color") * label.SelfModulate;
-			for (Node? parent = label; parent != null; parent = parent.GetParent()) if (parent is CanvasItem item) color *= item.Modulate;
-			if (color.A < 0.01f) continue;
-			var outline = label.GetThemeColor("font_outline_color");
-			result.Add(new TextSnapshot { Rich = true, Text = label.Text.Replace("[ancient_banner]", "").Replace("[/ancient_banner]", ""), Font = Path(label.GetThemeFont("normal_font")), FontSize = label.GetThemeFontSize("normal_font_size"), OutlineSize = label.GetThemeConstant("outline_size"), Transform = Transform(label.GetGlobalTransform()), Size = new[] { label.Size.X, label.Size.Y }, Color = new[] { color.R, color.G, color.B, color.A }, OutlineColor = new[] { outline.R, outline.G, outline.B, outline.A }, Alignment = (int)label.HorizontalAlignment, VerticalAlignment = (int)label.VerticalAlignment, WrapMode = (int)label.AutowrapMode });
-			result[^1].ArtKey = label.GetInstanceId().ToString(); result[^1].LocalColor = ColorValues(label.GetThemeColor("default_color") * label.SelfModulate);
+			var node = pending.Pop();
+			if (!GodotObject.IsInstanceValid(node) || node.IsQueuedForDeletion() || node is SubViewport || node is NCreature || node is CanvasItem item && !item.IsVisibleInTree() || skipCards && node is NCard) continue;
+			read(node); yield return 0;
+			if (node is NCard || !GodotObject.IsInstanceValid(node) || node.IsQueuedForDeletion()) continue;
+			for (int i = node.GetChildCount() - 1; i >= 0; i--) pending.Push(node.GetChild(i));
 		}
-		return result;
 	}
 
 	private static float[] Rect(Rect2 r) => new[] { r.Position.X, r.Position.Y, r.Size.X, r.Size.Y };
 	private static float[] Transform(Transform2D t) => new[] { t.X.X, t.X.Y, t.Y.X, t.Y.Y, t.Origin.X, t.Origin.Y };
 	private static float[] GlobalRect(Control? c) => c == null ? new[] { 0f, 0f, 200f, 24f } : Rect(c.GetGlobalRect());
-	private static string Path(Resource? resource) => resource?.ResourcePath ?? "";
+	private readonly Dictionary<ulong, string> _paths = new();
+	private string Path(Resource? resource)
+	{
+		if (resource == null) return "";
+		ulong id = resource.GetInstanceId();
+		if (_paths.TryGetValue(id, out var path)) return path;
+		if (_paths.Count >= 16384) _paths.Clear();
+		return _paths[id] = resource.ResourcePath;
+	}
 	internal static string T(string zh, string en) => MegaCrit.Sts2.Core.Localization.LocManager.Instance?.Language == "zhs" ? zh : en;
 	internal static IEnumerable<TNode> Descendants<TNode>(Node root) where TNode : Node
 	{

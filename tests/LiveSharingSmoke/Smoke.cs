@@ -65,23 +65,200 @@ public static class Smoke
 	{
 		var view = Field("_view")!;
 		var panel = (Control)view.GetType().GetField("_panel", Instance)!.GetValue(view)!;
-		var surface = panel.GetNode<SubViewportContainer>("SpectatorSurface");
+		// Keep the same harness usable for the previous DLL's performance baseline.
+		var content = panel.GetNodeOrNull<Control>("SpectatorContent");
+		var surface = (content ?? panel).GetNode<SubViewportContainer>("SpectatorSurface");
+		if (content != null) Check(content.ClipContents && surface.Position == Vector2.Zero, "spectator picture is embedded in its own clipped content region");
+		void CheckFit()
+		{
+			if (content == null) return;
+			Check((surface.Size * surface.Scale).DistanceTo(content.Size) < 0.01f, "spectator picture fills content without letterboxing or overflow");
+			Check(Math.Abs(content.Position.X - (panel.Size.X - content.Position.X - content.Size.X)) < 0.01f && Math.Abs(content.Position.X - (panel.Size.Y - content.Position.Y - content.Size.Y)) < 0.01f, "spectator frame has equal left right and bottom borders");
+			var fill = panel.GetNode<ColorRect>("SpectatorTitleFill");
+			Check(Math.Abs(fill.Position.Y + fill.Size.Y - content.Position.Y) < 0.01f, "title background directly meets spectator picture with no separator gap");
+			Check(new Rect2(panel.GlobalPosition, new Vector2(panel.Size.X, content.Position.Y)).Encloses(panel.GetNode<TextureRect>("SpectatorClose/Icon").GetGlobalRect()), "red cross remains fully inside resized navigation row");
+		}
+		CheckFit();
+		var closeIcon = panel.GetNode<TextureRect>("SpectatorClose/Icon");
+		Check(closeIcon.Texture?.ResourcePath == "res://images/atlases/compressed.sprites/back_button_x.tres" && closeIcon.SelfModulate.R > closeIcon.SelfModulate.G * 2 && panel.GetNode<Button>("SpectatorClose").Text == "", "spectator close uses native angular cross with red tint and no text button");
+		Check(closeIcon.Size == new Vector2(28, 28) && closeIcon.Position.X + closeIcon.Size.X <= 48 && closeIcon.Position.Y + closeIcon.Size.Y <= 36 && closeIcon.GlobalPosition.X >= panel.GlobalPosition.X + panel.Size.X - 56 * panel.GetNode<Button>("SpectatorClose").Scale.X, "red close cross fits far right of navigation row without native texture minimum-size overflow");
 		var deck = (Button)view.GetType().GetField("_deck", Instance)!.GetValue(view)!;
 		string before = Fingerprint(player);
-		await Click(panel.Position + surface.Position + deck.GetGlobalRect().GetCenter() * surface.Scale);
+		await Click(surface.GetGlobalTransform() * deck.GetGlobalRect().GetCenter());
 		Check((bool)view.GetType().GetField("_showDeck", Instance)!.GetValue(view)!, "game pointer reaches embedded deck control");
 		Check(MegaCrit.Sts2.Core.Nodes.Screens.Capstones.NCapstoneContainer.Instance!.CurrentCapstoneScreen == null && before == Fingerprint(player), "embedded pointer does not click or change underlying game");
-		await Click(panel.Position + surface.Position + deck.GetGlobalRect().GetCenter() * surface.Scale);
+		await Click(surface.GetGlobalTransform() * deck.GetGlobalRect().GetCenter());
 		Check(!(bool)view.GetType().GetField("_showDeck", Instance)!.GetValue(view)!, "embedded deck control returns to source page");
-		var origin = panel.Position; var title = panel.Position + new Vector2(100, 22);
+		var origin = panel.Position; var title = panel.Position + new Vector2(panel.Size.X - 76, 22);
 		await Pointer(title); await Pointer(title, true); await Pointer(title + new Vector2(80, 50)); await Pointer(title + new Vector2(80, 50), false);
 		Check(panel.Position.DistanceTo(origin + new Vector2(80, 50)) < 2, $"titlebar drag moves embedded panel (from {origin} to {panel.Position})");
 		float width = panel.Size.X; var corner = panel.Position + panel.Size - new Vector2(10, 10);
+		var iconSize = closeIcon.GetGlobalRect().Size; var sourceBox = panel.GetNode<Button>("SpectatorTitlebar/SpectatorSourceSelector/SpectatorSource0"); var sourceSize = sourceBox.GetGlobalRect().Size;
 		await Pointer(corner); await Pointer(corner, true); await Pointer(corner - new Vector2(100, 56)); await Pointer(corner - new Vector2(100, 56), false);
 		Check(panel.Size.X < width - 90 && Math.Abs(surface.Scale.X - surface.Scale.Y) < 0.001f, "resize keeps spectator aspect ratio");
+		Check((closeIcon.GetGlobalRect().Size - iconSize * (panel.Size.X / width)).Length() < 0.01f && (sourceBox.GetGlobalRect().Size - sourceSize * (panel.Size.X / width)).Length() < 0.01f, "real pointer resize scales player boxes and red close cross together");
+		CheckFit();
 		Check(before == Fingerprint(player), "moving and resizing panel leaves player unchanged");
 	}
+	private static async Task CheckSourceSelector(RunState state)
+	{
+		var view = Field("_view")!; var type = view.GetType(); var source = Field("_source")!;
+		_controller.GetMethod("CancelCapture", Static)?.Invoke(null, null);
+		var snapshot = source.GetType().GetMethod("Capture", Instance)!.Invoke(source, new object[] { state })!;
+		var options = (System.Collections.IEnumerable)snapshot.GetType().GetProperty("Sources")!.GetValue(snapshot)!;
+		var participant = options.Cast<object>().First();
+		var participantType = participant!.GetType();
+		Check((string)participant.GetType().GetProperty("Id")!.GetValue(participant)! == state.Players[0].NetId.ToString(), "singleplayer selector uses actual player network ID");
+		Check((string)participant.GetType().GetProperty("Name")!.GetValue(participant)! == MegaCrit.Sts2.Core.Platform.PlatformUtil.GetPlayerNameRaw(RunManager.Instance.NetService.Platform, state.Players[0].NetId), "singleplayer selector uses native platform player name");
+		var panel = (Control)type.GetField("_panel", Instance)!.GetValue(view)!;
+		var selector = panel.GetNode<Control>("SpectatorTitlebar/SpectatorSourceSelector");
+		Check(selector.GetNode<Button>("SpectatorSourcePrevious").Disabled && !selector.GetNode<Button>("SpectatorSourceNext").Disabled && selector.GetChildren().OfType<Button>().Count(b => b.Visible && b.Name.ToString().StartsWith("SpectatorSource") && char.IsDigit(b.Name.ToString()[^1])) == 3 && options.Cast<object>().Count() == 5, "local preview provides five sources with three visible on its first page");
+		Check(options.Cast<object>().Skip(1).All(p => (bool)p.GetType().GetProperty("Simulated")!.GetValue(p)!), "four extra preview sources are explicitly marked as simulated");
+		Check(selector.GetNode<TextureRect>("SpectatorSource0/Background").Texture?.ResourcePath == "res://images/ui/reward_screen/reward_item_button.png", "source frame reuses native blue loot button texture");
+		Check(selector.GetNode<Button>("SpectatorSource0").GetChildren().OfType<Label>().Single().GetThemeColor("font_color") == Colors.White, "source player label is white");
+		var frame = (StyleBoxFlat)selector.GetNode<Panel>("SpectatorSource0/FrameBorder").GetThemeStylebox("panel");
+		Check(!frame.DrawCenter && frame.BorderColor == new Color("142a35") && frame.BorderWidthLeft == 2, "source frame has distinct darker blue border without recoloring its center");
+		Check(selector.Position.Y >= 6 && selector.Size.Y <= 26 && selector.GetNode<Button>("SpectatorSource0").Size.X <= 150 && panel.Size.X - 64 - (selector.Position.X + selector.GetNode<Button>("SpectatorSourceNext").Position.X + 24) >= 96, "compact player boxes leave vertical padding and a generous drag area");
+		Check(selector.GetNode<TextureRect>("SpectatorSourcePrevious/Icon").Texture != null && selector.GetNode<TextureRect>("SpectatorSourceNext/Icon").Texture != null, "source arrows reuse native inspect-card textures");
+		string before = Fingerprint(state.Players[0]); await Click(selector.GetNode<Button>("SpectatorSource0").GetGlobalRect().GetCenter());
+		Check(before == Fingerprint(state.Players[0]), "source player click does not change the game");
+		await Click(selector.GetNode<Button>("SpectatorSourceNext").GetGlobalRect().GetCenter());
+		Check(selector.GetNode<Button>("SpectatorSourceNext").Disabled && !selector.GetNode<Button>("SpectatorSourcePrevious").Disabled && !selector.GetNode<Button>("SpectatorSource2").Visible, "real pointer flips five-source preview to final two-player page");
+		await Click(selector.GetNode<Button>("SpectatorSource1").GetGlobalRect().GetCenter()); await Frames(40);
+		Check((string)type.GetField("_selectedSourceId", Instance)!.GetValue(view)! == "local-preview:5", "real pointer selects fifth preview source after refreshed snapshot");
+		Check(selector.GetNode<TextureRect>("SpectatorSource1/Background").SelfModulate == Colors.White && selector.GetNode<TextureRect>("SpectatorSource0/Background").SelfModulate != Colors.White, "confirmed fifth source alone uses native loot blue without dark tint");
+		await SaveFrame("source-selector-page2", 0);
+		await Click(selector.GetNode<Button>("SpectatorSourcePrevious").GetGlobalRect().GetCenter());
+		Check(selector.GetNode<Button>("SpectatorSourcePrevious").Disabled && !selector.GetNode<Button>("SpectatorSourceNext").Disabled, "real pointer returns preview list to first page");
+		await Click(selector.GetNode<Button>("SpectatorSource0").GetGlobalRect().GetCenter()); await Frames(40);
+		Check((string)type.GetField("_selectedSourceId", Instance)!.GetValue(view)! == state.Players[0].NetId.ToString() && before == Fingerprint(state.Players[0]), "preview switches back to actual local ID without changing player state");
+		Check(selector.GetNode<TextureRect>("SpectatorSource0/Background").SelfModulate == Colors.White && selector.GetNode<TextureRect>("SpectatorSource1/Background").SelfModulate != Colors.White && selector.GetNode<TextureRect>("SpectatorSource2/Background").SelfModulate != Colors.White, "native loot blue selection follows real pointer back to local source");
+		await SaveFrame("source-selector-page1", 0);
+		// A second, test-only renderer exercises generic paging with DTO fixtures,
+		// without changing the local provider's preview list or enabling multiplayer.
+		string requested = "";
+		var testView = type.GetConstructors(Instance).Single().Invoke(new object?[] { new Action(() => { }), null, new Action<string>(id => requested = id) });
+		try
+		{
+			var testPanel = (Control)type.GetField("_panel", Instance)!.GetValue(testView)!;
+			var testSelector = testPanel.GetNode<Control>("SpectatorTitlebar/SpectatorSourceSelector");
+			var listType = snapshot.GetType().GetProperty("Sources")!.PropertyType;
+			System.Collections.IList Players(int count)
+			{
+				var result = (System.Collections.IList)Activator.CreateInstance(listType)!;
+				for (int i = 0; i < count; i++) { var item = Activator.CreateInstance(participantType!)!; item.GetType().GetProperty("Id")!.SetValue(item, (i + 1).ToString()); item.GetType().GetProperty("Name")!.SetValue(item, "玩家 " + (i + 1)); result.Add(item); }
+				return result;
+			}
+			void Update(int count, string current = "1") => type.GetMethod("UpdateSources", Instance)!.Invoke(testView, new object[] { Players(count), current });
+			Button left = testSelector.GetNode<Button>("SpectatorSourcePrevious"), right = testSelector.GetNode<Button>("SpectatorSourceNext");
+			string[] Names() => Enumerable.Range(0, 3).Select(i => testSelector.GetNode<Button>("SpectatorSource" + i)).Where(b => b.Visible).Select(b => b.GetChildren().OfType<Label>().Single().Text).ToArray();
+			foreach (int count in new[] { 0, 1, 2, 3 }) { Update(count); Check(left.Disabled && right.Disabled && Names().Length == count, "source selector fits " + count + " players without paging or empty slots"); }
+			Update(7); Check(left.Disabled && !right.Disabled && Names().SequenceEqual(new[] { "玩家 1", "玩家 2", "玩家 3" }), "source selector first page contains three players");
+			type.GetMethod("NavigateSources", Instance)!.Invoke(testView, new object[] { -1 }); Check(Names()[0] == "玩家 1", "source paging does not wrap before the first page");
+			right.EmitSignal(Button.SignalName.Pressed); Check(!left.Disabled && !right.Disabled && Names().SequenceEqual(new[] { "玩家 4", "玩家 5", "玩家 6" }), "source selector middle page contains next three players");
+			testSelector.GetNode<Button>("SpectatorSource1").EmitSignal(Button.SignalName.Pressed); Check(requested == "5", "source selection requests clicked stable player ID");
+			Check((string)type.GetField("_selectedSourceId", Instance)!.GetValue(testView)! == "1", "source selection awaits new snapshot rather than relabeling old content");
+			Update(7, "5"); Check((string)type.GetField("_selectedSourceId", Instance)!.GetValue(testView)! == "5", "source selection is confirmed by incoming source ID");
+			right.EmitSignal(Button.SignalName.Pressed); Check(!left.Disabled && right.Disabled && Names().SequenceEqual(new[] { "玩家 7" }), "source selector final page hides unused player slots");
+			type.GetMethod("NavigateSources", Instance)!.Invoke(testView, new object[] { 1 }); Check(Names()[0] == "玩家 7", "source paging does not wrap after the final page");
+			Check(testSelector.GetNode<TextureRect>("SpectatorSourceNext/Icon").Material is ShaderMaterial material && material.GetShaderParameter("s").AsSingle() == 0, "disabled source arrow is desaturated gray");
+			Update(2); Check(left.Disabled && right.Disabled && Names().Length == 2, "shrinking source list clamps page and hides stale players");
+			Check(before == Fingerprint(state.Players[0]), "source paging and selection fixtures leave the game unchanged");
+		}
+		finally { type.GetMethod("Dispose", Instance)!.Invoke(testView, null); }
+		await Frames(2);
+	}
 	private static string Fingerprint(Player p) => JsonSerializer.Serialize(p.ToSerializable()) + ":" + p.PlayerCombatState?.Energy + ":" + string.Join(",", p.PlayerCombatState?.Hand.Cards.Select(c => c.Id + ":" + c.CurrentUpgradeLevel) ?? Array.Empty<string>());
+	private static async Task Benchmark(RunState state, string page)
+	{
+		var source = Field("_source")!; var view = Field("_view")!;
+		var capture = source.GetType().GetMethod("Capture", Instance)!;
+		var update = view.GetType().GetMethod("Update", Instance)!;
+		bool optimized = source.GetType().Assembly.GetType("RemoveMultiplayerPlayerLimit.Features.LiveSharing.SnapshotEquality") != null;
+		var costs = new System.Collections.Generic.List<double>(); var frames = new System.Collections.Generic.List<double>();
+		double captureMs = 0, jsonMs = 0, renderMs = 0; long allocated = 0;
+		int gen0 = GC.CollectionCount(0), gen1 = GC.CollectionCount(1), gen2 = GC.CollectionCount(2);
+		var watch = System.Diagnostics.Stopwatch.StartNew(); double lastFrame = watch.Elapsed.TotalMilliseconds;
+		for (int i = 0; i < 60; i++)
+		{
+			await Frames(1); double frame = watch.Elapsed.TotalMilliseconds; frames.Add(frame - lastFrame); lastFrame = frame;
+			_controller.GetMethod("CancelCapture", Static)?.Invoke(null, null);
+			long bytes = GC.GetAllocatedBytesForCurrentThread(); double started = watch.Elapsed.TotalMilliseconds;
+			var sample = capture.Invoke(source, new object[] { state })!; double captured = watch.Elapsed.TotalMilliseconds;
+			var detached = optimized ? sample : sample.GetType().GetMethod("RoundTrip", Static)!.Invoke(null, new[] { sample })!;
+			double serialized = watch.Elapsed.TotalMilliseconds; update.Invoke(view, new[] { detached }); double ended = watch.Elapsed.TotalMilliseconds;
+			captureMs += captured - started; jsonMs += serialized - captured; renderMs += ended - serialized; costs.Add(ended - started);
+			allocated += GC.GetAllocatedBytesForCurrentThread() - bytes;
+		}
+		double Percentile(System.Collections.Generic.List<double> values, double percentile) { var ordered = values.OrderBy(v => v).ToArray(); return ordered[(int)Math.Ceiling(ordered.Length * percentile) - 1]; }
+		var stats = new { Page = page, Optimized = optimized, Samples = costs.Count, CaptureMs = captureMs / costs.Count, JsonMs = jsonMs / costs.Count, UpdateMs = renderMs / costs.Count, MeanMs = costs.Average(), P95Ms = Percentile(costs, .95), P99Ms = Percentile(costs, .99), AllocatedBytes = allocated / costs.Count, FrameP95Ms = Percentile(frames, .95), FrameP99Ms = Percentile(frames, .99), GC0 = GC.CollectionCount(0) - gen0, GC1 = GC.CollectionCount(1) - gen1, GC2 = GC.CollectionCount(2) - gen2, EngineMaxFps = Engine.MaxFps, EngineFPS = Engine.GetFramesPerSecond() };
+		File.WriteAllText(Path.Combine(Output, page + "-performance.json"), JsonSerializer.Serialize(stats));
+		GD.Print("[LiveSharingSmoke] PERFORMANCE " + JsonSerializer.Serialize(stats));
+		if (source.GetType().GetField("_metrics", Instance)?.GetValue(source) is { } profile)
+		{ File.WriteAllText(Path.Combine(Output, page + "-capture-stages.json"), JsonSerializer.Serialize(profile)); GD.Print("[LiveSharingSmoke] CAPTURE STAGES " + JsonSerializer.Serialize(profile)); }
+	}
+	private static void CheckOptimizations(RunState state)
+	{
+		var source = Field("_source")!; var view = Field("_view")!;
+		var equalType = source.GetType().Assembly.GetType("RemoveMultiplayerPlayerLimit.Features.LiveSharing.SnapshotEquality");
+		if (equalType == null) return; // The same benchmark also runs the old baseline.
+		_controller.GetMethod("CancelCapture", Static)?.Invoke(null, null);
+		var capture = source.GetType().GetMethod("Capture", Instance)!;
+		var first = capture.Invoke(source, new object[] { state })!; var second = capture.Invoke(source, new object[] { state })!;
+		var deckProperty = first.GetType().GetProperty("Deck")!;
+		Check(ReferenceEquals(deckProperty.GetValue(first), deckProperty.GetValue(second)), "unchanged deck domain reuses read-only DTO graph");
+		var detached = first.GetType().GetMethod("RoundTrip", Static)!.Invoke(null, new[] { first })!;
+		var equal = equalType.GetMethod("Equal", Static, null, new[] { first.GetType(), first.GetType() }, null)!;
+		Check((bool)equal.Invoke(null, new[] { first, detached })!, "typed comparison includes all round-tripped snapshot fields");
+		var detachedDeck = (System.Collections.IList)deckProperty.GetValue(detached)!;
+		var description = detachedDeck[0]!.GetType().GetProperty("Description")!;
+		description.SetValue(detachedDeck[0], "changed snapshot description");
+		Check(!(bool)equal.Invoke(null, new[] { first, detached })!, "typed comparison catches nested card text changes");
+		Check(!ReferenceEquals(deckProperty.GetValue(first), deckProperty.GetValue(detached)), "transport test still detaches mutable DTO containers");
+		state.Players[0].Deck.Cards[0].InvokeEnergyCostChanged();
+		Check((bool)source.GetType().GetField("_deckDirty", Instance)!.GetValue(source)!, "native card notification invalidates hidden deck cache");
+		var artPane = (Control)view.GetType().GetField("_screenArt", Instance)!.GetValue(view)!;
+		var pageArt = (System.Collections.IList)first.GetType().GetProperty("PageArt")!.GetValue(first)!;
+		var retained = (System.Collections.IDictionary)view.GetType().GetField("_retainedArt", Instance)!.GetValue(view)!;
+		System.Collections.IDictionary Index() => (System.Collections.IDictionary)retained[artPane.GetInstanceId()]!.GetType().GetProperty("Index")!.GetValue(retained[artPane.GetInstanceId()])!;
+		ulong DrawingId(object value) => ((CanvasItem)value.GetType().GetProperty("Drawing")!.GetValue(value)!).GetInstanceId();
+		var before = Index().Keys.Cast<string>().ToDictionary(key => key, key => DrawingId(Index()[key]!));
+		var parents = pageArt.Cast<object>().Select(a => (string)a.GetType().GetProperty("Parent")!.GetValue(a)!).ToHashSet();
+		var leaf = pageArt.Cast<object>().First(a => ((string)a.GetType().GetProperty("Texture")!.GetValue(a)!).Length > 0 && !parents.Contains((string)a.GetType().GetProperty("Key")!.GetValue(a)!));
+		var reduced = (System.Collections.IList)Activator.CreateInstance(pageArt.GetType())!;
+		foreach (var a in pageArt) if (!ReferenceEquals(a, leaf)) reduced.Add(a);
+		var retain = view.GetType().GetMethod("RetainArt", Instance)!;
+		retain.Invoke(view, new object[] { artPane, reduced });
+		Check(Index().Keys.Cast<string>().All(key => before[key] == DrawingId(Index()[key]!)), "map visibility change retains surviving native art nodes");
+		retain.Invoke(view, new object[] { artPane, pageArt });
+		var big = first.GetType().GetMethod("RoundTrip", Static)!.Invoke(null, new[] { first })!;
+		big.GetType().GetProperty("Page")!.SetValue(big, "deck");
+		var bigDeck = (System.Collections.IList)deckProperty.GetValue(big)!; var originals = bigDeck.Cast<object>().ToArray(); bigDeck.Clear();
+		for (int i = 0; i < 200; i++) bigDeck.Add(originals[i % originals.Length]);
+		view.GetType().GetMethod("Update", Instance)!.Invoke(view, new[] { big });
+		Check(Descendants(Game.GetTree().Root.GetNode<CanvasLayer>("RmpLocalSpectator")).OfType<NCard>().Count() < 40, "200-card deck creates only visible and buffered rows");
+		view.GetType().GetMethod("OpenInspect", Instance)!.Invoke(view, new object[] { bigDeck, 199, false });
+		view.GetType().GetMethod("NavigateInspect", Instance)!.Invoke(view, new object[] { 1 });
+		Check((int)view.GetType().GetField("_inspectIndex", Instance)!.GetValue(view)! == 199, "virtualized deck inspection still reaches last card without wrapping");
+		view.GetType().GetMethod("CloseInspect", Instance)!.Invoke(view, null);
+		view.GetType().GetMethod("Update", Instance)!.Invoke(view, new[] { second });
+	}
+	private static async Task BenchmarkLive(string page)
+	{
+		var times = new System.Collections.Generic.List<double>(); var slices = new System.Collections.Generic.List<double>();
+		var renders = new System.Collections.Generic.List<double>(); var acquire = new System.Collections.Generic.List<double>();
+		var watch = System.Diagnostics.Stopwatch.StartNew(); double last = 0;
+		for (int i = 0; i < 180; i++)
+		{
+			await Frames(1); double now = watch.Elapsed.TotalMilliseconds; times.Add(now - last); last = now;
+			if (_controller.GetField("_lastCaptureSliceMs", Static)?.GetValue(null) is double slice && slice > 0)
+			{ slices.Add(slice); double render = (double)(_controller.GetField("_lastCaptureRenderMs", Static)?.GetValue(null) ?? 0d); if (render > 0) renders.Add(render); acquire.Add(slice - render); }
+		}
+		double Percentile(System.Collections.Generic.List<double> values, double p) { var sorted = values.OrderBy(v => v).ToArray(); return sorted.Length == 0 ? 0 : sorted[(int)Math.Ceiling(sorted.Length * p) - 1]; }
+		var stats = new { Page = page, Frames = times.Count, FrameP95Ms = Percentile(times, .95), FrameP99Ms = Percentile(times, .99), FramesOver33Ms = times.Count(t => t > 33), FramesOver50Ms = times.Count(t => t > 50), CaptureSlices = slices.Count, SliceP95Ms = Percentile(slices, .95), SliceP99Ms = Percentile(slices, .99), AcquireP95Ms = Percentile(acquire, .95), RenderP95Ms = Percentile(renders, .95), LastCaptureFrames = _controller.GetField("_lastCaptureFrames", Static)?.GetValue(null), LastCaptureCpuMs = _controller.GetField("_lastCaptureTotalMs", Static)?.GetValue(null), EngineFPS = Engine.GetFramesPerSecond() };
+		File.WriteAllText(Path.Combine(Output, page + "-live-performance.json"), JsonSerializer.Serialize(stats)); GD.Print("[LiveSharingSmoke] LIVE PERFORMANCE " + JsonSerializer.Serialize(stats));
+		if (slices.Count > 0 && page == "map") Check((int)_controller.GetField("_lastCaptureFrames", Static)!.GetValue(null)! > 1, "complex map capture is spread across game frames");
+	}
 	private static async Task SaveFrame(string name, int waitFrames = 30)
 	{
 		await Frames(waitFrames);
@@ -97,10 +274,14 @@ public static class Smoke
 		Game.GetViewport().GetTexture().GetImage().SavePng(Path.Combine(Output, name + "-original.png"));
 		overlay.Show();
 		((Control)view.GetType().GetField("_preview", Instance)!.GetValue(view)!).Visible = true;
+		// Screenshot capture temporarily hides the overlay. Allow the viewport's
+		// GUI hit testing to observe it again before the next synthetic click.
+		await Frames(2);
 	}
 	private static async Task Inspect(RunState state, string page, int minimumCards, int waitFrames = 40)
 	{
 		await Frames(waitFrames);
+		_controller.GetMethod("CancelCapture", Static)?.Invoke(null, null);
 		var source = Field("_source")!;
 		string before = Fingerprint(state.Players[0]);
 		object snap = source.GetType().GetMethod("Capture", Instance)!.Invoke(source, new object[] { state })!;
@@ -176,7 +357,13 @@ public static class Smoke
 			Check(Descendants(Game.GetTree().Root).OfType<Window>().Count() == windowCount, "embedded spectator creates no native or embedded Window");
 			Check(Engine.MaxFps == foregroundFps, "opening embedded panel preserves foreground FPS limit");
 			await Inspect(state, "shop", 7);
+			await CheckSourceSelector(state);
 			await CheckPanelInput(state.Players[0]);
+			var closeView = Field("_view")!;
+			var closePanel = (Control)closeView.GetType().GetField("_panel", Instance)!.GetValue(closeView)!;
+			await Click(closePanel.GetNode<Button>("SpectatorClose").GetGlobalRect().GetCenter());
+			Check(Field("_view") == null, "real pointer red cross closes spectator");
+			await Key(Godot.Key.F8); Check(Field("_view") != null, "F8 reopens spectator after red cross close");
 			await Key(Godot.Key.F8); Check(Field("_view") == null, "F8 closes spectator");
 #if STS2_0111
 			NInputManager.Instance!.ModifyMKbKey("rmpLiveSharing", Godot.Key.F9);
@@ -205,6 +392,7 @@ public static class Smoke
 			MegaCrit.Sts2.Core.Nodes.Screens.Capstones.NCapstoneContainer.Instance!.Close();
 			await Frames(30);
 			await Inspect(state, "combat", 1);
+			await BenchmarkLive("combat");
 			var intentValue = Descendants(NCombatRoom.Instance).OfType<MegaCrit.Sts2.Core.Nodes.Combat.NIntent>().First().GetNode<MegaRichTextLabel>("%Value");
 			string oldIntent = intentValue.Text; intentValue.Text = "123[font_size=18]×12[/font_size]"; await Frames(5);
 			await Inspect(state, "combat", 1, 0); await SaveFrame("intent-multidigit");
@@ -252,19 +440,21 @@ public static class Smoke
 			var panel = Game.GetTree().Root.GetNode<Control>("RmpLocalSpectator/SpectatorPanel");
 			Check(panel.GetGlobalRect().Size.X > 600 && panel.GetGlobalRect().End.X <= Game.GetViewport().GetVisibleRect().Size.X, "embedded panel fits game viewport");
 			Check(Math.Abs(panel.Size.X - Game.GetViewport().GetVisibleRect().Size.X * 0.65f * 3 / 5) < 1, "default panel width is three fifths of initial embedded size");
+			Check(((SubViewport)view.GetType().GetField("_viewport", Instance)!.GetValue(view)!).Size == new Vector2I(1920, 1080), "small panel preserves full 1920x1080 rendering resolution");
 			deck.EmitSignal(Button.SignalName.Pressed);
 			var map = MegaCrit.Sts2.Core.Nodes.Screens.Map.NMapScreen.Instance!.Open(true);
 			await Frames(90);
 			map.Drawings.BeginLineLocal(map.Drawings.GetGlobalTransform().AffineInverse() * new Vector2(700, 500), MegaCrit.Sts2.Core.Nodes.Screens.Map.DrawingMode.Drawing);
 			map.Drawings.UpdateCurrentLinePositionLocal(map.Drawings.GetGlobalTransform().AffineInverse() * new Vector2(1100, 750)); map.Drawings.UpdateCurrentLinePositionLocal(map.Drawings.GetGlobalTransform().AffineInverse() * new Vector2(1500, 650)); map.Drawings.StopLineLocal();
 			await Inspect(state, "map", 0);
+			await BenchmarkLive("map");
 			var artPane = (Control)view.GetType().GetField("_screenArt", Instance)!.GetValue(view)!;
+			await Benchmark(state, "map");
+			var currentSnapshot = view.GetType().GetField("_snapshot", Instance)!.GetValue(view)!;
 			var originalIds = Descendants(artPane).Select(n => n.GetInstanceId()).ToArray();
-			var watch = System.Diagnostics.Stopwatch.StartNew(); double captureMs = 0, jsonMs = 0, renderMs = 0;
-			for (int i = 0; i < 10; i++) { var source = Field("_source")!; double started = watch.Elapsed.TotalMilliseconds; var sample = source.GetType().GetMethod("Capture", Instance)!.Invoke(source, new object[] { state })!; double captured = watch.Elapsed.TotalMilliseconds; var detached = sample.GetType().GetMethod("RoundTrip", Static)!.Invoke(null, new[] { sample })!; double serialized = watch.Elapsed.TotalMilliseconds; view.GetType().GetMethod("Update", Instance)!.Invoke(view, new[] { detached }); captureMs += captured - started; jsonMs += serialized - captured; renderMs += watch.Elapsed.TotalMilliseconds - serialized; }
-			watch.Stop();
+			view.GetType().GetMethod("Update", Instance)!.Invoke(view, new[] { currentSnapshot });
 			Check(originalIds.SequenceEqual(Descendants(artPane).Select(n => n.GetInstanceId())), "map refresh retains native drawing nodes");
-			GD.Print($"[LiveSharingSmoke] Map update avg={watch.Elapsed.TotalMilliseconds / 10:F1} ms (capture={captureMs / 10:F1}, JSON={jsonMs / 10:F1}, render={renderMs / 10:F1}); Engine.MaxFps={Engine.MaxFps}; actualFPS={Engine.GetFramesPerSecond()}");
+			CheckOptimizations(state);
 			map.Drawings.BeginLineLocal(map.Drawings.GetGlobalTransform().AffineInverse() * new Vector2(900, 600), MegaCrit.Sts2.Core.Nodes.Screens.Map.DrawingMode.Erasing); map.Drawings.UpdateCurrentLinePositionLocal(map.Drawings.GetGlobalTransform().AffineInverse() * new Vector2(1400, 700)); map.Drawings.StopLineLocal();
 			await Inspect(state, "map", 0); await SaveFrame("map-erased");
 			map.Close(); await Frames(30);
@@ -292,8 +482,14 @@ public static class Smoke
 			typeof(NDeckCardSelectScreen).GetMethod("ConfirmSelection", Instance)!.Invoke(selection, new object?[] { null }); await selectTask; await Frames(60);
 			await Inspect(state, "event", 0); Check(state.Players[0].Deck.Cards.Count == 6, "Ancient selection returns to event after removing chosen cards");
 			if (Environment.GetEnvironmentVariable("RMP_SMOKE_HOLD") == "1") { GD.Print("[LiveSharingSmoke] HOLD for visual review"); return; }
+			var closingSource = Field("_source")!;
 			Descendants(Game.GetTree().Root.GetNode<CanvasLayer>("RmpLocalSpectator")).OfType<Button>().Single(b => b.Name == "SpectatorClose").EmitSignal(Button.SignalName.Pressed);
 			await Frames(5); Check(Field("_view") == null, "embedded panel close disposes spectator");
+			if (closingSource.GetType().GetField("_watchedDeck", Instance) is { } watchedDeck)
+			{
+				var cards = closingSource.GetType().GetField("_watchedCards", Instance)!.GetValue(closingSource)!;
+				Check(watchedDeck.GetValue(closingSource) == null && (int)cards.GetType().GetProperty("Count")!.GetValue(cards)! == 0, "closing spectator detaches native card and pile subscriptions");
+			}
 			await Key(Godot.Key.F9); Check(Field("_view") != null, "spectator can reopen");
 			RunManager.Instance.CleanUp();
 			await Frames(5); Check(Field("_view") == null && !Game.GetTree().Root.HasNode("RmpLocalSpectator"), "run cleanup closes and frees spectator");

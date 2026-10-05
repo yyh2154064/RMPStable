@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Reflection;
+using System.Diagnostics;
 using Godot;
 using MegaCrit.Sts2.Core.Logging;
 using MegaCrit.Sts2.Core.Multiplayer.Game;
@@ -50,7 +51,14 @@ internal static class LiveSharingController
 	private static LocalSpectatorSource? _source;
 	private static ulong _session;
 	private static bool _wasDown;
-	private static double _settingsTimer, _captureTimer;
+	private static double _settingsTimer, _captureTimer, _drawingTimer, _sinceCapture;
+	private static bool _dirty;
+	private static readonly bool TransportTest = System.Environment.GetEnvironmentVariable("RMP_SPECTATOR_TRANSPORT_TEST") == "1";
+	private static IEnumerator<byte>? _captureWork;
+	private static string _capturePage = "";
+	private static double _captureCpuMs, _lastCaptureSliceMs, _lastCaptureTotalMs, _lastCaptureRenderMs;
+	private static int _captureFrames, _lastCaptureFrames;
+	private const double CaptureBudgetMs = 2;
 	private static string _lastError = "";
 
 	internal static void Initialize()
@@ -83,32 +91,74 @@ internal static class LiveSharingController
 			if (_view != null) { Close(); return; }
 			try
 			{
-				_source = new LocalSpectatorSource(); _session = session; _captureTimer = 0;
-				_view = new SpectatorView(Close);
+				_source = new LocalSpectatorSource(); _session = session; _captureTimer = _drawingTimer = 0; _sinceCapture = 1; _dirty = true;
+				_view = new SpectatorView(Close, () => { _source?.RequestDeck(); _captureTimer = 0; _dirty = true; }, id =>
+				{
+					if (_source?.SelectPreviewSource(id) != true) return;
+					CancelCapture(); _captureTimer = 0; _sinceCapture = 1; _dirty = true;
+				});
 				Log.Info("[RMP:LiveSharing] Local spectator opened.");
 			}
 			catch (Exception ex) { Close(); Log.Warn("[RMP:LiveSharing] Could not open window: " + ex); }
 		}
 		if (_view == null || _source == null) return;
+		_lastCaptureSliceMs = 0;
+		_lastCaptureRenderMs = 0;
 		_captureTimer -= delta;
-		if (_captureTimer > 0) return;
-		_captureTimer = 0.25;
+		_drawingTimer -= delta; _sinceCapture += delta;
+		_dirty |= _source.Observe(run!);
+		string pageToken = _source.PageToken();
+		if (_captureWork != null && pageToken != _capturePage) { CancelCapture(); _captureTimer = 0; _dirty = true; }
+		if (_drawingTimer <= 0)
+		{
+			_drawingTimer = 0.05;
+			try { if (_source.CaptureMapDrawings() is { } drawings) _view.UpdateMapDrawings(drawings); }
+			catch (Exception ex) { if (_lastError != ex.Message) Log.Warn("[RMP:LiveSharing] Drawing update: " + ex.Message); _lastError = ex.Message; }
+		}
+		if (_captureWork == null && _captureTimer > 0 && (!_dirty || _sinceCapture < 0.075)) return;
 		try
 		{
-			var snapshot = SpectatorSnapshot.RoundTrip(_source.Capture(run!));
-			_view.Update(snapshot); _lastError = "";
+			if (_captureWork == null)
+			{
+				_source.WantDeck = _view.WantsDeck; _capturePage = pageToken; _captureCpuMs = 0; _captureFrames = 0; _dirty = false;
+				_captureWork = _source.CaptureSteps(run!, snapshot =>
+				{
+					if (_source == null || _view == null || _source.PageToken() != _capturePage) return;
+					if (TransportTest) snapshot = SpectatorSnapshot.RoundTrip(snapshot);
+					long renderStarted = Stopwatch.GetTimestamp();
+					_view.Update(snapshot); _lastCaptureRenderMs = (Stopwatch.GetTimestamp() - renderStarted) * 1000d / Stopwatch.Frequency; _lastError = "";
+				}).GetEnumerator();
+			}
+			long started = Stopwatch.GetTimestamp(); bool more;
+			do { more = _captureWork.MoveNext(); }
+			while (more && (Stopwatch.GetTimestamp() - started) * 1000d / Stopwatch.Frequency < CaptureBudgetMs);
+			_lastCaptureSliceMs = (Stopwatch.GetTimestamp() - started) * 1000d / Stopwatch.Frequency;
+			_captureCpuMs += _lastCaptureSliceMs; _captureFrames++;
+			if (!more)
+			{
+				_captureWork.Dispose(); _captureWork = null; _lastCaptureFrames = _captureFrames; _lastCaptureTotalMs = _captureCpuMs;
+				_captureTimer = Math.Clamp(_captureCpuMs * 0.004, 0.05, 0.25); _sinceCapture = 0; _drawingTimer = 0.05;
+			}
 		}
 		catch (Exception ex)
 		{
 			_view.ShowError(ex.Message);
 			if (_lastError != ex.Message) Log.Warn("[RMP:LiveSharing] Snapshot unavailable: " + ex);
 			_lastError = ex.Message;
+			CancelCapture();
+			_captureTimer = 0.25; _dirty = false;
 		}
 	}
 
 	internal static void Close()
 	{
-		_view?.Dispose(); _view = null; _source = null; _session = 0; _lastError = "";
+		CancelCapture();
+		_view?.Dispose(); _source?.Dispose(); _view = null; _source = null; _session = 0; _lastError = "";
+	}
+	internal static void CancelCapture()
+	{
+		if (_captureWork == null) return;
+		_captureWork?.Dispose(); _captureWork = null; _source?.AbortCapture();
 	}
 
 	private static void RegisterInput()

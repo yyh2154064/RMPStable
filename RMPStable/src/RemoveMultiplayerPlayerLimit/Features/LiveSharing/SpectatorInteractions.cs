@@ -123,9 +123,29 @@ internal sealed partial class SpectatorView
 		float totalHeight = MathF.Ceiling(sorted.Count / (float)columns) * (height + padding) + 80 + 100 + 320 - padding;
 		float maxScroll = Math.Max(0, totalHeight - grid.Size.Y - 320);
 		var scrollbar = grid.GetNodeOrNull<Control>("%Scrollbar");
+		var visibleSlots = new Dictionary<int, Control>();
+		void VisibleCards()
+		{
+			// ClipContents hides pixels only; virtualize off-screen NCard nodes too.
+			// One extra row each side keeps wheel scrolling and hover smooth.
+			int firstRow = Math.Max(0, (int)((_deckScroll - 180) / (height + padding)) - 1);
+			int lastRow = (int)((_deckScroll + grid.Size.Y - 180) / (height + padding)) + 1;
+			int first = firstRow * columns, end = Math.Min(sorted.Count, (lastRow + 1) * columns);
+			foreach (int index in visibleSlots.Keys.Where(n => n < first || n >= end).ToList())
+			{ var old = visibleSlots[index]; cardLayer.RemoveChild(old); old.QueueFree(); visibleSlots.Remove(index); }
+			for (int i = first; i < end; i++)
+			{
+				if (visibleSlots.ContainsKey(i)) continue;
+				var card = _deckUpgraded ? sorted[i].Upgrade ?? sorted[i] : sorted[i];
+				var slot = Area(cardLayer, new Vector2(left + i % columns * (width + padding), 180 + i / columns * (height + padding)), new Vector2(width, height));
+				slot.MouseFilter = Control.MouseFilterEnum.Pass; DrawCard(slot, card, Vector2.Zero, 0.8f); Hover(slot, card, sorted, i, _deckUpgraded);
+				visibleSlots[i] = slot;
+			}
+		}
 		void ScrollTo(float value)
 		{
 			_deckScroll = Math.Clamp(value, 0, maxScroll); content.Position = new Vector2(content.Position.X, -_deckScroll); Clear(_preview);
+			VisibleCards();
 			if (scrollbar?.GetNodeOrNull<Control>("Handle") is { } handle) handle.Position = new Vector2((scrollbar.Size.X - handle.Size.X) / 2, (maxScroll > 0 ? _deckScroll / maxScroll : 0) * scrollbar.Size.Y - handle.Size.Y / 2);
 		}
 		_deckScroll = Math.Clamp(_deckScroll, 0, maxScroll);
@@ -137,12 +157,7 @@ internal sealed partial class SpectatorView
 			if (input is InputEventMouseButton { Pressed: true } wheel && wheel.ButtonIndex is MouseButton.WheelDown or MouseButton.WheelUp)
 			{ ScrollTo(_deckScroll + (wheel.ButtonIndex == MouseButton.WheelDown ? 120 : -120)); grid.AcceptEvent(); }
 		};
-		for (int i = 0; i < sorted.Count; i++)
-		{
-			var card = _deckUpgraded ? sorted[i].Upgrade ?? sorted[i] : sorted[i];
-			var slot = Area(cardLayer, new Vector2(left + i % columns * (width + padding), 180 + i / columns * (height + padding)), new Vector2(width, height));
-			slot.MouseFilter = Control.MouseFilterEnum.Pass; DrawCard(slot, card, Vector2.Zero, 0.8f); Hover(slot, card, sorted, i, _deckUpgraded);
-		}
+		VisibleCards();
 		if (scrollbar != null)
 		{
 			scrollbar.Visible = maxScroll > 0; scrollbar.MouseFilter = Control.MouseFilterEnum.Stop;

@@ -5,11 +5,15 @@ using System.Text.Json;
 namespace RemoveMultiplayerPlayerLimit.Features.LiveSharing;
 
 // Deliberately contains no Godot objects or live game models. The local prototype
-// passes through JSON before rendering, exercising the future transport boundary.
+// is handed to the local renderer as a read-only value graph. RoundTrip remains
+// available to integration tests to exercise the future transport boundary.
 internal sealed class SpectatorSnapshot
 {
 	public int Schema { get; set; } = 1;
+	public SpectatorRevisions Revisions { get; set; } = new();
 	public string Session { get; set; } = "";
+	public string SourceId { get; set; } = "";
+	public List<ParticipantSnapshot> Sources { get; set; } = new();
 	public string Room { get; set; } = "";
 	public string Page { get; set; } = "";
 	public string Character { get; set; } = "";
@@ -41,8 +45,29 @@ internal sealed class SpectatorSnapshot
 	public string Culture { get; set; } = "en-US";
 
 	internal static SpectatorSnapshot RoundTrip(SpectatorSnapshot source) =>
-		JsonSerializer.Deserialize<SpectatorSnapshot>(JsonSerializer.Serialize(source))
+		JsonSerializer.Deserialize<SpectatorSnapshot>(JsonSerializer.SerializeToUtf8Bytes(source))
 		?? throw new InvalidOperationException("Empty spectator snapshot");
+}
+
+// Session-local domain revisions, not native instance IDs or network entity IDs.
+internal sealed class SpectatorRevisions
+{
+	public long Hud { get; set; }
+	public long Background { get; set; }
+	public long Creatures { get; set; }
+	public long Screen { get; set; }
+	public long Inventory { get; set; }
+	public long Offers { get; set; }
+	public long Cards { get; set; }
+	public long Deck { get; set; }
+	public long Sources { get; set; }
+}
+
+internal sealed class ParticipantSnapshot
+{
+	public string Id { get; set; } = "";
+	public string Name { get; set; } = "";
+	public bool Simulated { get; set; }
 }
 
 internal sealed class CardSnapshot
@@ -97,6 +122,7 @@ internal sealed class ItemSnapshot
 
 internal sealed class CreatureSnapshot
 {
+	public string EntityKey { get; set; } = "";
 	public List<ArtSnapshot> StateArt { get; set; } = new();
 	public List<TextSnapshot> StateLabels { get; set; } = new();
 	public float[] Transform { get; set; } = { 1, 0, 0, 1, 0, 0 };
