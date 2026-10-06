@@ -55,6 +55,10 @@ public static partial class Smoke
 	}
 	private static async Task Pointer(Vector2 position, bool? pressed = null)
 	{
+		// Keep the OS cursor at the injected position across layout/animation
+		// frames; otherwise native motion can replace the synthetic hover before
+		// release, cancelling clicks on small controls.
+		if (!pressed.HasValue) Game.GetViewport().WarpMouse(position);
 		InputEvent input = pressed.HasValue
 			? new InputEventMouseButton { Position = position, GlobalPosition = position, ButtonIndex = MouseButton.Left, Pressed = pressed.Value }
 			: new InputEventMouseMotion { Position = position, GlobalPosition = position };
@@ -93,7 +97,7 @@ public static partial class Smoke
 		Check(MegaCrit.Sts2.Core.Nodes.Screens.Capstones.NCapstoneContainer.Instance!.CurrentCapstoneScreen == null && before == Fingerprint(player), "embedded pointer does not click or change underlying game");
 		await Click(surface.GetGlobalTransform() * deck.GetGlobalRect().GetCenter());
 		Check(!(bool)view.GetType().GetField("_showDeck", Instance)!.GetValue(view)!, "embedded deck control returns to source page");
-		var origin = panel.Position; var title = panel.Position + new Vector2(panel.Size.X - 76, 22);
+		var origin = panel.Position; var title = panel.Position + new Vector2(panel.Size.X - 120 * panel.GetNode<Control>("SpectatorTitlebar").Scale.X, 22);
 		await Pointer(title); await Pointer(title, true); await Pointer(title + new Vector2(80, 50)); await Pointer(title + new Vector2(80, 50), false);
 		Check(panel.Position.DistanceTo(origin + new Vector2(80, 50)) < 2, $"titlebar drag moves embedded panel (from {origin} to {panel.Position})");
 		float width = panel.Size.X; var corner = panel.Position + panel.Size - new Vector2(10, 10);
@@ -263,14 +267,14 @@ public static partial class Smoke
 		File.WriteAllText(Path.Combine(Output, page + "-live-performance.json"), JsonSerializer.Serialize(stats)); GD.Print("[LiveSharingSmoke] LIVE PERFORMANCE " + JsonSerializer.Serialize(stats));
 		if (slices.Count > 0 && page == "map") Check((int)_controller.GetField("_lastCaptureFrames", Static)!.GetValue(null)! > 1, "complex map capture is spread across game frames");
 	}
-	private static async Task SaveFrame(string name, int waitFrames = 30)
+	private static async Task SaveFrame(string name, int waitFrames = 30, bool keepPreview = false)
 	{
 		await Frames(waitFrames);
 		if (DisplayServer.GetName() == "headless") return;
 		var overlay = Game.GetTree().Root.GetNode<CanvasLayer>("RmpLocalSpectator");
 		await Game.ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
 		var view = Field("_view")!;
-		((Control)view.GetType().GetField("_preview", Instance)!.GetValue(view)!).Visible = false;
+		((Control)view.GetType().GetField("_preview", Instance)!.GetValue(view)!).Visible = keepPreview;
 		await Game.ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
 		((SubViewport)view.GetType().GetField("_viewport", Instance)!.GetValue(view)!).GetTexture().GetImage().SavePng(Path.Combine(Output, name + ".png"));
 		Game.GetViewport().GetTexture().GetImage().SavePng(Path.Combine(Output, name + "-embedded.png"));
@@ -356,14 +360,16 @@ public static partial class Smoke
 			File.WriteAllLines(Path.Combine(Output, "card-tree.txt"), Descendants(realCard).OfType<Control>().Select(c => c.GetPath() + " " + c.Position + " " + c.Size));
 			int windowCount = Descendants(Game.GetTree().Root).OfType<Window>().Count();
 			int foregroundFps = Engine.MaxFps;
+			bool initialFocus = DisplayServer.WindowIsFocused();
 			await Key(Godot.Key.F8);
 			Check(Field("_view") != null, "F8 opens spectator");
 			await SaveFrame("default-layout", 0);
 			Check(Descendants(Game.GetTree().Root).OfType<Window>().Count() == windowCount, "embedded spectator creates no native or embedded Window");
-			Check(Engine.MaxFps == foregroundFps, "opening embedded panel preserves foreground FPS limit");
+			Check(DisplayServer.WindowIsFocused() != initialFocus || Engine.MaxFps == foregroundFps, "opening embedded panel preserves FPS limit when window focus is unchanged");
 			await Inspect(state, "shop", 7);
 			await CheckSourceSelector(state);
 			await CheckPanelInput(state.Players[0]);
+			await CheckSourcePointer(state);
 			var closeView = Field("_view")!;
 			var closePanel = (Control)closeView.GetType().GetField("_panel", Instance)!.GetValue(closeView)!;
 			var savedPosition = closePanel.Position; var savedSize = closePanel.Size;
@@ -402,6 +408,7 @@ public static partial class Smoke
 			await Frames(30);
 			await Inspect(state, "combat", 1);
 			await CheckNewInteractions(state);
+			await CheckDocking(state);
 			await BenchmarkLive("combat");
 			var intentValue = Descendants(NCombatRoom.Instance).OfType<MegaCrit.Sts2.Core.Nodes.Combat.NIntent>().First().GetNode<MegaRichTextLabel>("%Value");
 			string oldIntent = intentValue.Text; intentValue.Text = "123[font_size=18]×12[/font_size]"; await Frames(5);
@@ -415,6 +422,7 @@ public static partial class Smoke
 			await Frames(30);
 			Check(Descendants(Game.GetTree().Root.GetNode<CanvasLayer>("RmpLocalSpectator")).OfType<NCard>().Count() == state.Players[0].Deck.Cards.Count, "spectator deck shows all cards");
 			Check(beforeDeck == Fingerprint(state.Players[0]), "deck browsing leaves player unchanged");
+			await CheckDeckUpgrade(state);
 			await SaveFrame("deck");
 			foreach (int mode in new[] { 0, 1, 2, 3 })
 			{
@@ -427,10 +435,11 @@ public static partial class Smoke
 			var current = Field("_source")!.GetType().GetMethod("Capture", Instance)!.Invoke(Field("_source"), new object[] { state })!;
 			var list = current.GetType().GetProperty("Deck")!.GetValue(current)!;
 			view.GetType().GetMethod("OpenInspect", Instance)!.Invoke(view, new object[] { list, 0, false }); await Frames(10);
+			await CheckInspectUpgrade("deck");
 			view.GetType().GetMethod("NavigateInspect", Instance)!.Invoke(view, new object[] { -1 });
 			Check((int)view.GetType().GetField("_inspectIndex", Instance)!.GetValue(view)! == 0, "first card has no previous or wrap");
 			await SaveFrame("inspect");
-			Descendants(Game.GetTree().Root.GetNode<CanvasLayer>("RmpLocalSpectator")).OfType<Button>().Single(b => b.Name == "SpectatorInspectUpgrade").EmitSignal(Button.SignalName.Pressed);
+			await Click(SpectatorPoint(Descendants(Game.GetTree().Root.GetNode<CanvasLayer>("RmpLocalSpectator")).OfType<Button>().Single(b => b.Name == "SpectatorInspectUpgrade").GetGlobalRect().GetCenter()));
 			await SaveFrame("inspect-upgrade");
 			for (int i = 0; i < 30; i++) view.GetType().GetMethod("NavigateInspect", Instance)!.Invoke(view, new object[] { 1 });
 			Check((int)view.GetType().GetField("_inspectIndex", Instance)!.GetValue(view)! == state.Players[0].Deck.Cards.Count - 1, "last card has no next or wrap");
@@ -443,7 +452,7 @@ public static partial class Smoke
 			var tipsRect = Descendants(detail).OfType<VBoxContainer>().Single(n => n.Name == "SpectatorTips").GetGlobalRect();
 			Check(tipsRect.Position.X >= cardFrame.End.X || tipsRect.End.X <= cardFrame.Position.X, "keyword panel sits beside the inspected card");
 			Check(Descendants(detail).OfType<NCard>().Single().GetNode<Label>("%TitleLabel").GetThemeColor("font_color") == StsColors.green, "upgrade title uses original bright green");
-			Descendants(Game.GetTree().Root.GetNode<CanvasLayer>("RmpLocalSpectator")).OfType<Button>().Single(b => b.Name == "SpectatorInspectUpgrade").EmitSignal(Button.SignalName.Pressed);
+			await Click(SpectatorPoint(Descendants(Game.GetTree().Root.GetNode<CanvasLayer>("RmpLocalSpectator")).OfType<Button>().Single(b => b.Name == "SpectatorInspectUpgrade").GetGlobalRect().GetCenter()));
 			await SaveFrame("inspect-base");
 			Check(beforeDeck == Fingerprint(state.Players[0]), "downgrade comparison leaves original upgraded card unchanged");
 			view.GetType().GetMethod("CloseInspect", Instance)!.Invoke(view, null);
@@ -470,6 +479,7 @@ public static partial class Smoke
 			map.Close(); await Frames(30);
 			var lootSet = new MegaCrit.Sts2.Core.Rewards.RewardsSet(state.Players[0]).WithCustomRewards(new System.Collections.Generic.List<MegaCrit.Sts2.Core.Rewards.Reward> { new MegaCrit.Sts2.Core.Rewards.GoldReward(10, state.Players[0]) });
 			var loot = MegaCrit.Sts2.Core.Nodes.Screens.NRewardsScreen.ShowScreen(lootSet, false, state); await Inspect(state, "loot", 0);
+			await CheckNativeRelicAndLootMap(state, loot);
 			NOverlayStack.Instance!.Remove(loot); await Frames(20);
 			var canonicalAncient = ModelDb.AncientEvent<MegaCrit.Sts2.Core.Models.Events.Neow>();
 			state.AppendToMapPointHistory(MegaCrit.Sts2.Core.Map.MapPointType.Ancient, RoomType.Event, canonicalAncient.Id); await RunManager.Instance.EnterRoom(new EventRoom(canonicalAncient) { OnStart = e => ((AncientEventModel)e).DebugOption = "LEAFY_POULTICE" }); await Frames(90); var ancient = RunManager.Instance.EventSynchronizer.GetLocalEvent();

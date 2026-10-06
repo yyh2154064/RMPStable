@@ -38,6 +38,8 @@ internal sealed partial class SpectatorView
 			CreateSourceSelector(titlebar);
 			var dismiss = CreateCloseButton(close);
 			panel.AddChild(dismiss);
+			_pinned = SpectatorPreferences.Current.Pinned;
+			_pin = CreatePinButton(); panel.AddChild(_pin);
 			// Clip at the displayed content rectangle, not at the unscaled 1920x1080
 			// surface. A single layout calculation owns the frame and picture edges.
 			var content = new Control { Name = "SpectatorContent", Position = new Vector2(inset, titleHeight), ClipContents = true, MouseFilter = Control.MouseFilterEnum.Stop };
@@ -67,8 +69,9 @@ internal sealed partial class SpectatorView
 				panel.Size = new Vector2(width, navigationHeight + content.Size.Y + inset);
 				container.Scale = Vector2.One * (content.Size.X / 1920);
 				titleFill.Size = new Vector2(content.Size.X, navigationHeight - inset);
-				titlebar.Scale = dismiss.Scale = Vector2.One * navigationScale;
-				titlebar.Size = new Vector2(width / navigationScale - 64, titleHeight); LayoutSources(width / navigationScale - 96);
+				titlebar.Scale = dismiss.Scale = _pin.Scale = Vector2.One * navigationScale;
+				titlebar.Size = new Vector2(width / navigationScale - 100, titleHeight); LayoutSources(width / navigationScale - 132);
+				_pin.Position = new Vector2(width - 94 * navigationScale, 3 * navigationScale);
 				dismiss.Position = new Vector2(width - 56 * navigationScale, 3 * navigationScale); resize.Position = panel.Size - resize.Size;
 				panel.Position = new Vector2(Math.Clamp(panel.Position.X, 0, Math.Max(0, bounds.X - panel.Size.X)), Math.Clamp(panel.Position.Y, 0, Math.Max(0, bounds.Y - panel.Size.Y)));
 			}
@@ -76,20 +79,30 @@ internal sealed partial class SpectatorView
 			Layout(preferences.HasLayout ? preferences.Width : 640f * 5 / 6);
 			panel.Position = preferences.HasLayout ? new Vector2(preferences.X, preferences.Y) : new Vector2((Bounds().X - panel.Size.X) / 2, SpectatorPreferences.DefaultTop);
 			Layout(panel.Size.X);
-			bool dragging = false, resizing = false;
+			_expandedPosition = panel.Position; _dockEdge = preferences.DockEdge;
 			Vector2 dragStart = default, initialPosition = default; float initialWidth = 0;
 			titlebar.GuiInput += input =>
 			{
-				if (input is InputEventMouseButton { ButtonIndex: MouseButton.Left } click) { dragging = click.Pressed; dragStart = click.GlobalPosition; initialPosition = panel.Position; if (!click.Pressed) SpectatorPreferences.RememberLayout(panel.Position, panel.Size.X); titlebar.AcceptEvent(); }
-				else if (input is InputEventMouseMotion motion && dragging) { panel.Position = initialPosition + motion.GlobalPosition - dragStart; Layout(panel.Size.X); titlebar.AcceptEvent(); }
+				if (input is InputEventMouseButton { ButtonIndex: MouseButton.Left } click)
+				{
+					_panelDragging = click.Pressed;
+					if (click.Pressed) { _dockTween?.Kill(); _dockEdge = 0; _dockHidden = false; dragStart = click.GlobalPosition; initialPosition = panel.Position; }
+					else FinishPanelDrag();
+					titlebar.AcceptEvent();
+				}
+				else if (input is InputEventMouseMotion motion && _panelDragging) { panel.Position = initialPosition + motion.GlobalPosition - dragStart; Layout(panel.Size.X); _expandedPosition = panel.Position; titlebar.AcceptEvent(); }
 			};
 			resize.GuiInput += input =>
 			{
-				if (input is InputEventMouseButton { ButtonIndex: MouseButton.Left } click) { resizing = click.Pressed; dragStart = click.GlobalPosition; initialWidth = panel.Size.X; if (!click.Pressed) SpectatorPreferences.RememberLayout(panel.Position, panel.Size.X); resize.AcceptEvent(); }
-				else if (input is InputEventMouseMotion motion && resizing) { Layout(initialWidth + motion.GlobalPosition.X - dragStart.X); resize.AcceptEvent(); }
+				if (input is InputEventMouseButton { ButtonIndex: MouseButton.Left } click) { _panelResizing = click.Pressed; dragStart = click.GlobalPosition; initialWidth = panel.Size.X; _dockTween?.Kill(); _dockHidden = false; if (!click.Pressed) RememberPanelLayout(); resize.AcceptEvent(); }
+				else if (input is InputEventMouseMotion motion && _panelResizing) { Layout(initialWidth + motion.GlobalPosition.X - dragStart.X); _expandedPosition = panel.Position; panel.Position = _expandedPosition = DockPosition(false); resize.AcceptEvent(); }
 			};
-			void Resized() { Layout(panel.Size.X); SpectatorPreferences.RememberLayout(panel.Position, panel.Size.X); }
-			root.SizeChanged += Resized; overlay.TreeExiting += () => root.SizeChanged -= Resized;
+			void Resized() { bool hidden = _dockHidden; _dockTween?.Kill(); panel.Position = _expandedPosition; Layout(panel.Size.X); _expandedPosition = panel.Position; _expandedPosition = DockPosition(false); SlidePanel(hidden, true); RememberPanelLayout(); }
+			var tree = root.GetTree();
+			root.SizeChanged += Resized; tree.ProcessFrame += ProcessDocking;
+			overlay.TreeExiting += () => { root.SizeChanged -= Resized; tree.ProcessFrame -= ProcessDocking; _dockTween?.Kill(); };
+			// _panel is assigned by the constructor after this factory returns.
+			Callable.From(() => { if (GodotObject.IsInstanceValid(panel) && panel.IsInsideTree()) { _expandedPosition = DockPosition(false); SlidePanel(false, true); } }).CallDeferred();
 			return (overlay, panel, viewport);
 		}
 		catch { overlay.QueueFree(); throw; }

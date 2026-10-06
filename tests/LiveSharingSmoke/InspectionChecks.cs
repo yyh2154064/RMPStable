@@ -8,6 +8,21 @@ using MegaCrit.Sts2.Core.Runs;
 
 public static partial class Smoke
 {
+	private static async Task CheckInspectUpgrade(string context)
+	{
+		var view = Field("_view")!; var type = view.GetType();
+		var inspect = (Control)type.GetField("_inspect", Instance)!.GetValue(view)!;
+		await Frames(3);
+		System.IO.File.WriteAllLines(System.IO.Path.Combine(Output, context + "-inspect-tree.txt"), Descendants(inspect).OfType<Control>().Select(c => c.GetPath() + " " + c.GetGlobalRect() + " " + c.MouseFilter + " z=" + c.ZIndex + " clip=" + c.ClipContents + " visible=" + c.IsVisibleInTree()));
+		var button = Descendants(inspect).OfType<Button>().Single(b => b.Name == "SpectatorInspectUpgrade");
+		bool before = (bool)type.GetField("_inspectUpgraded", Instance)!.GetValue(view)!;
+		await Click(SpectatorPoint(button.GetGlobalRect().GetCenter()));
+		Check((bool)type.GetField("_inspectUpgraded", Instance)!.GetValue(view)! != before, context + " real pointer toggles inspect upgrade");
+		await SaveFrame(context + "-inspect-upgraded", 0);
+		button = Descendants(inspect).OfType<Button>().Single(b => b.Name == "SpectatorInspectUpgrade");
+		await Click(SpectatorPoint(button.GetGlobalRect().GetCenter()));
+		Check((bool)type.GetField("_inspectUpgraded", Instance)!.GetValue(view)! == before, context + " real pointer restores inspect base");
+	}
 	private static object Prop(object value, string property) => value.GetType().GetProperty(property, Instance)!.GetValue(value)!;
 	private static object CaptureNow(RunState state)
 	{
@@ -28,6 +43,7 @@ public static partial class Smoke
 		CaptureNow(state); await Frames(3);
 		var view = Field("_view")!; var type = view.GetType();
 		var button = Descendants((Control)type.GetField("_cards", Instance)!.GetValue(view)!).OfType<Button>().Single(b => b.Name == "SpectatorDeckUpgrade");
+		System.IO.File.WriteAllLines(System.IO.Path.Combine(Output, "spectator-deck-input-tree.txt"), Descendants((Control)type.GetField("_canvas", Instance)!.GetValue(view)!).OfType<Control>().Select(c => c.GetPath() + " " + c.GetGlobalRect() + " " + c.MouseFilter + " z=" + c.ZIndex + " top=" + c.TopLevel + " clip=" + c.ClipContents + " visible=" + c.IsVisibleInTree()));
 		string before = Fingerprint(state.Players[0]);
 		await Click(SpectatorPoint(button.GetGlobalRect().GetCenter()));
 		Check((bool)type.GetField("_deckUpgraded", Instance)!.GetValue(view)!, "native deck page upgrade checkbox responds to real pointer");
@@ -46,6 +62,16 @@ public static partial class Smoke
 			var card = combatState.DrawPile.Cards.First(); combatState.DrawPile.RemoveInternal(card); destination.AddInternal(card);
 		}
 		var snapshot = CaptureNow(state); var view = Field("_view")!; var type = view.GetType();
+		var hand = Descendants((Control)type.GetField("_cards", Instance)!.GetValue(view)!).OfType<NCard>().First();
+		// Resting fan-card centers can lie below the viewport; hit the visible
+		// lower portion instead of injecting a pointer outside the clipped panel.
+		var handPoint = hand.GetGlobalTransform().Origin; handPoint.Y = Math.Min(handPoint.Y, 1020);
+		await Pointer(SpectatorPoint(handPoint));
+		var enlarged = Descendants((Control)type.GetField("_preview", Instance)!.GetValue(view)!).OfType<NCard>().Single();
+		Check(Math.Abs(enlarged.GlobalPosition.Y + 211 * enlarged.Scale.Y - 1080) < 1, "hovered combat hand card bottom stays at viewport bottom");
+		await SaveFrame("hand-hover-bottom", 0, true);
+		await Click(SpectatorPoint(handPoint)); await CheckInspectUpgrade("hand");
+		type.GetMethod("CloseInspect", Instance)!.Invoke(view, null);
 		var hovers = ((System.Collections.IEnumerable)Prop(snapshot, "HudHovers")).Cast<object>().ToList();
 		Check(hovers.Count >= 6, "native health gold room boss map and potion descriptions captured");
 		foreach (var hover in hovers)
@@ -92,6 +118,7 @@ public static partial class Smoke
 				Check(Descendants((Control)type.GetField("_preview", Instance)!.GetValue(view)!).OfType<NCard>().Any(), "pile card hover enlarges card");
 				await Click(SpectatorPoint(cards[0].GetGlobalTransform().Origin));
 				Check((int)type.GetField("_inspectIndex", Instance)!.GetValue(view)! == 0, "pile card click opens first detail");
+				await CheckInspectUpgrade(kind);
 				type.GetMethod("NavigateInspect", Instance)!.Invoke(view, new object[] { -1 });
 				Check((int)type.GetField("_inspectIndex", Instance)!.GetValue(view)! == 0, "pile first detail does not wrap");
 				for (int i = 0; i < 30; i++) type.GetMethod("NavigateInspect", Instance)!.Invoke(view, new object[] { 1 });
@@ -134,7 +161,7 @@ public static partial class Smoke
 		await Frames(90);
 		Check(MegaCrit.Sts2.Core.Nodes.NRun.Instance?.GetInstanceId() != oldRun && Field("_view") != null, "real F5 reload restores spectator automatically");
 		view = Field("_view")!; panel = (Control)type.GetField("_panel", Instance)!.GetValue(view)!;
-		Check(panel.Position == position && panel.Size == size && (string)type.GetField("_selectedSourceId", Instance)!.GetValue(view)! == selected, "real F5 preserves saved source position and size");
+		Check(panel.Position == position && panel.Size == size && (string)type.GetField("_selectedSourceId", Instance)!.GetValue(view)! == selected, "real F5 preserves saved source position and size: before=" + position + "/" + size + "/" + selected + " after=" + panel.Position + "/" + panel.Size + "/" + type.GetField("_selectedSourceId", Instance)!.GetValue(view));
 		await SaveFrame("f5-restored");
 		RunManager.Instance.CleanUp(); await Frames(10);
 		var character = MegaCrit.Sts2.Core.Models.ModelDb.Character<MegaCrit.Sts2.Core.Models.Characters.Ironclad>();

@@ -58,7 +58,16 @@ internal sealed partial class SpectatorView
 	private static Button LocalButton(Control anchor, string name, Action pressed)
 	{
 		var button = new Button { Name = name, Flat = true, FocusMode = Control.FocusModeEnum.None };
-		anchor.AddChild(button); button.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
+		// Native tickboxes are HBoxContainers. A normal child is laid out as an
+		// extra, often zero-width cell instead of covering the checkbox and label.
+		button.TopLevel = anchor is Container;
+		anchor.AddChild(button);
+		if (button.TopLevel)
+		{
+			void Fit() { button.GlobalPosition = anchor.GlobalPosition; button.Size = anchor.Size; button.Scale = anchor.GetGlobalTransform().Scale; }
+			Fit(); anchor.ItemRectChanged += Fit;
+		}
+		else button.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
 		button.Pressed += pressed; return button;
 	}
 	private static void Tick(Control root, bool value)

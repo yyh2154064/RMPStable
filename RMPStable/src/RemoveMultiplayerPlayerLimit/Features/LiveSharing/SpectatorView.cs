@@ -99,6 +99,7 @@ internal sealed partial class SpectatorView : IDisposable
 		_preview = Area(_canvas, Vector2.Zero, new Vector2(1920, 1080));
 		_inspect = Area(_canvas, Vector2.Zero, new Vector2(1920, 1080));
 		_modal = Area(_canvas, Vector2.Zero, new Vector2(1920, 1080));
+		CreatePointer();
 		}
 		catch { _overlay.QueueFree(); throw; }
 	}
@@ -112,6 +113,7 @@ internal sealed partial class SpectatorView : IDisposable
 		UpdateSources(snapshot.Sources, snapshot.SourceId);
 		if (_sourcePage != snapshot.Page) { CloseInspect(); _showDeck = false; BrowsePile = ""; _browseKey = ""; _cardKey = ""; _sourcePage = snapshot.Page; }
 		_snapshot = snapshot;
+		UpdatePointer(snapshot.Pointer);
 		_deck.Disabled = false;
 		_title.Text = snapshot.Character + "  ·  " + T("只读观战", "Spectator");
 		_summary.Text = snapshot.Summary;
@@ -255,7 +257,8 @@ internal sealed partial class SpectatorView : IDisposable
 			if (_inspectIndex >= 0 || _relicIndex >= 0) return;
 			Clear(_preview);
 			var center = slot.GetGlobalRect().GetCenter();
-			var origin = new Vector2(Math.Clamp(center.X - 180, 24, 1536), Math.Clamp(center.Y - 254, 150, 520));
+			bool hand = !_showDeck && BrowsePile.Length == 0 && _snapshot?.Page == "combat";
+			var origin = new Vector2(Math.Clamp(center.X - 180, 24, 1536), hand ? 1080 - 422 * 1.2f : Math.Clamp(center.Y - 254, 150, 520));
 			DrawCard(_preview, card, origin, 1.2f);
 			DrawTips(_preview, card.Tips, new Vector2(origin.X > 1160 ? origin.X - 380 : origin.X + 370, origin.Y));
 		};
@@ -548,5 +551,5 @@ internal sealed partial class SpectatorView : IDisposable
 	}
 	private static void Clear(Node node) { foreach (Node child in node.GetChildren()) { node.RemoveChild(child); child.QueueFree(); } }
 	private static string T(string zh, string en) => LocalSpectatorSource.T(zh, en);
-	public void Dispose() { if (GodotObject.IsInstanceValid(_overlay)) { SpectatorPreferences.RememberLayout(_panel.Position, _panel.Size.X); _overlay.Hide(); _overlay.GetParent()?.RemoveChild(_overlay); _overlay.QueueFree(); } }
+	public void Dispose() { if (GodotObject.IsInstanceValid(_overlay)) { RememberPanelLayout(); _overlay.Hide(); _overlay.GetParent()?.RemoveChild(_overlay); _overlay.QueueFree(); } }
 }

@@ -53,6 +53,7 @@ internal static class LiveSharingController
 	private static ulong _session;
 	private static bool _wasDown;
 	private static double _settingsTimer, _captureTimer, _drawingTimer, _sinceCapture;
+	private static double _pointerTimer;
 	private static bool _dirty;
 	private static readonly bool TransportTest = System.Environment.GetEnvironmentVariable("RMP_SPECTATOR_TRANSPORT_TEST") == "1";
 	private static IEnumerator<byte>? _captureWork;
@@ -93,7 +94,7 @@ internal static class LiveSharingController
 		{
 			try
 			{
-				_source = new LocalSpectatorSource(); _session = session; _captureTimer = _drawingTimer = 0; _sinceCapture = 1; _dirty = true;
+				_source = new LocalSpectatorSource(); _session = session; _captureTimer = _drawingTimer = _pointerTimer = 0; _sinceCapture = 1; _dirty = true;
 				_source.RestorePreviewSource(SpectatorPreferences.Current.SourceId);
 				var relicRow = LocalSpectatorSource.Descendants<MegaCrit.Sts2.Core.Nodes.Relics.NRelicInventoryHolder>(NRun.Instance.GlobalUi.RelicInventory).Where(n => n.IsVisibleInTree()).Select(n => n.GetGlobalRect()).OrderBy(r => r.Position.Y).FirstOrDefault();
 				SpectatorPreferences.DefaultTop = relicRow.Size.Y > 0 ? relicRow.Position.Y + relicRow.Size.Y * 3 / 5 : 116;
@@ -109,6 +110,13 @@ internal static class LiveSharingController
 			catch (Exception ex) { Suspend(); Log.Warn("[RMP:LiveSharing] Could not open window: " + ex); }
 		}
 		if (_view == null || _source == null) return;
+		_pointerTimer -= delta;
+		if (_pointerTimer <= 0)
+		{
+			_pointerTimer = 1d / 30;
+			try { _view.UpdatePointer(_source.CapturePointer(_view.PointerExclusion)); }
+			catch (Exception ex) { if (_lastError != ex.Message) Log.Warn("[RMP:LiveSharing] Pointer update: " + ex.Message); _lastError = ex.Message; }
+		}
 		_lastCaptureSliceMs = 0;
 		_lastCaptureRenderMs = 0;
 		_captureTimer -= delta;

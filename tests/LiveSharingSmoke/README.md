@@ -42,6 +42,21 @@ verifies automatic restoration of the open panel, geometry and fourth source,
 then starts another run and reloads the profile preferences from disk. Explicit
 closed-state persistence and the new 5/6 minimum/default size are also checked.
 
+The edge-docking checks drag to all four edges, check the ten-pixel strip,
+hover reveal, pinning, undocking and restoration of dock/pin preferences.
+Upgrade toggles use pointer press/release in both native and locally opened
+deck views, combat hand details and all three piles. Native relic clicks and a
+map covering the still-present loot stack are captured as regressions. Hand
+hover checks the enlarged card's bottom against the spectator viewport bottom.
+Pointer injection also warps the cursor inside the isolated test window so OS
+motion cannot cancel a synthetic hover between press and release.
+
+Pointer tracking checks cover normalized placement, the exact native image and
+dimensions, the native tilted image while pressed, retained graphics, smooth
+movement, stale sequence rejection, hiding the viewer's own cursor in the panel,
+and read-only behavior. This is still a local pointer simulation, without any
+friend network transport or network bandwidth benchmark.
+
 `*-live-performance.json` samples 180 normal production frames in combat and on
 the map. It reports frame P95/P99, counts above 33/50 ms, capture slice costs,
 and acquisition versus display-update time. `map-performance.json` separately

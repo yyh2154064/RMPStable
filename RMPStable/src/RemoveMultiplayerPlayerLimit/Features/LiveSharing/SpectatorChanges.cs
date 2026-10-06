@@ -34,7 +34,7 @@ internal sealed partial class LocalSpectatorSource
 		_previewSourceId = id; _eventDirty = true; return true;
 	}
 	internal void AbortCapture() { _backgroundRoom = ""; _materialSamples.Clear(); }
-	internal string PageToken() => $"{NRun.Instance?.GetInstanceId()}:{NCombatRoom.Instance?.GetInstanceId()}:{NMerchantRoom.Instance?.GetInstanceId()}:{NEventRoom.Instance?.GetInstanceId()}:{(NOverlayStack.Instance?.Peek() as Node)?.GetInstanceId()}:{(NCapstoneContainer.Instance?.CurrentCapstoneScreen as Node)?.GetInstanceId()}:{NMapScreen.Instance?.IsOpen}:{NMerchantRoom.Instance?.Inventory?.IsOpen}:{(NModalContainer.Instance?.OpenModal as Node)?.GetInstanceId()}:{NRun.Instance?.GetViewportRect().Size}";
+	internal string PageToken() => $"{NRun.Instance?.GetInstanceId()}:{NCombatRoom.Instance?.GetInstanceId()}:{NMerchantRoom.Instance?.GetInstanceId()}:{NEventRoom.Instance?.GetInstanceId()}:{(NOverlayStack.Instance?.Peek() as Node)?.GetInstanceId()}:{(NCapstoneContainer.Instance?.CurrentCapstoneScreen as Node)?.GetInstanceId()}:{NMapScreen.Instance?.IsOpen}:{NMerchantRoom.Instance?.Inventory?.IsOpen}:{NGame.Instance?.InspectRelicScreen?.IsVisibleInTree()}:{(NModalContainer.Instance?.OpenModal as Node)?.GetInstanceId()}:{NRun.Instance?.GetViewportRect().Size}";
 	private CardPile? _watchedDeck;
 	private readonly HashSet<CardModel> _watchedCards = new();
 	private bool _deckDirty = true, _eventDirty;

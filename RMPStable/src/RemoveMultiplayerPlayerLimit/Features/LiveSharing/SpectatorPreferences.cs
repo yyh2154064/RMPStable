@@ -15,6 +15,8 @@ internal sealed class SpectatorPreferences
 	public float X { get; set; }
 	public float Y { get; set; }
 	public float Width { get; set; }
+	public int DockEdge { get; set; }
+	public bool Pinned { get; set; }
 	public string SourceId { get; set; } = "";
 	internal static SpectatorPreferences Current { get; private set; } = new();
 	internal static float DefaultTop { get; set; } = 116;
@@ -31,6 +33,7 @@ internal sealed class SpectatorPreferences
 			if (File.Exists(path)) Current = JsonSerializer.Deserialize<SpectatorPreferences>(File.ReadAllText(path)) ?? new();
 			if (!float.IsFinite(Current.X) || !float.IsFinite(Current.Y) || !float.IsFinite(Current.Width) || Current.Width <= 0) Current.HasLayout = false;
 			Current.SourceId ??= "";
+			if (Current.DockEdge is < 0 or > 4 || !Current.HasLayout) Current.DockEdge = 0;
 		}
 		catch (Exception ex) { Log.Warn("[RMP:LiveSharing] Preferences load: " + ex.Message); }
 		return true;

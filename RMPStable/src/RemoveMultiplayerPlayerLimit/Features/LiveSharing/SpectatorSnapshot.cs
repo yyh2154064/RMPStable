@@ -14,6 +14,7 @@ internal sealed class SpectatorSnapshot
 	public string Session { get; set; } = "";
 	public string SourceId { get; set; } = "";
 	public List<ParticipantSnapshot> Sources { get; set; } = new();
+	public PointerSnapshot Pointer { get; set; } = new();
 	public string Room { get; set; } = "";
 	public string Page { get; set; } = "";
 	public string Character { get; set; } = "";
@@ -52,6 +53,21 @@ internal sealed class SpectatorSnapshot
 	internal static SpectatorSnapshot RoundTrip(SpectatorSnapshot source) =>
 		JsonSerializer.Deserialize<SpectatorSnapshot>(JsonSerializer.SerializeToUtf8Bytes(source))
 		?? throw new InvalidOperationException("Empty spectator snapshot");
+}
+
+internal sealed class PointerSnapshot
+{
+	public string Session { get; set; } = "";
+	public string SourceId { get; set; } = "";
+	public long Sequence { get; set; }
+	public bool Visible { get; set; }
+	public float X { get; set; }
+	public float Y { get; set; }
+	public string Texture { get; set; } = "";
+	public float HotspotX { get; set; }
+	public float HotspotY { get; set; }
+	public float ScaleX { get; set; } = 1;
+	public float ScaleY { get; set; } = 1;
 }
 
 // Session-local domain revisions, not native instance IDs or network entity IDs.

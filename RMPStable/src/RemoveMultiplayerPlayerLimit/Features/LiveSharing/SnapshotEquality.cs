@@ -29,6 +29,7 @@ internal static class SnapshotEquality
 			a.Session == b.Session &&
 			a.SourceId == b.SourceId &&
 			List(a.Sources, b.Sources, Equal) &&
+			Equal(a.Pointer, b.Pointer) &&
 			a.Room == b.Room &&
 			a.Page == b.Page &&
 			a.Character == b.Character &&
@@ -63,6 +64,19 @@ internal static class SnapshotEquality
 			List(a.CombatHudArt, b.CombatHudArt, Equal) &&
 			List(a.CombatHudLabels, b.CombatHudLabels, Equal) &&
 			a.Culture == b.Culture);
+	internal static bool Equal(PointerSnapshot? a, PointerSnapshot? b) => ReferenceEquals(a, b) ||
+		(a != null && b != null &&
+			a.Session == b.Session &&
+			a.SourceId == b.SourceId &&
+			a.Sequence == b.Sequence &&
+			a.Visible == b.Visible &&
+			a.X == b.X &&
+			a.Y == b.Y &&
+			a.Texture == b.Texture &&
+			a.HotspotX == b.HotspotX &&
+			a.HotspotY == b.HotspotY &&
+			a.ScaleX == b.ScaleX &&
+			a.ScaleY == b.ScaleY);
 	internal static bool Equal(SpectatorRevisions? a, SpectatorRevisions? b) => ReferenceEquals(a, b) ||
 		(a != null && b != null &&
 			a.Hud == b.Hud &&

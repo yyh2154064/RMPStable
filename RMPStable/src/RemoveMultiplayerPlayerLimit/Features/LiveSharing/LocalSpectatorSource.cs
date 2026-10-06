@@ -76,6 +76,8 @@ internal sealed partial class LocalSpectatorSource : IDisposable
 		var overlay = NOverlayStack.Instance?.Peek() as Control;
 		if (overlay?.IsVisibleInTree() != true) { overlay = null; reward = null; }
 		var mapScreen = NMapScreen.Instance;
+		// The map covers the overlay stack without necessarily popping rewards.
+		if (mapScreen?.IsOpen == true) { overlay = null; reward = null; }
 		var capstone = NCapstoneContainer.Instance?.CurrentCapstoneScreen as Control;
 		var eventRoom = NEventRoom.Instance;
 		var state = player.PlayerCombatState;
@@ -103,6 +105,7 @@ internal sealed partial class LocalSpectatorSource : IDisposable
 		}
 		var snap = new SpectatorSnapshot
 		{
+			Pointer = _pointer,
 			SourceId = _previewSourceId.Length > 0 ? _previewSourceId : sourceId, Sources = new() { _participant },
 			Session = NRun.Instance.GetInstanceId().ToString(), Room = room, Page = page, UnderlayPage = underlayPage,
 			Width = viewSize.X, Height = viewSize.Y, Background = _background, Culture = LocManager.Instance.CultureInfo.Name,
@@ -280,6 +283,12 @@ internal sealed partial class LocalSpectatorSource : IDisposable
 		}
 		if (page == "event" && eventRoom?.IsVisibleInTree() == true) foreach (var option in Descendants<NEventOptionButton>(eventRoom).Where(n => n.IsVisibleInTree()))
 			snap.Hovers.Add(new HoverSnapshot { Rect = GlobalRect(option), Tips = CaptureTips(option.Option.HoverTips) });
+		// Native relic inspection also lives outside NRun/overlay/capstone stacks.
+		if (NGame.Instance?.InspectRelicScreen is Control relicInspect && relicInspect.IsVisibleInTree())
+		{
+			foreach (var step in CaptureArtSteps(relicInspect, snap.ModalArt, includeButtons: true)) yield return step;
+			foreach (var step in CaptureLabelSteps(relicInspect, snap.ModalLabels)) yield return step;
+		}
 		// Global dialogs live outside NRun and must remain above every captured page.
 		if (NModalContainer.Instance?.OpenModal is Control modal && modal.IsVisibleInTree())
 		{
