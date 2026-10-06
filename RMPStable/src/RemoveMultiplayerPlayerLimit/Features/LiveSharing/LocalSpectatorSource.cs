@@ -124,6 +124,9 @@ internal sealed partial class LocalSpectatorSource : IDisposable
 		if (combat != null) foreach (var ui in new Node[] { combat.Ui.EnergyCounterContainer, combat.Ui.DrawPile, combat.Ui.DiscardPile, combat.Ui.ExhaustPile, combat.Ui.EndTurnButton })
 		{ foreach (var step in CaptureArtSteps(ui, snap.CombatHudArt, true)) yield return step; foreach (var step in CaptureLabelSteps(ui, snap.CombatHudLabels)) yield return step; yield return 0; }
 		foreach (var hud in hudRoots) { foreach (var step in CaptureArtSteps(hud, snap.HudArt, includeButtons: true)) yield return step; foreach (var step in CaptureLabelSteps(hud, snap.HudLabels)) yield return step; yield return 0; }
+		CaptureInspectionTargets(snap, run, top); yield return 0;
+		if (combat != null && state != null)
+			foreach (var step in CapturePiles(snap, new[] { state.DrawPile, state.DiscardPile, state.ExhaustPile }, new Control[] { combat.Ui.DrawPile, combat.Ui.DiscardPile, combat.Ui.ExhaustPile })) yield return step;
 		_metrics?.Mark("hud");
 		// Only traverse the actual run, never the separate spectator window.
 		var visibleCards = new Dictionary<CardModel, NCard>();
@@ -277,6 +280,12 @@ internal sealed partial class LocalSpectatorSource : IDisposable
 		}
 		if (page == "event" && eventRoom?.IsVisibleInTree() == true) foreach (var option in Descendants<NEventOptionButton>(eventRoom).Where(n => n.IsVisibleInTree()))
 			snap.Hovers.Add(new HoverSnapshot { Rect = GlobalRect(option), Tips = CaptureTips(option.Option.HoverTips) });
+		// Global dialogs live outside NRun and must remain above every captured page.
+		if (NModalContainer.Instance?.OpenModal is Control modal && modal.IsVisibleInTree())
+		{
+			foreach (var step in CaptureArtSteps(NModalContainer.Instance, snap.ModalArt, includeButtons: true, includeCards: true)) yield return step;
+			foreach (var step in CaptureLabelSteps(NModalContainer.Instance, snap.ModalLabels)) yield return step;
+		}
 		// Evict detached previews for cards that have left the player's run.
 		var present = new HashSet<CardModel>(visibleCards.Keys.Concat(player.Deck.Cards));
 		foreach (var old in _upgrades.Keys.Where(c => !present.Contains(c)).ToList()) _upgrades.Remove(old);

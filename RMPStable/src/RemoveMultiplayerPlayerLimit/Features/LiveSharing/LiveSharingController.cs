@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Reflection;
 using System.Diagnostics;
 using Godot;
@@ -20,7 +21,7 @@ public sealed class LiveSharingModule : IRMPModule
 	public string Name => "LocalLiveSharing";
 	public void Initialize(ConfigManager config, ReflectionCache cache) => LiveSharingController.Initialize();
 	public Node? CreateNode() => null;
-	public void Cleanup() => LiveSharingController.Close();
+	public void Cleanup() => LiveSharingController.Suspend();
 }
 
 internal static class LiveSharingController
@@ -63,8 +64,8 @@ internal static class LiveSharingController
 
 	internal static void Initialize()
 	{
-		Close();
-		Log.Info("[RMP:LiveSharing] Singleplayer spectator prototype initialized, OFF by default; default hotkey F8.");
+		Suspend();
+		Log.Info("[RMP:LiveSharing] Spectator initialized; new profiles default OFF, saved preferences restore in runs.");
 	}
 
 	internal static void ProcessFrame(double delta)
@@ -76,30 +77,36 @@ internal static class LiveSharingController
 		bool down = key != Key.None && Input.IsKeyPressed(key);
 		bool pressed = down && !_wasDown;
 		_wasDown = down;
-		if (_view == null && !pressed) return;
+		SpectatorPreferences.LoadProfile(Suspend);
+		if (_view == null && !pressed && !SpectatorPreferences.Current.Open) return;
 		var run = GameStateAccessor.GetRunState();
 		var service = RunManager.Instance?.NetService;
-		bool singleplayer = RunManager.Instance?.IsInProgress == true && run?.Players.Count == 1 && NRun.Instance != null
+		bool singleplayer = RunManager.Instance?.IsInProgress == true && run?.Players.Count == 1 && NRun.Instance?.IsNodeReady() == true
 			&& service != null && service.Type != NetGameType.Host && service.Type != NetGameType.Client;
-		if (!singleplayer) { if (_view != null) Close(); return; }
+		if (!singleplayer) { if (_view != null) Suspend(); return; }
 		ulong session = NRun.Instance.GetInstanceId();
-		if (_view != null && _session != session) Close();
+		if (_view != null && _session != session) Suspend();
 		var settings = SceneMonitor.FindSettingsScreen();
 		bool binding = settings != null && settings.IsVisibleInTree();
-		if (pressed && !binding)
+		if (pressed && !binding && _view != null) { Close(); return; }
+		if (_view == null && !binding && (pressed || SpectatorPreferences.Current.Open))
 		{
-			if (_view != null) { Close(); return; }
 			try
 			{
 				_source = new LocalSpectatorSource(); _session = session; _captureTimer = _drawingTimer = 0; _sinceCapture = 1; _dirty = true;
+				_source.RestorePreviewSource(SpectatorPreferences.Current.SourceId);
+				var relicRow = LocalSpectatorSource.Descendants<MegaCrit.Sts2.Core.Nodes.Relics.NRelicInventoryHolder>(NRun.Instance.GlobalUi.RelicInventory).Where(n => n.IsVisibleInTree()).Select(n => n.GetGlobalRect()).OrderBy(r => r.Position.Y).FirstOrDefault();
+				SpectatorPreferences.DefaultTop = relicRow.Size.Y > 0 ? relicRow.Position.Y + relicRow.Size.Y * 3 / 5 : 116;
 				_view = new SpectatorView(Close, () => { _source?.RequestDeck(); _captureTimer = 0; _dirty = true; }, id =>
 				{
 					if (_source?.SelectPreviewSource(id) != true) return;
+					SpectatorPreferences.Current.SourceId = id; SpectatorPreferences.Save();
 					CancelCapture(); _captureTimer = 0; _sinceCapture = 1; _dirty = true;
 				});
+				SpectatorPreferences.Current.Open = true; SpectatorPreferences.Save();
 				Log.Info("[RMP:LiveSharing] Local spectator opened.");
 			}
-			catch (Exception ex) { Close(); Log.Warn("[RMP:LiveSharing] Could not open window: " + ex); }
+			catch (Exception ex) { Suspend(); Log.Warn("[RMP:LiveSharing] Could not open window: " + ex); }
 		}
 		if (_view == null || _source == null) return;
 		_lastCaptureSliceMs = 0;
@@ -120,11 +127,12 @@ internal static class LiveSharingController
 		{
 			if (_captureWork == null)
 			{
-				_source.WantDeck = _view.WantsDeck; _capturePage = pageToken; _captureCpuMs = 0; _captureFrames = 0; _dirty = false;
+				_source.WantDeck = _view.WantsDeck; _source.WantPile = _view.BrowsePile; _capturePage = pageToken; _captureCpuMs = 0; _captureFrames = 0; _dirty = false;
 				_captureWork = _source.CaptureSteps(run!, snapshot =>
 				{
 					if (_source == null || _view == null || _source.PageToken() != _capturePage) return;
 					if (TransportTest) snapshot = SpectatorSnapshot.RoundTrip(snapshot);
+					if (SpectatorPreferences.Current.SourceId != snapshot.SourceId) { SpectatorPreferences.Current.SourceId = snapshot.SourceId; SpectatorPreferences.Save(); }
 					long renderStarted = Stopwatch.GetTimestamp();
 					_view.Update(snapshot); _lastCaptureRenderMs = (Stopwatch.GetTimestamp() - renderStarted) * 1000d / Stopwatch.Frequency; _lastError = "";
 				}).GetEnumerator();
@@ -151,6 +159,10 @@ internal static class LiveSharingController
 	}
 
 	internal static void Close()
+	{
+		SpectatorPreferences.Current.Open = false; SpectatorPreferences.Save(); Suspend();
+	}
+	internal static void Suspend()
 	{
 		CancelCapture();
 		_view?.Dispose(); _source?.Dispose(); _view = null; _source = null; _session = 0; _lastError = "";

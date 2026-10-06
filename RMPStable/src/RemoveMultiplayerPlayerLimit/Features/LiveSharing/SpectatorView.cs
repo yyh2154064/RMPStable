@@ -32,6 +32,9 @@ internal sealed partial class SpectatorView : IDisposable
 	private readonly Control _underlay;
 	private readonly Control _screen;
 	private readonly Control _inspect;
+	private readonly Control _hudHovers, _pileTargets, _browse, _modal;
+	internal string BrowsePile { get; private set; } = "";
+	private string _browseKey = "";
 	private readonly Control _combatHud;
 	private readonly Control _combatHudText;
 	private readonly Control _screenArt;
@@ -88,10 +91,14 @@ internal sealed partial class SpectatorView : IDisposable
 		_inventory = Area(_canvas, new Vector2(24, 83), new Vector2(1840, 58));
 		_deck = new Button { Text = T("查看牌组", "View deck"), Position = new Vector2(1665, 12), Size = new Vector2(230, 45), FocusMode = Control.FocusModeEnum.None };
 		_canvas.AddChild(_deck);
-		_deck.Pressed += () => { _showDeck = !_showDeck; _cardKey = ""; if (_showDeck) requestDeck?.Invoke(); if (_snapshot != null) Update(_snapshot); };
+		_deck.Pressed += () => { BrowsePile = ""; _browseKey = ""; CloseInspect(); _showDeck = !_showDeck; _cardKey = ""; if (_showDeck) requestDeck?.Invoke(); if (_snapshot != null) Update(_snapshot); };
 		_status = Text(_canvas, "", new Rect2(24, 1055, 1840, 25), 18);
+		_hudHovers = Area(_canvas, Vector2.Zero, new Vector2(1920, 1080));
+		_pileTargets = Area(_canvas, Vector2.Zero, new Vector2(1920, 1080));
+		_browse = Area(_canvas, Vector2.Zero, new Vector2(1920, 1080));
 		_preview = Area(_canvas, Vector2.Zero, new Vector2(1920, 1080));
 		_inspect = Area(_canvas, Vector2.Zero, new Vector2(1920, 1080));
+		_modal = Area(_canvas, Vector2.Zero, new Vector2(1920, 1080));
 		}
 		catch { _overlay.QueueFree(); throw; }
 	}
@@ -101,9 +108,9 @@ internal sealed partial class SpectatorView : IDisposable
 		if (snapshot.Schema != 1) throw new InvalidOperationException("Unsupported spectator snapshot version.");
 		string revisionSession = snapshot.Session + ":" + snapshot.SourceId;
 		if (_revisionSession != revisionSession)
-		{ _revisionSession = revisionSession; CloseInspect(); _showDeck = false; _hudKey = _roomKey = _actorKey = _itemKey = _offerKey = _cardKey = _screenKey = ""; }
+		{ _revisionSession = revisionSession; CloseInspect(); _showDeck = false; BrowsePile = ""; _browseKey = ""; _hudKey = _roomKey = _actorKey = _itemKey = _offerKey = _cardKey = _screenKey = ""; }
 		UpdateSources(snapshot.Sources, snapshot.SourceId);
-		if (_sourcePage != snapshot.Page) { CloseInspect(); _showDeck = false; _cardKey = ""; _sourcePage = snapshot.Page; }
+		if (_sourcePage != snapshot.Page) { CloseInspect(); _showDeck = false; BrowsePile = ""; _browseKey = ""; _cardKey = ""; _sourcePage = snapshot.Page; }
 		_snapshot = snapshot;
 		_deck.Disabled = false;
 		_title.Text = snapshot.Character + "  ·  " + T("只读观战", "Spectator");
@@ -113,6 +120,13 @@ internal sealed partial class SpectatorView : IDisposable
 		_deck.Text = _showDeck ? T("返回当前页面", "Current page") : T("查看牌组", "View deck");
 		_page.Scale = new Vector2(1920 / Math.Max(1, snapshot.Width), 1080 / Math.Max(1, snapshot.Height));
 		_page.Size = new Vector2(snapshot.Width, snapshot.Height);
+		_hudHovers.Scale = _pileTargets.Scale = _browse.Scale = _modal.Scale = _page.Scale;
+		_hudHovers.Size = _pileTargets.Size = _browse.Size = _modal.Size = _page.Size;
+		RetainArt(_modal, snapshot.ModalArt); RetainLabels(_modal, snapshot.ModalLabels);
+		_modal.MouseFilter = snapshot.ModalArt.Count > 0 ? Control.MouseFilterEnum.Stop : Control.MouseFilterEnum.Ignore;
+		if (snapshot.ModalArt.Count > 0) { CloseInspect(); BrowsePile = ""; _browseKey = ""; }
+		UpdatePileBrowser(snapshot);
+		_pileTargets.Visible = snapshot.Page == "combat" && !_showDeck && BrowsePile.Length == 0;
 		foreach (var pane in new[] { _cards, _screen, _underlay, _background, _actors, _offers, _hud }) pane.Size = _page.Size;
 		bool nativeHud = snapshot.HudArt.Count > 0;
 		_header.Visible = _title.Visible = _summary.Visible = _inventory.Visible = !nativeHud;
@@ -123,6 +137,7 @@ internal sealed partial class SpectatorView : IDisposable
 		if (nativeHud && snapshot.DeckButtonRect != null) { var rect = Rectangle(snapshot.DeckButtonRect); _deck.Position = rect.Position * _page.Scale; _deck.Size = rect.Size * _page.Scale; }
 		string hudKey = snapshot.Revisions.Hud.ToString();
 		if (_hudKey != hudKey) { _hudKey = hudKey; RetainArt(_hud, snapshot.HudArt); RetainLabels(_hud, snapshot.HudLabels); }
+		RetainHudInteractions(snapshot);
 		string roomKey = snapshot.Revisions.Background.ToString();
 		if (_roomKey != roomKey)
 		{
@@ -177,9 +192,10 @@ internal sealed partial class SpectatorView : IDisposable
 	{
 		_snapshot = null; _deck.Disabled = true;
 		ClearMounted(_mountedCards); ClearMounted(_mountedLabels);
-		Clear(_preview); Clear(_cards); Clear(_actorSprites); Clear(_actorState); Clear(_offers); Clear(_inventory); Clear(_background); Clear(_hud); Clear(_underlay);
+		Clear(_preview); Clear(_cards); Clear(_actorSprites); Clear(_actorState); Clear(_offers); Clear(_inventory); Clear(_background); Clear(_hud); Clear(_underlay); Clear(_hudHovers); Clear(_pileTargets); Clear(_browse); Clear(_modal); BrowsePile = ""; _browseKey = "";
 		foreach (var pane in new[] { _screenArt, _screenDrawings, _screenText, _screenHovers, _combatHud, _combatHudText }) Clear(pane);
 		_retainedArt.Clear(); _retainedLabels.Clear(); _creatureSprites.Clear(); _creatureStates.Clear(); _drawingSurfaces.Clear(); CloseInspect();
+		_interactionHovers = null; _interactionRelics = null; _interactionPiles = null;
 		_handNodes.Clear(); _underlayHandNodes.Clear();
 		_cardKey = _actorKey = _offerKey = _itemKey = _roomKey = _hudKey = _screenKey = "";
 		_header.Visible = _title.Visible = _summary.Visible = true;
@@ -236,7 +252,7 @@ internal sealed partial class SpectatorView : IDisposable
 	{
 		slot.MouseEntered += () =>
 		{
-			if (_inspectIndex >= 0) return;
+			if (_inspectIndex >= 0 || _relicIndex >= 0) return;
 			Clear(_preview);
 			var center = slot.GetGlobalRect().GetCenter();
 			var origin = new Vector2(Math.Clamp(center.X - 180, 24, 1536), Math.Clamp(center.Y - 254, 150, 520));
@@ -532,5 +548,5 @@ internal sealed partial class SpectatorView : IDisposable
 	}
 	private static void Clear(Node node) { foreach (Node child in node.GetChildren()) { node.RemoveChild(child); child.QueueFree(); } }
 	private static string T(string zh, string en) => LocalSpectatorSource.T(zh, en);
-	public void Dispose() { if (GodotObject.IsInstanceValid(_overlay)) { _overlay.Hide(); _overlay.QueueFree(); } }
+	public void Dispose() { if (GodotObject.IsInstanceValid(_overlay)) { SpectatorPreferences.RememberLayout(_panel.Position, _panel.Size.X); _overlay.Hide(); _overlay.GetParent()?.RemoveChild(_overlay); _overlay.QueueFree(); } }
 }

@@ -30,6 +30,11 @@ internal sealed class SpectatorSnapshot
 	public List<string> Choices { get; set; } = new();
 	public List<ArtSnapshot> HudArt { get; set; } = new();
 	public List<TextSnapshot> HudLabels { get; set; } = new();
+	public List<HoverSnapshot> HudHovers { get; set; } = new();
+	public List<RelicSnapshot> Relics { get; set; } = new();
+	public List<PileSnapshot> Piles { get; set; } = new();
+	public List<ArtSnapshot> ModalArt { get; set; } = new();
+	public List<TextSnapshot> ModalLabels { get; set; } = new();
 	public float[]? DeckButtonRect { get; set; }
 	public List<CardSnapshot> UnderlayCards { get; set; } = new();
 	public List<ItemSnapshot> UnderlayItems { get; set; } = new();
@@ -223,4 +228,25 @@ internal sealed class HoverSnapshot
 {
 	public float[] Rect { get; set; } = { 0, 0, 1, 1 };
 	public List<TipSnapshot> Tips { get; set; } = new();
+}
+
+internal sealed class PileSnapshot
+{
+	public string Kind { get; set; } = "";
+	public float[] Rect { get; set; } = { 0, 0, 1, 1 };
+	public List<CardSnapshot> Cards { get; set; } = new();
+}
+
+internal sealed class RelicSnapshot
+{
+	public string Title { get; set; } = "";
+	public string Description { get; set; } = "";
+	public string Flavor { get; set; } = "";
+	public string Icon { get; set; } = "";
+	public string Rarity { get; set; } = "";
+	public float[] FrameHsv { get; set; } = { 1, 1, 1 };
+	public float[] RarityColor { get; set; } = { 1, 1, 1, 1 };
+	public float[] Rect { get; set; } = { 0, 0, 1, 1 };
+	public List<TipSnapshot> Tips { get; set; } = new();
+	public List<TipSnapshot> ExtraTips { get; set; } = new();
 }

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using Godot;
 using MegaCrit.Sts2.Core.Nodes;
+using MegaCrit.Sts2.Core.Nodes.CommonUi;
 using MegaCrit.Sts2.Core.Nodes.Rooms;
 using MegaCrit.Sts2.Core.Nodes.Screens.Capstones;
 using MegaCrit.Sts2.Core.Nodes.Screens.Map;
@@ -17,6 +18,8 @@ internal sealed partial class LocalSpectatorSource
 	private SpectatorSnapshot? _previous;
 	private string _observedState = "";
 	internal bool WantDeck { get; set; }
+	internal string WantPile { get; set; } = "";
+	internal void RestorePreviewSource(string id) { if (_previewParticipants.Exists(p => p.Id == id)) _previewSourceId = id; }
 	private string _previewSourceId = "";
 	private readonly List<ParticipantSnapshot> _previewParticipants = new()
 	{
@@ -31,7 +34,7 @@ internal sealed partial class LocalSpectatorSource
 		_previewSourceId = id; _eventDirty = true; return true;
 	}
 	internal void AbortCapture() { _backgroundRoom = ""; _materialSamples.Clear(); }
-	internal string PageToken() => $"{NRun.Instance?.GetInstanceId()}:{NCombatRoom.Instance?.GetInstanceId()}:{NMerchantRoom.Instance?.GetInstanceId()}:{NEventRoom.Instance?.GetInstanceId()}:{(NOverlayStack.Instance?.Peek() as Node)?.GetInstanceId()}:{(NCapstoneContainer.Instance?.CurrentCapstoneScreen as Node)?.GetInstanceId()}:{NMapScreen.Instance?.IsOpen}:{NMerchantRoom.Instance?.Inventory?.IsOpen}:{NRun.Instance?.GetViewportRect().Size}";
+	internal string PageToken() => $"{NRun.Instance?.GetInstanceId()}:{NCombatRoom.Instance?.GetInstanceId()}:{NMerchantRoom.Instance?.GetInstanceId()}:{NEventRoom.Instance?.GetInstanceId()}:{(NOverlayStack.Instance?.Peek() as Node)?.GetInstanceId()}:{(NCapstoneContainer.Instance?.CurrentCapstoneScreen as Node)?.GetInstanceId()}:{NMapScreen.Instance?.IsOpen}:{NMerchantRoom.Instance?.Inventory?.IsOpen}:{(NModalContainer.Instance?.OpenModal as Node)?.GetInstanceId()}:{NRun.Instance?.GetViewportRect().Size}";
 	private CardPile? _watchedDeck;
 	private readonly HashSet<CardModel> _watchedCards = new();
 	private bool _deckDirty = true, _eventDirty;
@@ -85,6 +88,11 @@ internal sealed partial class LocalSpectatorSource
 		s.Sources = Reuse(s.Sources, p?.Sources, SnapshotEquality.Equal);
 		s.HudArt = Reuse(s.HudArt, p?.HudArt, SnapshotEquality.Equal);
 		s.HudLabels = Reuse(s.HudLabels, p?.HudLabels, SnapshotEquality.Equal);
+		s.HudHovers = Reuse(s.HudHovers, p?.HudHovers, SnapshotEquality.Equal);
+		s.Relics = Reuse(s.Relics, p?.Relics, SnapshotEquality.Equal);
+		s.Piles = Reuse(s.Piles, p?.Piles, SnapshotEquality.Equal);
+		s.ModalArt = Reuse(s.ModalArt, p?.ModalArt, SnapshotEquality.Equal);
+		s.ModalLabels = Reuse(s.ModalLabels, p?.ModalLabels, SnapshotEquality.Equal);
 		s.Creatures = Reuse(s.Creatures, p?.Creatures, SnapshotEquality.Equal);
 		s.Cards = Reuse(s.Cards, p?.Cards, SnapshotEquality.Equal);
 		s.Deck = Reuse(s.Deck, p?.Deck, SnapshotEquality.Equal);
@@ -105,7 +113,7 @@ internal sealed partial class LocalSpectatorSource
 		long Next(long? revision, bool same) => (revision ?? 0) + (same ? 0 : 1);
 		s.Revisions = new SpectatorRevisions
 		{
-			Hud = Next(p?.Revisions.Hud, Same(s.HudArt, p?.HudArt) && Same(s.HudLabels, p?.HudLabels)),
+			Hud = Next(p?.Revisions.Hud, Same(s.HudArt, p?.HudArt) && Same(s.HudLabels, p?.HudLabels) && Same(s.HudHovers, p?.HudHovers) && Same(s.Relics, p?.Relics) && Same(s.Piles, p?.Piles)),
 			Background = Next(p?.Revisions.Background, s.Room == p?.Room && Same(s.Background, p?.Background)),
 			Creatures = Next(p?.Revisions.Creatures, Same(s.Creatures, p?.Creatures)),
 			Screen = Next(p?.Revisions.Screen, s.Page == p?.Page && Same(s.PageLabels, p?.PageLabels) && Same(s.Hovers, p?.Hovers) && Same(s.CombatHudLabels, p?.CombatHudLabels)),

@@ -48,8 +48,8 @@ internal sealed partial class SpectatorView
 			container.AddChild(viewport);
 			// The surface consumes pointer events throughout the read-only view,
 			// including empty spaces, so they cannot click the game underneath it.
-			var resize = new Control { Name = "SpectatorResize", Size = new Vector2(30, 30), MouseFilter = Control.MouseFilterEnum.Stop, MouseDefaultCursorShape = Control.CursorShape.Fdiagsize };
-			panel.AddChild(resize); Text(resize, "◢", new Rect2(0, 0, 30, 30), 24);
+			var resize = new Control { Name = "SpectatorResize", Size = new Vector2(16, 16), MouseFilter = Control.MouseFilterEnum.Stop, MouseDefaultCursorShape = Control.CursorShape.Fdiagsize };
+			panel.AddChild(resize); Text(resize, "◢", new Rect2(0, 0, 16, 16), 14);
 			Vector2 Bounds() => root.GetVisibleRect().Size;
 			var initialBounds = Bounds();
 			float initialMaximum = Math.Max(100, Math.Min(initialBounds.X - 16, (initialBounds.Y - titleHeight - inset - 16) * 16 / 9 + inset * 2));
@@ -60,7 +60,7 @@ internal sealed partial class SpectatorView
 				// The navigation row shares one scale with the resized panel. Account
 				// for its changing height when limiting the whole panel to the screen.
 				float maximum = Math.Max(100, Math.Min(bounds.X - 16, (bounds.Y - inset - 16 + inset * 2 * 9 / 16) / (titleHeight / referenceWidth + 9f / 16)));
-				width = Math.Clamp(width, Math.Min(640, maximum), maximum);
+				width = Math.Clamp(width, Math.Min(640f * 5 / 6, maximum), maximum);
 				float navigationScale = width / referenceWidth, navigationHeight = titleHeight * navigationScale;
 				content.Size = new Vector2(width - inset * 2, (width - inset * 2) * 9 / 16);
 				content.Position = new Vector2(inset, navigationHeight);
@@ -72,20 +72,23 @@ internal sealed partial class SpectatorView
 				dismiss.Position = new Vector2(width - 56 * navigationScale, 3 * navigationScale); resize.Position = panel.Size - resize.Size;
 				panel.Position = new Vector2(Math.Clamp(panel.Position.X, 0, Math.Max(0, bounds.X - panel.Size.X)), Math.Clamp(panel.Position.Y, 0, Math.Max(0, bounds.Y - panel.Size.Y)));
 			}
-			Layout(referenceWidth); panel.Position = (Bounds() - panel.Size) / 2;
+			var preferences = SpectatorPreferences.Current;
+			Layout(preferences.HasLayout ? preferences.Width : 640f * 5 / 6);
+			panel.Position = preferences.HasLayout ? new Vector2(preferences.X, preferences.Y) : new Vector2((Bounds().X - panel.Size.X) / 2, SpectatorPreferences.DefaultTop);
+			Layout(panel.Size.X);
 			bool dragging = false, resizing = false;
 			Vector2 dragStart = default, initialPosition = default; float initialWidth = 0;
 			titlebar.GuiInput += input =>
 			{
-				if (input is InputEventMouseButton { ButtonIndex: MouseButton.Left } click) { dragging = click.Pressed; dragStart = click.GlobalPosition; initialPosition = panel.Position; titlebar.AcceptEvent(); }
+				if (input is InputEventMouseButton { ButtonIndex: MouseButton.Left } click) { dragging = click.Pressed; dragStart = click.GlobalPosition; initialPosition = panel.Position; if (!click.Pressed) SpectatorPreferences.RememberLayout(panel.Position, panel.Size.X); titlebar.AcceptEvent(); }
 				else if (input is InputEventMouseMotion motion && dragging) { panel.Position = initialPosition + motion.GlobalPosition - dragStart; Layout(panel.Size.X); titlebar.AcceptEvent(); }
 			};
 			resize.GuiInput += input =>
 			{
-				if (input is InputEventMouseButton { ButtonIndex: MouseButton.Left } click) { resizing = click.Pressed; dragStart = click.GlobalPosition; initialWidth = panel.Size.X; resize.AcceptEvent(); }
+				if (input is InputEventMouseButton { ButtonIndex: MouseButton.Left } click) { resizing = click.Pressed; dragStart = click.GlobalPosition; initialWidth = panel.Size.X; if (!click.Pressed) SpectatorPreferences.RememberLayout(panel.Position, panel.Size.X); resize.AcceptEvent(); }
 				else if (input is InputEventMouseMotion motion && resizing) { Layout(initialWidth + motion.GlobalPosition.X - dragStart.X); resize.AcceptEvent(); }
 			};
-			void Resized() => Layout(panel.Size.X);
+			void Resized() { Layout(panel.Size.X); SpectatorPreferences.RememberLayout(panel.Position, panel.Size.X); }
 			root.SizeChanged += Resized; overlay.TreeExiting += () => root.SizeChanged -= Resized;
 			return (overlay, panel, viewport);
 		}

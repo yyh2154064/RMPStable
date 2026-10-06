@@ -45,6 +45,11 @@ internal static class SnapshotEquality
 			List(a.Choices, b.Choices, Equal) &&
 			List(a.HudArt, b.HudArt, Equal) &&
 			List(a.HudLabels, b.HudLabels, Equal) &&
+			List(a.HudHovers, b.HudHovers, Equal) &&
+			List(a.Relics, b.Relics, Equal) &&
+			List(a.Piles, b.Piles, Equal) &&
+			List(a.ModalArt, b.ModalArt, Equal) &&
+			List(a.ModalLabels, b.ModalLabels, Equal) &&
 			Array(a.DeckButtonRect, b.DeckButtonRect) &&
 			List(a.UnderlayCards, b.UnderlayCards, Equal) &&
 			List(a.UnderlayItems, b.UnderlayItems, Equal) &&
@@ -243,4 +248,21 @@ internal static class SnapshotEquality
 		(a != null && b != null &&
 			Array(a.Rect, b.Rect) &&
 			List(a.Tips, b.Tips, Equal));
+	internal static bool Equal(PileSnapshot? a, PileSnapshot? b) => ReferenceEquals(a, b) ||
+		(a != null && b != null &&
+			a.Kind == b.Kind &&
+			Array(a.Rect, b.Rect) &&
+			List(a.Cards, b.Cards, Equal));
+	internal static bool Equal(RelicSnapshot? a, RelicSnapshot? b) => ReferenceEquals(a, b) ||
+		(a != null && b != null &&
+			a.Title == b.Title &&
+			a.Description == b.Description &&
+			a.Flavor == b.Flavor &&
+			a.Icon == b.Icon &&
+			a.Rarity == b.Rarity &&
+			Array(a.FrameHsv, b.FrameHsv) &&
+			Array(a.RarityColor, b.RarityColor) &&
+			Array(a.Rect, b.Rect) &&
+			List(a.Tips, b.Tips, Equal) &&
+			List(a.ExtraTips, b.ExtraTips, Equal));
 }

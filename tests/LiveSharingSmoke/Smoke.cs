@@ -31,7 +31,7 @@ using MegaCrit.Sts2.Core.Saves;
 // Test-only mod. Run exclusively in the isolated, non-Steam profile described in
 // README.md. It intentionally creates a disposable run and never ships in RMP.
 [ModInitializer(nameof(Initialize))]
-public static class Smoke
+public static partial class Smoke
 {
 	private static Type _controller = null!;
 	private static readonly BindingFlags Static = BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public;
@@ -80,6 +80,10 @@ public static class Smoke
 		}
 		CheckFit();
 		var closeIcon = panel.GetNode<TextureRect>("SpectatorClose/Icon");
+		var relicRow = Descendants(NRun.Instance!.GlobalUi.RelicInventory).OfType<MegaCrit.Sts2.Core.Nodes.Relics.NRelicInventoryHolder>().Where(n => n.IsVisibleInTree()).Select(n => n.GetGlobalRect()).OrderBy(r => r.Position.Y).First();
+		Check(Math.Abs(panel.Size.X - 640f * 5 / 6) < 1 && Math.Abs(panel.Position.Y - relicRow.Position.Y - relicRow.Size.Y * 3 / 5) < 1, "new profile defaults to five-sixths minimum size exposing three-fifths of native relic row");
+		var firstCorner = panel.Position + panel.Size - new Vector2(10, 10);
+		await Pointer(firstCorner); await Pointer(firstCorner, true); await Pointer(firstCorner + new Vector2(300, 170)); await Pointer(firstCorner + new Vector2(300, 170), false);
 		Check(closeIcon.Texture?.ResourcePath == "res://images/atlases/compressed.sprites/back_button_x.tres" && closeIcon.SelfModulate.R > closeIcon.SelfModulate.G * 2 && panel.GetNode<Button>("SpectatorClose").Text == "", "spectator close uses native angular cross with red tint and no text button");
 		Check(closeIcon.Size == new Vector2(28, 28) && closeIcon.Position.X + closeIcon.Size.X <= 48 && closeIcon.Position.Y + closeIcon.Size.Y <= 36 && closeIcon.GlobalPosition.X >= panel.GlobalPosition.X + panel.Size.X - 56 * panel.GetNode<Button>("SpectatorClose").Scale.X, "red close cross fits far right of navigation row without native texture minimum-size overflow");
 		var deck = (Button)view.GetType().GetField("_deck", Instance)!.GetValue(view)!;
@@ -118,7 +122,7 @@ public static class Smoke
 		Check(selector.GetNode<Button>("SpectatorSource0").GetChildren().OfType<Label>().Single().GetThemeColor("font_color") == Colors.White, "source player label is white");
 		var frame = (StyleBoxFlat)selector.GetNode<Panel>("SpectatorSource0/FrameBorder").GetThemeStylebox("panel");
 		Check(!frame.DrawCenter && frame.BorderColor == new Color("142a35") && frame.BorderWidthLeft == 2, "source frame has distinct darker blue border without recoloring its center");
-		Check(selector.Position.Y >= 6 && selector.Size.Y <= 26 && selector.GetNode<Button>("SpectatorSource0").Size.X <= 150 && panel.Size.X - 64 - (selector.Position.X + selector.GetNode<Button>("SpectatorSourceNext").Position.X + 24) >= 96, "compact player boxes leave vertical padding and a generous drag area");
+		Check(selector.Position.Y >= 6 && selector.Size.Y <= 26 && selector.GetNode<Button>("SpectatorSource0").Size.X <= 150 && panel.Size.X / panel.GetNode<Control>("SpectatorTitlebar").Scale.X - 64 - (selector.Position.X + selector.GetNode<Button>("SpectatorSourceNext").Position.X + 24) >= 96, "compact player boxes leave vertical padding and a generous drag area");
 		Check(selector.GetNode<TextureRect>("SpectatorSourcePrevious/Icon").Texture != null && selector.GetNode<TextureRect>("SpectatorSourceNext/Icon").Texture != null, "source arrows reuse native inspect-card textures");
 		string before = Fingerprint(state.Players[0]); await Click(selector.GetNode<Button>("SpectatorSource0").GetGlobalRect().GetCenter());
 		Check(before == Fingerprint(state.Players[0]), "source player click does not change the game");
@@ -335,7 +339,7 @@ public static class Smoke
 #endif
 			var character = ModelDb.Character<Ironclad>();
 			var state = RunState.CreateForNewRun(new[] { Player.CreateForNewRun(character, SaveManager.Instance.GenerateUnlockStateFromProgress(), 1) }, ActModel.GetDefaultList().Select(a => a.ToMutable()).ToList(), Array.Empty<ModifierModel>(), GameMode.Standard, 0, "RMPLOCALTEST");
-			RunManager.Instance.SetUpNewSingleplayer(state, false);
+			RunManager.Instance.SetUpNewSingleplayer(state, true);
 			await PreloadManager.LoadRunAssets(new[] { character });
 			RunManager.Instance.Launch();
 			Game.RootSceneContainer.SetCurrentScene(NRun.Create(state));
@@ -354,6 +358,7 @@ public static class Smoke
 			int foregroundFps = Engine.MaxFps;
 			await Key(Godot.Key.F8);
 			Check(Field("_view") != null, "F8 opens spectator");
+			await SaveFrame("default-layout", 0);
 			Check(Descendants(Game.GetTree().Root).OfType<Window>().Count() == windowCount, "embedded spectator creates no native or embedded Window");
 			Check(Engine.MaxFps == foregroundFps, "opening embedded panel preserves foreground FPS limit");
 			await Inspect(state, "shop", 7);
@@ -361,9 +366,12 @@ public static class Smoke
 			await CheckPanelInput(state.Players[0]);
 			var closeView = Field("_view")!;
 			var closePanel = (Control)closeView.GetType().GetField("_panel", Instance)!.GetValue(closeView)!;
+			var savedPosition = closePanel.Position; var savedSize = closePanel.Size;
 			await Click(closePanel.GetNode<Button>("SpectatorClose").GetGlobalRect().GetCenter());
 			Check(Field("_view") == null, "real pointer red cross closes spectator");
 			await Key(Godot.Key.F8); Check(Field("_view") != null, "F8 reopens spectator after red cross close");
+			var reopenedPanel = (Control)Field("_view")!.GetType().GetField("_panel", Instance)!.GetValue(Field("_view"))!;
+			Check(reopenedPanel.Position == savedPosition && reopenedPanel.Size == savedSize, "F8 reopen restores saved position and size");
 			await Key(Godot.Key.F8); Check(Field("_view") == null, "F8 closes spectator");
 #if STS2_0111
 			NInputManager.Instance!.ModifyMKbKey("rmpLiveSharing", Godot.Key.F9);
@@ -388,10 +396,12 @@ public static class Smoke
 			MegaCrit.Sts2.Core.Commands.CardCmd.Upgrade(bash);
 			var nativeDeck = MegaCrit.Sts2.Core.Nodes.Screens.NDeckViewScreen.ShowScreen(state.Players[0]);
 			await Frames(60);
+			await CheckDeckUpgrade(state);
 			File.WriteAllLines(Path.Combine(Output, "deck-tree.txt"), Descendants(nativeDeck!).Where(n => n is Control).Select(n => n.GetPath() + " " + n.GetType().Name + "/" + n.GetClass() + " " + ((Control)n).GetGlobalRect()));
 			MegaCrit.Sts2.Core.Nodes.Screens.Capstones.NCapstoneContainer.Instance!.Close();
 			await Frames(30);
 			await Inspect(state, "combat", 1);
+			await CheckNewInteractions(state);
 			await BenchmarkLive("combat");
 			var intentValue = Descendants(NCombatRoom.Instance).OfType<MegaCrit.Sts2.Core.Nodes.Combat.NIntent>().First().GetNode<MegaRichTextLabel>("%Value");
 			string oldIntent = intentValue.Text; intentValue.Text = "123[font_size=18]×12[/font_size]"; await Frames(5);
@@ -439,7 +449,7 @@ public static class Smoke
 			view.GetType().GetMethod("CloseInspect", Instance)!.Invoke(view, null);
 			var panel = Game.GetTree().Root.GetNode<Control>("RmpLocalSpectator/SpectatorPanel");
 			Check(panel.GetGlobalRect().Size.X > 600 && panel.GetGlobalRect().End.X <= Game.GetViewport().GetVisibleRect().Size.X, "embedded panel fits game viewport");
-			Check(Math.Abs(panel.Size.X - Game.GetViewport().GetVisibleRect().Size.X * 0.65f * 3 / 5) < 1, "default panel width is three fifths of initial embedded size");
+			Check(panel.Size.X >= 640f * 5 / 6, "saved panel respects reduced minimum size");
 			Check(((SubViewport)view.GetType().GetField("_viewport", Instance)!.GetValue(view)!).Size == new Vector2I(1920, 1080), "small panel preserves full 1920x1080 rendering resolution");
 			deck.EmitSignal(Button.SignalName.Pressed);
 			var map = MegaCrit.Sts2.Core.Nodes.Screens.Map.NMapScreen.Instance!.Open(true);
@@ -470,6 +480,7 @@ public static class Smoke
 			await Inspect(state, "event", 1, 0); await SaveFrame("ancient-transform", 0); await chooseTask; await Frames(90);
 			await Inspect(state, "event", 0); await SaveFrame("ancient-poultice");
 			Check(state.Players[0].Creature.MaxHp == 68 && state.Players[0].Relics.Any(r => r is MegaCrit.Sts2.Core.Models.Relics.LeafyPoultice), "Leafy Poultice completion follows HP and transformed deck");
+			await CheckMultipleRelics(state);
 			var secondAncient = ModelDb.AncientEvent<MegaCrit.Sts2.Core.Models.Events.Tezcatara>();
 			state.AppendToMapPointHistory(MegaCrit.Sts2.Core.Map.MapPointType.Ancient, RoomType.Event, secondAncient.Id);
 			await RunManager.Instance.EnterRoom(new EventRoom(secondAncient) { OnStart = e => ((AncientEventModel)e).DebugOption = "BIIIG_HUG" }); await Frames(90);
@@ -491,6 +502,7 @@ public static class Smoke
 				Check(watchedDeck.GetValue(closingSource) == null && (int)cards.GetType().GetProperty("Count")!.GetValue(cards)! == 0, "closing spectator detaches native card and pile subscriptions");
 			}
 			await Key(Godot.Key.F9); Check(Field("_view") != null, "spectator can reopen");
+			await CheckRunRestoration(state);
 			RunManager.Instance.CleanUp();
 			await Frames(5); Check(Field("_view") == null && !Game.GetTree().Root.HasNode("RmpLocalSpectator"), "run cleanup closes and frees spectator");
 			GD.Print("[LiveSharingSmoke] ALL PASSED");

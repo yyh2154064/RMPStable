@@ -4,7 +4,7 @@ Developer-only in-game integration harness. **Do not install in the normal game
 directory or run it against your real profile.** The installer ZIP does not
 contain this harness.
 
-It creates a disposable, unsaved Ironclad run, opens a generated merchant, shows
+It creates a disposable Ironclad run saved only in an isolated test profile, opens a generated merchant, shows
 three card candidates, and enters ExoskeletonsWeak combat. It also remaps the
 spectator key in the isolated profile. Card reward candidates here intentionally
 come from the starting deck: the test exercises presentation and lifecycle, not
@@ -33,6 +33,14 @@ blue. Pointer tests close the panel with the native angular cross tinted red,
 reopen it with F8, and verify that resizing scales player boxes and the close
 icon together while keeping the icon fully inside the navigation row.
 Simulated sources do not enable multiplayer.
+
+The interaction checks cover the native deck's view-all-upgrades checkbox,
+HUD and relic hover tips, relic details with bounded previous/next navigation,
+all three combat pile browsers and their native grid layout, card hover/detail
+navigation, and the real F5 confirmation. It accepts F5 in the disposable run,
+verifies automatic restoration of the open panel, geometry and fourth source,
+then starts another run and reloads the profile preferences from disk. Explicit
+closed-state persistence and the new 5/6 minimum/default size are also checked.
 
 `*-live-performance.json` samples 180 normal production frames in combat and on
 the map. It reports frame P95/P99, counts above 33/50 ms, capture slice costs,

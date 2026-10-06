@@ -89,8 +89,11 @@ internal sealed partial class SpectatorView
 		_deckScroll = 0; _cardKey = ""; CloseInspect(); if (_snapshot != null) Update(_snapshot);
 	}
 	private void DrawDeck(SpectatorSnapshot snapshot, List<CardSnapshot> cards, Control parent)
+		=> DrawGrid(snapshot, cards, parent, "");
+	private void DrawGrid(SpectatorSnapshot snapshot, List<CardSnapshot> cards, Control parent, string pile)
 	{
-		var shell = DecorativeScene("res://scenes/screens/deck_view_screen.tscn", parent, new Vector2(snapshot.Width, snapshot.Height));
+		bool deck = pile.Length == 0;
+		var shell = DecorativeScene(deck ? "res://scenes/screens/deck_view_screen.tscn" : "res://scenes/screens/card_pile_screen.tscn", parent, new Vector2(snapshot.Width, snapshot.Height));
 		if (shell == null) return;
 		Solid(parent, new Rect2(0, 80, snapshot.Width, snapshot.Height - 80), new Color(0, 0, 0, 0.65f));
 		parent.MoveChild(shell, parent.GetChildCount() - 1);
@@ -101,7 +104,7 @@ internal sealed partial class SpectatorView
 		if (shell.GetNodeOrNull<CanvasItem>("%SortingBg") is { } bg) bg.Material = material;
 		string[] paths = { "%ObtainedSorter", "%CardTypeSorter", "%CostSorter", "%AlphabeticalSorter" };
 		string[] labels = { T("获得顺序", "Obtained"), T("类型", "Type"), T("费用", "Cost"), T("拼音顺序", "Alphabetical") };
-		for (int i = 0; i < 4; i++)
+		for (int i = 0; deck && i < 4; i++)
 		{
 			int mode = i; var anchor = shell.GetNode<Control>(paths[i]);
 			SetLabel(anchor, "%Label", labels[i]);
@@ -112,44 +115,46 @@ internal sealed partial class SpectatorView
 		SetLabel(shell, "%ViewUpgradesLabel", T("查看升级", "View upgrades"));
 		if (shell.GetNodeOrNull<Control>("%Upgrades") is { } upgrades)
 		{ Tick(upgrades, _deckUpgraded); LocalButton(upgrades, "SpectatorDeckUpgrade", () => { _deckUpgraded = !_deckUpgraded; _cardKey = ""; if (_snapshot != null) Update(_snapshot); }); }
-		if (shell.GetNodeOrNull<Control>("%BackButton") is { } back) LocalButton(back, "SpectatorDeckBack", () => { _showDeck = false; _cardKey = ""; CloseInspect(); if (_snapshot != null) Update(_snapshot); });
-		SetLabel(shell, "%BottomLabel", T("你在战斗中将会使用这里的所有卡牌。", "These are the cards in your deck."));
+		if ((shell.GetNodeOrNull<Control>("%BackButton") ?? shell.GetNodeOrNull<Control>("BackButton")) is { } back) LocalButton(back, "SpectatorDeckBack", () => { _showDeck = false; BrowsePile = ""; _cardKey = ""; _browseKey = ""; CloseInspect(); if (_snapshot != null) Update(_snapshot); });
+		SetLabel(shell, "%BottomLabel", deck ? new MegaCrit.Sts2.Core.Localization.LocString("gameplay_ui", "DECK_PILE_INFO").GetFormattedText() : new MegaCrit.Sts2.Core.Localization.LocString("gameplay_ui", pile.ToUpperInvariant() + "_PILE_INFO").GetFormattedText());
 		// NCardGrid uses 0.8 scale, 40 px padding, 80 px top margin and
 		// NDeckViewScreen adds YOffset=100. The native shell sets the insets.
 		const float width = 240, height = 337.6f, padding = 40;
 		int columns = Math.Max(1, (int)((content.Size.X + padding) / (width + padding)));
-		var sorted = SortedCards(cards);
+		var sorted = deck ? SortedCards(cards) : cards;
+		float yOffset = deck ? 180 : 80;
 		float left = (content.Size.X - (columns * width + (columns - 1) * padding)) * 0.5f;
-		float totalHeight = MathF.Ceiling(sorted.Count / (float)columns) * (height + padding) + 80 + 100 + 320 - padding;
-		float maxScroll = Math.Max(0, totalHeight - grid.Size.Y - 320);
-		var scrollbar = grid.GetNodeOrNull<Control>("%Scrollbar");
+		float totalHeight = MathF.Ceiling(sorted.Count / (float)columns) * (height + padding) + yOffset + 320 - padding;
+		float top = Math.Max(0, (grid.Size.Y - totalHeight) * 0.5f);
+		float maxScroll = Math.Max(0, totalHeight - grid.Size.Y);
+		var scrollbar = grid.GetNodeOrNull<Control>("Scrollbar");
 		var visibleSlots = new Dictionary<int, Control>();
 		void VisibleCards()
 		{
 			// ClipContents hides pixels only; virtualize off-screen NCard nodes too.
 			// One extra row each side keeps wheel scrolling and hover smooth.
-			int firstRow = Math.Max(0, (int)((_deckScroll - 180) / (height + padding)) - 1);
-			int lastRow = (int)((_deckScroll + grid.Size.Y - 180) / (height + padding)) + 1;
+			int firstRow = Math.Max(0, (int)((_deckScroll - yOffset) / (height + padding)) - 1);
+			int lastRow = (int)((_deckScroll + grid.Size.Y - yOffset) / (height + padding)) + 1;
 			int first = firstRow * columns, end = Math.Min(sorted.Count, (lastRow + 1) * columns);
 			foreach (int index in visibleSlots.Keys.Where(n => n < first || n >= end).ToList())
 			{ var old = visibleSlots[index]; cardLayer.RemoveChild(old); old.QueueFree(); visibleSlots.Remove(index); }
 			for (int i = first; i < end; i++)
 			{
 				if (visibleSlots.ContainsKey(i)) continue;
-				var card = _deckUpgraded ? sorted[i].Upgrade ?? sorted[i] : sorted[i];
-				var slot = Area(cardLayer, new Vector2(left + i % columns * (width + padding), 180 + i / columns * (height + padding)), new Vector2(width, height));
-				slot.MouseFilter = Control.MouseFilterEnum.Pass; DrawCard(slot, card, Vector2.Zero, 0.8f); Hover(slot, card, sorted, i, _deckUpgraded);
+				var card = deck && _deckUpgraded ? sorted[i].Upgrade ?? sorted[i] : sorted[i];
+				var slot = Area(cardLayer, new Vector2(left + i % columns * (width + padding), yOffset + i / columns * (height + padding)), new Vector2(width, height));
+				slot.MouseFilter = Control.MouseFilterEnum.Pass; DrawCard(slot, card, Vector2.Zero, 0.8f); Hover(slot, card, sorted, i, deck && _deckUpgraded);
 				visibleSlots[i] = slot;
 			}
 		}
 		void ScrollTo(float value)
 		{
-			_deckScroll = Math.Clamp(value, 0, maxScroll); content.Position = new Vector2(content.Position.X, -_deckScroll); Clear(_preview);
+			_deckScroll = Math.Clamp(value, 0, maxScroll); content.Position = new Vector2(content.Position.X, top - _deckScroll); Clear(_preview);
 			VisibleCards();
 			if (scrollbar?.GetNodeOrNull<Control>("Handle") is { } handle) handle.Position = new Vector2((scrollbar.Size.X - handle.Size.X) / 2, (maxScroll > 0 ? _deckScroll / maxScroll : 0) * scrollbar.Size.Y - handle.Size.Y / 2);
 		}
 		_deckScroll = Math.Clamp(_deckScroll, 0, maxScroll);
-		content.Position = new Vector2(content.Position.X, -_deckScroll); content.Size = new Vector2(content.Size.X, totalHeight);
+		content.Position = new Vector2(content.Position.X, top - _deckScroll); content.Size = new Vector2(content.Size.X, totalHeight);
 		grid.ClipContents = true;
 		grid.MouseFilter = Control.MouseFilterEnum.Stop;
 		grid.GuiInput += input =>
@@ -160,7 +165,7 @@ internal sealed partial class SpectatorView
 		VisibleCards();
 		if (scrollbar != null)
 		{
-			scrollbar.Visible = maxScroll > 0; scrollbar.MouseFilter = Control.MouseFilterEnum.Stop;
+			scrollbar.Visible = totalHeight > grid.Size.Y + 320; scrollbar.MouseFilter = Control.MouseFilterEnum.Stop;
 			bool dragging = false;
 			scrollbar.GuiInput += input =>
 			{
@@ -190,7 +195,7 @@ internal sealed partial class SpectatorView
 	private void OpenInspect(List<CardSnapshot> cards, int index, bool upgraded = false)
 	{ if (index < 0 || index >= cards.Count) return; _detailCards = cards.ToList(); _inspectIndex = index; _inspectAllUpgraded = upgraded; _inspectUpgraded = upgraded || cards[index].Upgraded; DrawInspect(); }
 	private bool _inspectAllUpgraded;
-	private void CloseInspect() { _inspectIndex = -1; _detailCards.Clear(); Clear(_inspect); Clear(_preview); }
+	private void CloseInspect() { _inspectIndex = _relicIndex = -1; _detailCards.Clear(); Clear(_inspect); Clear(_preview); }
 	private void NavigateInspect(int direction)
 	{ int next = _inspectIndex + direction; if (next < 0 || next >= _detailCards.Count) return; _inspectIndex = next; _inspectUpgraded = _inspectAllUpgraded || _detailCards[next].Upgraded; DrawInspect(); }
 	private void DrawInspect()
