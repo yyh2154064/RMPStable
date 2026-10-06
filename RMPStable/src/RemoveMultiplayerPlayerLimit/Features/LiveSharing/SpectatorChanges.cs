@@ -72,6 +72,7 @@ internal sealed partial class LocalSpectatorSource
 	}
 	public void Dispose()
 	{
+		SetControlMode(false); _controlBindings.Clear(); _controlCardIds.Clear();
 		if (_watchedDeck != null) _watchedDeck.ContentsChanged -= DeckChanged;
 		foreach (var card in new List<CardModel>(_watchedCards)) WatchCard(card, false);
 		_watchedDeck = null; _previous = null; _deckCache = new(); _upgrades.Clear(); _paths.Clear(); _materialSamples.Clear();
@@ -110,6 +111,7 @@ internal sealed partial class LocalSpectatorSource
 		s.RewardArt = Reuse(s.RewardArt, p?.RewardArt, SnapshotEquality.Equal);
 		s.RewardLabels = Reuse(s.RewardLabels, p?.RewardLabels, SnapshotEquality.Equal);
 		bool Same(object a, object? b) => ReferenceEquals(a, b);
+		if (p != null && SnapshotEquality.Equal(s.Control, p.Control)) s.Control = p.Control;
 		long Next(long? revision, bool same) => (revision ?? 0) + (same ? 0 : 1);
 		s.Revisions = new SpectatorRevisions
 		{

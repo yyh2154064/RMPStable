@@ -103,6 +103,11 @@ internal static class LiveSharingController
 					if (_source?.SelectPreviewSource(id) != true) return;
 					SpectatorPreferences.Current.SourceId = id; SpectatorPreferences.Save();
 					CancelCapture(); _captureTimer = 0; _sinceCapture = 1; _dirty = true;
+				}, enabled => _source?.SetControlMode(enabled) ?? 0, command =>
+				{
+					var result = _source?.ExecuteCommand(command) ?? new SpectatorCommandResult { RequestId = command.RequestId, Message = "Source unavailable" };
+					CancelCapture(); _captureTimer = 0; _dirty = true;
+					return result;
 				});
 				SpectatorPreferences.Current.Open = true; SpectatorPreferences.Save();
 				Log.Info("[RMP:LiveSharing] Local spectator opened.");

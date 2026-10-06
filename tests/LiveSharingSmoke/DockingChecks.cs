@@ -23,7 +23,7 @@ public static partial class Smoke
 		async Task DragTo(Vector2 position)
 		{
 			float scale = panel.GetNode<Control>("SpectatorTitlebar").Scale.X;
-			var title = panel.Position + new Vector2(panel.Size.X - 120 * scale, 20 * scale);
+			var title = panel.Position + new Vector2(panel.Size.X - 180 * scale, 20 * scale);
 			var end = title + position - panel.Position;
 			await Pointer(title); await Pointer(title, true); await Pointer(end); await Pointer(end, false);
 		}

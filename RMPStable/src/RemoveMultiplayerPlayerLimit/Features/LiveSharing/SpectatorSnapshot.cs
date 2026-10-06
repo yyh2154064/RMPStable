@@ -15,6 +15,7 @@ internal sealed class SpectatorSnapshot
 	public string SourceId { get; set; } = "";
 	public List<ParticipantSnapshot> Sources { get; set; } = new();
 	public PointerSnapshot Pointer { get; set; } = new();
+	public ControlSnapshot Control { get; set; } = new();
 	public string Room { get; set; } = "";
 	public string Page { get; set; } = "";
 	public string Character { get; set; } = "";
@@ -93,6 +94,7 @@ internal sealed class ParticipantSnapshot
 
 internal sealed class CardSnapshot
 {
+	public string ControlId { get; set; } = "";
 	public string ArtKey { get; set; } = "";
 	public List<ArtSnapshot> Art { get; set; } = new();
 	public List<TextSnapshot> Labels { get; set; } = new();
@@ -127,6 +129,31 @@ internal sealed class CardSnapshot
 	public List<TipSnapshot> Tips { get; set; } = new();
 	public CardSnapshot? Upgrade { get; set; }
 	public CardSnapshot? Base { get; set; }
+}
+
+internal sealed class ControlSnapshot
+{
+	public string Context { get; set; } = "";
+	public List<ControlActionSnapshot> Actions { get; set; } = new();
+	public List<ControlTargetSnapshot> Targets { get; set; } = new();
+}
+
+internal sealed class ControlActionSnapshot
+{
+	public string Id { get; set; } = "";
+	public string Kind { get; set; } = "";
+	public string CardId { get; set; } = "";
+	public string Label { get; set; } = "";
+	public bool Enabled { get; set; }
+	public bool RequiresTarget { get; set; }
+	public float[] Rect { get; set; } = { 0, 0, 0, 0 };
+	public List<string> TargetIds { get; set; } = new();
+}
+
+internal sealed class ControlTargetSnapshot
+{
+	public string Id { get; set; } = "";
+	public float[] Rect { get; set; } = { 0, 0, 0, 0 };
 }
 
 internal sealed class ItemSnapshot

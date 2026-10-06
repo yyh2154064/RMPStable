@@ -97,7 +97,7 @@ public static partial class Smoke
 		Check(MegaCrit.Sts2.Core.Nodes.Screens.Capstones.NCapstoneContainer.Instance!.CurrentCapstoneScreen == null && before == Fingerprint(player), "embedded pointer does not click or change underlying game");
 		await Click(surface.GetGlobalTransform() * deck.GetGlobalRect().GetCenter());
 		Check(!(bool)view.GetType().GetField("_showDeck", Instance)!.GetValue(view)!, "embedded deck control returns to source page");
-		var origin = panel.Position; var title = panel.Position + new Vector2(panel.Size.X - 120 * panel.GetNode<Control>("SpectatorTitlebar").Scale.X, 22);
+		var origin = panel.Position; var title = panel.Position + new Vector2(panel.Size.X - 180 * panel.GetNode<Control>("SpectatorTitlebar").Scale.X, 22);
 		await Pointer(title); await Pointer(title, true); await Pointer(title + new Vector2(80, 50)); await Pointer(title + new Vector2(80, 50), false);
 		Check(panel.Position.DistanceTo(origin + new Vector2(80, 50)) < 2, $"titlebar drag moves embedded panel (from {origin} to {panel.Position})");
 		float width = panel.Size.X; var corner = panel.Position + panel.Size - new Vector2(10, 10);
@@ -145,7 +145,10 @@ public static partial class Smoke
 		// A second, test-only renderer exercises generic paging with DTO fixtures,
 		// without changing the local provider's preview list or enabling multiplayer.
 		string requested = "";
-		var testView = type.GetConstructors(Instance).Single().Invoke(new object?[] { new Action(() => { }), null, new Action<string>(id => requested = id) });
+		var constructor = type.GetConstructors(Instance).Single();
+		var arguments = new object?[constructor.GetParameters().Length];
+		arguments[0] = new Action(() => { }); arguments[2] = new Action<string>(id => requested = id);
+		var testView = constructor.Invoke(arguments);
 		try
 		{
 			var testPanel = (Control)type.GetField("_panel", Instance)!.GetValue(testView)!;
@@ -367,6 +370,7 @@ public static partial class Smoke
 			Check(Descendants(Game.GetTree().Root).OfType<Window>().Count() == windowCount, "embedded spectator creates no native or embedded Window");
 			Check(DisplayServer.WindowIsFocused() != initialFocus || Engine.MaxFps == foregroundFps, "opening embedded panel preserves FPS limit when window focus is unchanged");
 			await Inspect(state, "shop", 7);
+			if (Environment.GetEnvironmentVariable("RMP_SMOKE_CONTROL") == "1") { await CheckLocalControls(state); GD.Print("[LiveSharingSmoke] CONTROL ALL PASSED"); Game.GetTree().Quit(); return; }
 			await CheckSourceSelector(state);
 			await CheckPanelInput(state.Players[0]);
 			await CheckSourcePointer(state);

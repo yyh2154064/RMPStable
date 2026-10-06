@@ -40,6 +40,7 @@ internal sealed partial class SpectatorView
 			panel.AddChild(dismiss);
 			_pinned = SpectatorPreferences.Current.Pinned;
 			_pin = CreatePinButton(); panel.AddChild(_pin);
+			_controlToggle = CreateControlToggle(); panel.AddChild(_controlToggle);
 			// Clip at the displayed content rectangle, not at the unscaled 1920x1080
 			// surface. A single layout calculation owns the frame and picture edges.
 			var content = new Control { Name = "SpectatorContent", Position = new Vector2(inset, titleHeight), ClipContents = true, MouseFilter = Control.MouseFilterEnum.Stop };
@@ -69,8 +70,9 @@ internal sealed partial class SpectatorView
 				panel.Size = new Vector2(width, navigationHeight + content.Size.Y + inset);
 				container.Scale = Vector2.One * (content.Size.X / 1920);
 				titleFill.Size = new Vector2(content.Size.X, navigationHeight - inset);
-				titlebar.Scale = dismiss.Scale = _pin.Scale = Vector2.One * navigationScale;
-				titlebar.Size = new Vector2(width / navigationScale - 100, titleHeight); LayoutSources(width / navigationScale - 132);
+				titlebar.Scale = dismiss.Scale = _pin.Scale = _controlToggle.Scale = Vector2.One * navigationScale;
+				titlebar.Size = new Vector2(width / navigationScale - 166, titleHeight); LayoutSources(width / navigationScale - 198);
+				_controlToggle.Position = new Vector2(width - 160 * navigationScale, 3 * navigationScale);
 				_pin.Position = new Vector2(width - 94 * navigationScale, 3 * navigationScale);
 				dismiss.Position = new Vector2(width - 56 * navigationScale, 3 * navigationScale); resize.Position = panel.Size - resize.Size;
 				panel.Position = new Vector2(Math.Clamp(panel.Position.X, 0, Math.Max(0, bounds.X - panel.Size.X)), Math.Clamp(panel.Position.Y, 0, Math.Max(0, bounds.Y - panel.Size.Y)));

@@ -30,6 +30,7 @@ internal static class SnapshotEquality
 			a.SourceId == b.SourceId &&
 			List(a.Sources, b.Sources, Equal) &&
 			Equal(a.Pointer, b.Pointer) &&
+			Equal(a.Control, b.Control) &&
 			a.Room == b.Room &&
 			a.Page == b.Page &&
 			a.Character == b.Character &&
@@ -95,6 +96,7 @@ internal static class SnapshotEquality
 			a.Simulated == b.Simulated);
 	internal static bool Equal(CardSnapshot? a, CardSnapshot? b) => ReferenceEquals(a, b) ||
 		(a != null && b != null &&
+			a.ControlId == b.ControlId &&
 			a.ArtKey == b.ArtKey &&
 			List(a.Art, b.Art, Equal) &&
 			List(a.Labels, b.Labels, Equal) &&
@@ -130,6 +132,7 @@ internal static class SnapshotEquality
 			Equal(a.Upgrade, b.Upgrade) &&
 			Equal(a.Base, b.Base));
 	internal static bool SameCardFace(CardSnapshot a, CardSnapshot b) =>
+		a.ControlId == b.ControlId &&
 		a.ArtKey == b.ArtKey &&
 		List(a.Art, b.Art, Equal) &&
 		List(a.Labels, b.Labels, Equal) &&
@@ -163,6 +166,25 @@ internal static class SnapshotEquality
 		List(a.Tips, b.Tips, Equal) &&
 		Equal(a.Upgrade, b.Upgrade) &&
 		Equal(a.Base, b.Base);
+	internal static bool Equal(ControlSnapshot? a, ControlSnapshot? b) => ReferenceEquals(a, b) ||
+		(a != null && b != null &&
+			a.Context == b.Context &&
+			List(a.Actions, b.Actions, Equal) &&
+			List(a.Targets, b.Targets, Equal));
+	internal static bool Equal(ControlActionSnapshot? a, ControlActionSnapshot? b) => ReferenceEquals(a, b) ||
+		(a != null && b != null &&
+			a.Id == b.Id &&
+			a.Kind == b.Kind &&
+			a.CardId == b.CardId &&
+			a.Label == b.Label &&
+			a.Enabled == b.Enabled &&
+			a.RequiresTarget == b.RequiresTarget &&
+			Array(a.Rect, b.Rect) &&
+			List(a.TargetIds, b.TargetIds, Equal));
+	internal static bool Equal(ControlTargetSnapshot? a, ControlTargetSnapshot? b) => ReferenceEquals(a, b) ||
+		(a != null && b != null &&
+			a.Id == b.Id &&
+			Array(a.Rect, b.Rect));
 	internal static bool Equal(ItemSnapshot? a, ItemSnapshot? b) => ReferenceEquals(a, b) ||
 		(a != null && b != null &&
 			List(a.Art, b.Art, Equal) &&

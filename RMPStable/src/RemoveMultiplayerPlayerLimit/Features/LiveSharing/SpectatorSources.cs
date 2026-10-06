@@ -99,6 +99,7 @@ internal sealed partial class SpectatorView
 	{
 		int index = _sourcePageIndex * 3 + slot;
 		if (index >= _sourceOptions.Count || _sourceOptions[index].Id == _selectedSourceId) return;
+		SetControlEnabled(false);
 		// A future transport/provider supplies the new source snapshot. Selection
 		// is confirmed by its SourceId, never by relabeling the previous picture.
 		_selectSource?.Invoke(_sourceOptions[index].Id);

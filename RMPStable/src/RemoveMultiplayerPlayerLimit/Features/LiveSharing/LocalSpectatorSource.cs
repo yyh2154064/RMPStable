@@ -126,6 +126,13 @@ internal sealed partial class LocalSpectatorSource : IDisposable
 		if (top != null) snap.DeckButtonRect = GlobalRect(top.Deck);
 		if (combat != null) foreach (var ui in new Node[] { combat.Ui.EnergyCounterContainer, combat.Ui.DrawPile, combat.Ui.DiscardPile, combat.Ui.ExhaustPile, combat.Ui.EndTurnButton })
 		{ foreach (var step in CaptureArtSteps(ui, snap.CombatHudArt, true)) yield return step; foreach (var step in CaptureLabelSteps(ui, snap.CombatHudLabels)) yield return step; yield return 0; }
+		if (combat?.Ui.Hand is { } selectingHand && selectingHand.CurrentMode is NPlayerHand.Mode.SimpleSelect or NPlayerHand.Mode.UpgradeSelect)
+			foreach (var name in new[] { "%SelectModeBackstop", "%SelectModeConfirmButton", "%SelectionHeader", "%UpgradePreviewContainer" })
+			{
+				var ui = selectingHand.GetNodeOrNull<Control>(name);
+				foreach (var step in CaptureArtSteps(ui, snap.CombatHudArt, true)) yield return step;
+				foreach (var step in CaptureLabelSteps(ui, snap.CombatHudLabels)) yield return step;
+			}
 		foreach (var hud in hudRoots) { foreach (var step in CaptureArtSteps(hud, snap.HudArt, includeButtons: true)) yield return step; foreach (var step in CaptureLabelSteps(hud, snap.HudLabels)) yield return step; yield return 0; }
 		CaptureInspectionTargets(snap, run, top); yield return 0;
 		if (combat != null && state != null)
@@ -299,6 +306,7 @@ internal sealed partial class LocalSpectatorSource : IDisposable
 		var present = new HashSet<CardModel>(visibleCards.Keys.Concat(player.Deck.Cards));
 		foreach (var old in _upgrades.Keys.Where(c => !present.Contains(c)).ToList()) _upgrades.Remove(old);
 		_metrics?.Mark("page");
+		CaptureControl(snap, player, reward ?? pageRoot);
 		var frozen = Freeze(snap); _metrics?.Mark("compare"); publish(frozen);
 	}
 	private List<TipSnapshot> CaptureTips(IEnumerable<IHoverTip> tips)
@@ -318,6 +326,7 @@ internal sealed partial class LocalSpectatorSource : IDisposable
 		int cost = c.EnergyCost.GetWithModifiers(pile == PileType.Hand ? CostModifiers.All : CostModifiers.Local);
 		var result = new CardSnapshot
 		{
+			ControlId = preview ? "" : CardControlId(c),
 			ArtKey = visual?.GetInstanceId().ToString() ?? "",
 			Transform = visual == null ? null : Transform(visual.Body.GetGlobalTransform()),
 			Id = c.Id.ToString(), Title = c.Title, Type = c.Type.ToLocString().GetFormattedText(),

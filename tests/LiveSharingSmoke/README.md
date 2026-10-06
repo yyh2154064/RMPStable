@@ -4,6 +4,16 @@ Developer-only in-game integration harness. **Do not install in the normal game
 directory or run it against your real profile.** The installer ZIP does not
 contain this harness.
 
+Set `RMP_SMOKE_CONTROL=1` in the isolated profile to run the separate control
+suite. It generates real reward cards through the native reward task, selects
+and skips rewards using spectator pointer clicks, completes a native multi-card
+confirmation and a combat hand selection, then drags actual cards, checks energy,
+damage and block, and ends a full turn. It rejects stale contexts and revoked
+permissions, replays an accepted request to prove no second play occurs, checks
+cancelled drags, and verifies local input priority and permission reset on close.
+The default suite keeps control off and checks all existing read-only behavior.
+Neither suite tests friend transport or remote permissions.
+
 It creates a disposable Ironclad run saved only in an isolated test profile, opens a generated merchant, shows
 three card candidates, and enters ExoskeletonsWeak combat. It also remaps the
 spectator key in the isolated profile. Card reward candidates here intentionally

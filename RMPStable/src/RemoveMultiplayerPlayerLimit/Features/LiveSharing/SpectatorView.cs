@@ -57,8 +57,9 @@ internal sealed partial class SpectatorView : IDisposable
 	private readonly HashSet<string> _reportedAssets = new();
 
 	internal bool WantsDeck => _showDeck || _snapshot?.Page == "deck";
-	internal SpectatorView(Action close, Action? requestDeck = null, Action<string>? selectSource = null)
+	internal SpectatorView(Action close, Action? requestDeck = null, Action<string>? selectSource = null, Func<bool, long>? setControl = null, Func<SpectatorCommand, SpectatorCommandResult>? executeCommand = null)
 	{
+		_setControl = setControl; _executeCommand = executeCommand;
 		_selectSource = selectSource;
 		(_overlay, _panel, _viewport) = CreatePanel(close);
 		try
@@ -100,6 +101,7 @@ internal sealed partial class SpectatorView : IDisposable
 		_inspect = Area(_canvas, Vector2.Zero, new Vector2(1920, 1080));
 		_modal = Area(_canvas, Vector2.Zero, new Vector2(1920, 1080));
 		CreatePointer();
+		CreateControlLayer();
 		}
 		catch { _overlay.QueueFree(); throw; }
 	}
@@ -109,13 +111,13 @@ internal sealed partial class SpectatorView : IDisposable
 		if (snapshot.Schema != 1) throw new InvalidOperationException("Unsupported spectator snapshot version.");
 		string revisionSession = snapshot.Session + ":" + snapshot.SourceId;
 		if (_revisionSession != revisionSession)
-		{ _revisionSession = revisionSession; CloseInspect(); _showDeck = false; BrowsePile = ""; _browseKey = ""; _hudKey = _roomKey = _actorKey = _itemKey = _offerKey = _cardKey = _screenKey = ""; }
+		{ _revisionSession = revisionSession; SetControlEnabled(false); CloseInspect(); _showDeck = false; BrowsePile = ""; _browseKey = ""; _hudKey = _roomKey = _actorKey = _itemKey = _offerKey = _cardKey = _screenKey = ""; }
 		UpdateSources(snapshot.Sources, snapshot.SourceId);
 		if (_sourcePage != snapshot.Page) { CloseInspect(); _showDeck = false; BrowsePile = ""; _browseKey = ""; _cardKey = ""; _sourcePage = snapshot.Page; }
 		_snapshot = snapshot;
 		UpdatePointer(snapshot.Pointer);
 		_deck.Disabled = false;
-		_title.Text = snapshot.Character + "  ·  " + T("只读观战", "Spectator");
+		_title.Text = snapshot.Character + "  ·  " + (_controlEnabled ? T("本机控制", "Local control") : T("只读观战", "Spectator"));
 		_summary.Text = snapshot.Summary;
 		_detail.Text = snapshot.Page == "combat" ? snapshot.Detail.Replace("   ", "\n") : "";
 		_status.Text = T("单人本地测试 · 悬停放大卡牌 · 在游戏窗口按观战快捷键开关", "Local test · hover to enlarge cards · toggle the hotkey in the game window");
@@ -123,6 +125,7 @@ internal sealed partial class SpectatorView : IDisposable
 		_page.Scale = new Vector2(1920 / Math.Max(1, snapshot.Width), 1080 / Math.Max(1, snapshot.Height));
 		_page.Size = new Vector2(snapshot.Width, snapshot.Height);
 		_hudHovers.Scale = _pileTargets.Scale = _browse.Scale = _modal.Scale = _page.Scale;
+		UpdateControl(snapshot);
 		_hudHovers.Size = _pileTargets.Size = _browse.Size = _modal.Size = _page.Size;
 		RetainArt(_modal, snapshot.ModalArt); RetainLabels(_modal, snapshot.ModalLabels);
 		_modal.MouseFilter = snapshot.ModalArt.Count > 0 ? Control.MouseFilterEnum.Stop : Control.MouseFilterEnum.Ignore;
@@ -263,7 +266,11 @@ internal sealed partial class SpectatorView : IDisposable
 			DrawTips(_preview, card.Tips, new Vector2(origin.X > 1160 ? origin.X - 380 : origin.X + 370, origin.Y));
 		};
 		slot.MouseExited += () => { if (_inspectIndex < 0) Clear(_preview); };
-		slot.GuiInput += input => { if (input is InputEventMouseButton { ButtonIndex: MouseButton.Left, Pressed: true }) { OpenInspect(cards, index ?? cards.IndexOf(card), upgraded); slot.AcceptEvent(); } };
+		slot.GuiInput += input =>
+		{
+			if (HandleControlCard(slot, card, input)) return;
+			if (input is InputEventMouseButton { Pressed: true } click && (click.ButtonIndex == MouseButton.Left || _controlEnabled && click.ButtonIndex == MouseButton.Right)) { OpenInspect(cards, index ?? cards.IndexOf(card), upgraded); slot.AcceptEvent(); }
+		};
 	}
 	private bool TryMoveHand(SpectatorSnapshot snapshot, List<CardSnapshot> cards)
 	{
@@ -551,5 +558,5 @@ internal sealed partial class SpectatorView : IDisposable
 	}
 	private static void Clear(Node node) { foreach (Node child in node.GetChildren()) { node.RemoveChild(child); child.QueueFree(); } }
 	private static string T(string zh, string en) => LocalSpectatorSource.T(zh, en);
-	public void Dispose() { if (GodotObject.IsInstanceValid(_overlay)) { RememberPanelLayout(); _overlay.Hide(); _overlay.GetParent()?.RemoveChild(_overlay); _overlay.QueueFree(); } }
+	public void Dispose() { SetControlEnabled(false); if (GodotObject.IsInstanceValid(_overlay)) { RememberPanelLayout(); _overlay.Hide(); _overlay.GetParent()?.RemoveChild(_overlay); _overlay.QueueFree(); } }
 }
