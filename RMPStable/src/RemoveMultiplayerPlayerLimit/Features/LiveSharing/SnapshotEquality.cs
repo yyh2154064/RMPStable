@@ -246,6 +246,7 @@ internal static class SnapshotEquality
 			a.Antialiased == b.Antialiased &&
 			a.Solid == b.Solid &&
 			a.Skeleton == b.Skeleton &&
+			a.AttachmentClass == b.AttachmentClass && a.AttachmentName == b.AttachmentName &&
 			a.Animation == b.Animation &&
 			a.Texture == b.Texture &&
 			a.Material == b.Material &&

@@ -125,3 +125,16 @@ rendering is enabled, spectator/original PNGs. Keep a fresh output folder or
 check timestamps so old screenshots or failure files cannot be mistaken for
 the latest run. Engine shutdown resource warnings are distinct from harness
 assertions; inspect the complete log for runtime errors as well.
+
+Set `RMP_SMOKE_CONTROL=1` for the control workflow suite. Graphical mode uses
+actual pointer events in the embedded panel, including combat drags and local
+inspection. Headless mode submits the same value-only commands through the
+production view and verifies native purchases, rewards, map travel, potions,
+rest upgrades, treasure and event results; it does not certify texture-container
+mouse forwarding or visual layout. No OS mouse warp occurs in headless mode.
+Headless fixtures cap FPS at 30; use a fresh isolated settings file with master
+volume zero and lower only the test process priority during concurrent gameplay.
+
+Normal screenshot collection keeps the spectator visible. Set
+`RMP_SMOKE_ORIGINAL=1` only for a dedicated image comparison run that temporarily
+hides the panel to capture the original scene.

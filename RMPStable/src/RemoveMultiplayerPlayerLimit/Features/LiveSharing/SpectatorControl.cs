@@ -28,6 +28,8 @@ internal sealed partial class SpectatorView
 	private Vector2 _dragStart;
 	private readonly List<Panel> _targetHighlights = new();
 	private bool _outsideLeftDown, _escapeDown;
+	private string _captureError = "";
+	private readonly Dictionary<string, Button> _actionButtons = new();
 
 	private sealed class ControlInput : Node
 	{
@@ -63,6 +65,14 @@ internal sealed partial class SpectatorView
 	}
 	private void LocalControlInputEvent(InputEvent input)
 	{
+		if (_controlEnabled && input is InputEventKey { Keycode: Key.Escape, Pressed: true, Echo: false })
+		{
+			_escapeDown = true;
+			if (_dragCard != null) CancelControlDrag();
+			else if (CanControlPage && _snapshot!.Control.Actions.FirstOrDefault(a => a.Kind == "cancel" && a.Enabled) is { } cancel) SubmitControl(cancel.Id);
+			else SetControlEnabled(false);
+			_overlay.GetViewport().SetInputAsHandled(); return;
+		}
 		if (!_controlEnabled || input is not InputEventMouseButton { ButtonIndex: MouseButton.Left } button || _panel.GetGlobalRect().HasPoint(button.Position)) return;
 		if (button.Pressed && _dragCard == null) SetControlEnabled(false);
 		else if (!button.Pressed && _dragCard != null) CancelControlDrag();
@@ -77,7 +87,7 @@ internal sealed partial class SpectatorView
 		CancelControlDrag(); _pendingControlContext = ""; _controlMessage = ""; _renderedControl = null;
 		if (_snapshot != null) { CloseInspect(); UpdateControl(_snapshot); }
 	}
-	private bool CanControlPage => _controlEnabled && !_showDeck && BrowsePile.Length == 0 && _inspectIndex < 0 && _relicIndex < 0 && _snapshot?.ModalArt.Count == 0;
+	private bool CanControlPage => _controlEnabled && !_showDeck && BrowsePile.Length == 0 && _inspectIndex < 0 && _relicIndex < 0;
 	private void UpdateControl(SpectatorSnapshot snapshot)
 	{
 		if (_pendingControlContext.Length > 0 && snapshot.Control.Context != _pendingControlContext) { _pendingControlContext = ""; _controlMessage = ""; }
@@ -85,16 +95,24 @@ internal sealed partial class SpectatorView
 		_controlLayer.Visible = CanControlPage;
 		if (ReferenceEquals(snapshot.Control, _renderedControl)) return;
 		_renderedControl = snapshot.Control;
-		foreach (var child in _controlLayer.GetChildren().OfType<Button>()) { _controlLayer.RemoveChild(child); child.QueueFree(); }
-		foreach (var action in snapshot.Control.Actions.Where(a => a.CardId.Length == 0))
+		var present = new HashSet<string>();
+		foreach (var action in snapshot.Control.Actions.Where(a => a.CardId.Length == 0 && a.Kind != "scroll"))
 		{
 			var rect = Rectangle(action.Rect);
 			if (rect.Size.X <= 0 || rect.Size.Y <= 0) continue;
-			var button = new Button { Name = "SpectatorCommand_" + action.Id.Replace(':', '_'), Flat = true, Position = rect.Position * _page.Scale, Size = rect.Size * _page.Scale, FocusMode = Control.FocusModeEnum.None, Disabled = !action.Enabled, TooltipText = action.Label };
-			foreach (var style in new[] { "normal", "hover", "pressed", "focus", "disabled" }) button.AddThemeStyleboxOverride(style, new StyleBoxEmpty());
-			button.Pressed += () => SubmitControl(action.Id);
-			_controlLayer.AddChild(button);
+			present.Add(action.Id);
+			if (!_actionButtons.TryGetValue(action.Id, out var button))
+			{
+				button = new Button { Name = "SpectatorCommand_" + action.Id.Replace(':', '_'), Flat = true, FocusMode = Control.FocusModeEnum.None };
+				foreach (var style in new[] { "normal", "hover", "pressed", "focus", "disabled" }) button.AddThemeStyleboxOverride(style, new StyleBoxEmpty());
+				string id = action.Id; button.Pressed += () => SubmitControl(id);
+				_controlLayer.AddChild(button); _actionButtons[id] = button;
+			}
+			button.Position = rect.Position * _page.Scale; button.Size = rect.Size * _page.Scale;
+			button.Disabled = !action.Enabled; button.TooltipText = action.Label;
 		}
+		foreach (var old in _actionButtons.Keys.Where(id => !present.Contains(id)).ToArray())
+		{ var button = _actionButtons[old]; _controlLayer.RemoveChild(button); button.QueueFree(); _actionButtons.Remove(old); }
 	}
 	private void SubmitControl(string actionId, string targetId = "", string? context = null)
 	{
@@ -104,13 +122,23 @@ internal sealed partial class SpectatorView
 		var result = _executeCommand!(request);
 		_lastControlResult = result;
 		_controlMessage = result.Message;
-		if (result.Accepted) { _pendingControlContext = request.Context; _pendingControlTime = 0; }
+		if (result.Accepted)
+		{
+			_pendingControlContext = request.Context; _pendingControlTime = 0;
+			foreach (var button in _actionButtons.Values) button.Disabled = true;
+		}
 	}
 	private bool HandleControlCard(Control slot, CardSnapshot card, InputEvent input)
 	{
 		if (!CanControlPage || input is not InputEventMouseButton { ButtonIndex: MouseButton.Left, Pressed: true }) return false;
 		var action = _snapshot!.Control.Actions.FirstOrDefault(a => a.CardId == card.ControlId);
-		if (action == null) return false;
+		if (action == null)
+		{
+			// A left click in a decision scene must never fall back to inspection.
+			// This also protects disabled/sold items and stale scene transitions.
+			if (_snapshot.Page is "deck" or "run") return false;
+			slot.AcceptEvent(); return true;
+		}
 		slot.AcceptEvent();
 		if (!action.Enabled || _pendingControlContext.Length > 0) { _controlMessage = T("当前无法执行，请等待游戏更新", "Unavailable; wait for game update"); return true; }
 		if (action.Kind != "play") { SubmitControl(action.Id); return true; }
@@ -129,6 +157,19 @@ internal sealed partial class SpectatorView
 	}
 	private void ControlInputEvent(InputEvent input)
 	{
+		if (CanControlPage && _dragCard == null && input is InputEventMouseButton { Pressed: true } click)
+		{
+			if (click.ButtonIndex is MouseButton.WheelUp or MouseButton.WheelDown)
+			{
+				var scroll = _snapshot!.Control.Actions.LastOrDefault(a => a.Kind == "scroll" && a.Enabled && Rectangle(a.Rect).HasPoint(click.Position / _page.Scale));
+				if (scroll != null) { SubmitControl(scroll.Id, click.ButtonIndex == MouseButton.WheelUp ? "up" : "down"); _viewport.SetInputAsHandled(); }
+			}
+			else if (click.ButtonIndex == MouseButton.Right && _snapshot!.Control.Actions.FirstOrDefault(a => a.Kind == "cancel") is { } cancel)
+			{ SubmitControl(cancel.Id); _viewport.SetInputAsHandled(); }
+			else if (click.ButtonIndex == MouseButton.Left && _snapshot!.Control.Actions.FirstOrDefault(a => a.Id.StartsWith("cancel-popup:")) is { } popupCancel &&
+				!_snapshot.Control.Actions.Any(a => a.Enabled && a.Kind == "native" && Rectangle(a.Rect).HasPoint(click.Position / _page.Scale)))
+			{ SubmitControl(popupCancel.Id); _viewport.SetInputAsHandled(); }
+		}
 		if (_dragCard == null) return;
 		if (input is InputEventMouseButton { ButtonIndex: MouseButton.Right, Pressed: true } || input is InputEventKey { Keycode: Key.Escape, Pressed: true })
 		{ CancelControlDrag(); _viewport.SetInputAsHandled(); }
@@ -169,6 +210,13 @@ internal sealed partial class SpectatorView
 			_pendingControlTime += _panel.GetProcessDeltaTime();
 			if (_pendingControlTime > 5) { _pendingControlContext = ""; _controlMessage = T("尚未确认结果，请检查游戏状态", "Result not confirmed; check game state"); }
 		}
-		if (_controlEnabled) _status.Text = T("本机控制 · 拖牌出牌 · 点击选牌 · 右键查看 · Esc 退出", "Local control · drag to play · click to choose · right-click to inspect · Esc exits") + (_controlMessage.Length > 0 ? " · " + _controlMessage : "");
+		RefreshStatus();
+	}
+	private void RefreshStatus()
+	{
+		string text = _captureError.Length > 0 ? T("状态暂不可用：", "State unavailable: ") + _captureError
+			: _controlEnabled ? T("本机控制 · 拖牌出牌 · 点击决策 · 右键查看 · Esc 退出", "Local control · drag to play · click to decide · right-click to inspect · Esc exits") + (_controlMessage.Length > 0 ? " · " + _controlMessage : "")
+			: T("单人本地测试 · 悬停放大卡牌 · 在游戏窗口按观战快捷键开关", "Local test · hover to enlarge cards · toggle the hotkey in the game window");
+		if (_status.Text != text) _status.Text = text;
 	}
 }

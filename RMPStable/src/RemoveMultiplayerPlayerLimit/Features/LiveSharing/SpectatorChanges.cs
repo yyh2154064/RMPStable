@@ -86,6 +86,9 @@ internal sealed partial class LocalSpectatorSource
 	{
 		var p = _previous;
 		s.Background = Reuse(s.Background, p?.Background, SnapshotEquality.Equal);
+		s.BackgroundLabels = Reuse(s.BackgroundLabels, p?.BackgroundLabels, SnapshotEquality.Equal);
+		s.ForegroundArt = Reuse(s.ForegroundArt, p?.ForegroundArt, SnapshotEquality.Equal);
+		s.ForegroundLabels = Reuse(s.ForegroundLabels, p?.ForegroundLabels, SnapshotEquality.Equal);
 		s.Sources = Reuse(s.Sources, p?.Sources, SnapshotEquality.Equal);
 		s.HudArt = Reuse(s.HudArt, p?.HudArt, SnapshotEquality.Equal);
 		s.HudLabels = Reuse(s.HudLabels, p?.HudLabels, SnapshotEquality.Equal);
@@ -94,6 +97,7 @@ internal sealed partial class LocalSpectatorSource
 		s.Piles = Reuse(s.Piles, p?.Piles, SnapshotEquality.Equal);
 		s.ModalArt = Reuse(s.ModalArt, p?.ModalArt, SnapshotEquality.Equal);
 		s.ModalLabels = Reuse(s.ModalLabels, p?.ModalLabels, SnapshotEquality.Equal);
+		s.ModalCards = Reuse(s.ModalCards, p?.ModalCards, SnapshotEquality.Equal);
 		s.Creatures = Reuse(s.Creatures, p?.Creatures, SnapshotEquality.Equal);
 		s.Cards = Reuse(s.Cards, p?.Cards, SnapshotEquality.Equal);
 		s.Deck = Reuse(s.Deck, p?.Deck, SnapshotEquality.Equal);
@@ -116,7 +120,7 @@ internal sealed partial class LocalSpectatorSource
 		s.Revisions = new SpectatorRevisions
 		{
 			Hud = Next(p?.Revisions.Hud, Same(s.HudArt, p?.HudArt) && Same(s.HudLabels, p?.HudLabels) && Same(s.HudHovers, p?.HudHovers) && Same(s.Relics, p?.Relics) && Same(s.Piles, p?.Piles)),
-			Background = Next(p?.Revisions.Background, s.Room == p?.Room && Same(s.Background, p?.Background)),
+			Background = Next(p?.Revisions.Background, s.Room == p?.Room && Same(s.Background, p?.Background) && Same(s.BackgroundLabels, p?.BackgroundLabels)),
 			Creatures = Next(p?.Revisions.Creatures, Same(s.Creatures, p?.Creatures)),
 			Screen = Next(p?.Revisions.Screen, s.Page == p?.Page && Same(s.PageLabels, p?.PageLabels) && Same(s.Hovers, p?.Hovers) && Same(s.CombatHudLabels, p?.CombatHudLabels)),
 			Inventory = Next(p?.Revisions.Inventory, Same(s.Inventory, p?.Inventory)),

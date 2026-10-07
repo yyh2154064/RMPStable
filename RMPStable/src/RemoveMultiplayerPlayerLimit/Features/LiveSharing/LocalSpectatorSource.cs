@@ -80,11 +80,17 @@ internal sealed partial class LocalSpectatorSource : IDisposable
 		if (mapScreen?.IsOpen == true) { overlay = null; reward = null; }
 		var capstone = NCapstoneContainer.Instance?.CurrentCapstoneScreen as Control;
 		var eventRoom = NEventRoom.Instance;
+		var restRoom = NRestSiteRoom.Instance;
+		var treasureRoom = NRun.Instance.TreasureRoom;
+		Control? nativeRoom = NativeRoom;
 		var state = player.PlayerCombatState;
 		string room = NRun.Instance.GetInstanceId() + ":" + (combat?.GetInstanceId() ?? merchant?.GetInstanceId() ?? 0) + ":" + run.CurrentRoom?.GetType().Name + ":" + merchant?.Inventory?.IsOpen;
 		string page = reward != null ? "reward" : merchant != null ? "shop" : combat != null ? "combat" : "run";
 		string underlayPage = merchant != null ? "shop" : combat != null ? "combat" : "";
-		Control? pageRoot = overlay ?? (mapScreen?.IsOpen == true ? mapScreen : eventRoom);
+		Control? pageRoot = overlay ?? (mapScreen?.IsOpen == true ? mapScreen : nativeRoom);
+		if (restRoom != null) page = "rest";
+		if (treasureRoom != null) page = "treasure";
+		if (NRun.Instance.MapRoom != null) page = "mapRoom";
 		if (eventRoom?.IsVisibleInTree() == true) page = "event";
 		if (mapScreen?.IsOpen == true) page = "map";
 		if (overlay != null) page = reward != null ? "reward" : overlay is NRewardsScreen ? "loot" : "selection";
@@ -97,11 +103,13 @@ internal sealed partial class LocalSpectatorSource : IDisposable
 			_participantExpires = Time.GetTicksMsec() + 5000;
 		}
 		room += ":" + viewSize;
-		if (room != _backgroundRoom || _background.Count == 0)
+		if (merchant != null || room != _backgroundRoom || _background.Count == 0)
 		{
 			_backgroundRoom = room;
 			_background = new();
-			foreach (var step in CaptureArtSteps(combat?.Background ?? (Node?)merchant, _background)) yield return step;
+			// The rug opens/closes asynchronously. Sample its current visibility and
+			// transform instead of freezing the first frame of that transition.
+			foreach (var step in CaptureArtSteps(combat?.Background ?? (Node?)merchant, _background, includeButtons: true, skipMerchantForeground: merchant != null)) yield return step;
 		}
 		var snap = new SpectatorSnapshot
 		{
@@ -115,6 +123,14 @@ internal sealed partial class LocalSpectatorSource : IDisposable
 				? $"{T("能量", "Energy")} {state.Energy}/{state.MaxEnergy}   {T("星星", "Stars")} {state.Stars}   {T("抽牌堆", "Draw")} {state.DrawPile.Cards.Count}   {T("弃牌堆", "Discard")} {state.DiscardPile.Cards.Count}   {T("消耗", "Exhaust")} {state.ExhaustPile.Cards.Count}   {T("回合", "Turn")} {state.TurnNumber}"
 				: T("单人本地模拟 · 仅展示，不操作游戏", "Local singleplayer preview · read only")
 		};
+		if (merchant != null)
+			foreach (var step in CaptureLabelSteps(merchant, snap.BackgroundLabels, skipMerchantSlots: true)) yield return step;
+		if (merchant != null && page == "shop")
+			foreach (var foreground in Descendants<CanvasItem>(merchant).Where(n => n.GetType().Name is "NMerchantDialogue" or "NSpeechBubbleVfx" && n.IsVisibleInTree()))
+			{
+				foreach (var step in CaptureArtSteps(foreground, snap.ForegroundArt)) yield return step;
+				foreach (var step in CaptureLabelSteps(foreground, snap.ForegroundLabels)) yield return step;
+			}
 		// Five selectable local preview entries are requested for this test build.
 		// Their content always comes from the same real singleplayer run.
 		snap.Sources.AddRange(_previewParticipants);
@@ -220,7 +236,7 @@ internal sealed partial class LocalSpectatorSource : IDisposable
 			snap.Cards.Clear();
 			// Never generate an inventory: opening the actual merchant supplies it.
 			var inventory = merchant.Inventory?.Inventory;
-			if (inventory == null)
+			if (inventory == null || merchant.Inventory?.IsOpen != true)
 				snap.Detail = T("请在游戏中打开商店以读取商品", "Open the merchant in the game to inspect stock");
 			else
 			{
@@ -249,7 +265,7 @@ internal sealed partial class LocalSpectatorSource : IDisposable
 				}
 			}
 		}
-		else if (combat == null) snap.Cards = snap.Deck;
+		else if (page == "run") snap.Cards = snap.Deck;
 		if (reward != null)
 		{
 			if (RewardOptions?.GetValue(reward) is not IReadOnlyList<CardCreationResult> options)
@@ -291,6 +307,13 @@ internal sealed partial class LocalSpectatorSource : IDisposable
 		if (page == "event" && eventRoom?.IsVisibleInTree() == true) foreach (var option in Descendants<NEventOptionButton>(eventRoom).Where(n => n.IsVisibleInTree()))
 			snap.Hovers.Add(new HoverSnapshot { Rect = GlobalRect(option), Tips = CaptureTips(option.Option.HoverTips) });
 		// Native relic inspection also lives outside NRun/overlay/capstone stacks.
+		if (NGame.Instance?.InspectCardScreen is Control cardInspect && cardInspect.IsVisibleInTree())
+		{
+			foreach (var step in CaptureArtSteps(cardInspect, snap.ModalArt, includeButtons: true, includeCards: true)) yield return step;
+			foreach (var step in CaptureLabelSteps(cardInspect, snap.ModalLabels)) yield return step;
+			foreach (var card in Descendants<NCard>(cardInspect).Where(c => Ready(c) && c.Model != null))
+			{ snap.ModalCards.Add(CaptureCard(card.Model!, PileType.None, card)); yield return 0; }
+		}
 		if (NGame.Instance?.InspectRelicScreen is Control relicInspect && relicInspect.IsVisibleInTree())
 		{
 			foreach (var step in CaptureArtSteps(relicInspect, snap.ModalArt, includeButtons: true)) yield return step;
@@ -387,12 +410,13 @@ internal sealed partial class LocalSpectatorSource : IDisposable
 		foreach (var step in CaptureArtSteps(root, result, includeButtons, visibleRegion, includeCards)) { }
 		return result;
 	}
-	private IEnumerable<byte> CaptureArtSteps(Node? root, List<ArtSnapshot> result, bool includeButtons = false, Rect2? visibleRegion = null, bool includeCards = false)
+	private IEnumerable<byte> CaptureArtSteps(Node? root, List<ArtSnapshot> result, bool includeButtons = false, Rect2? visibleRegion = null, bool includeCards = false, bool skipMerchantForeground = false)
 	{
 		if (root == null) yield break;
 		IEnumerable<byte> Visit(Node node, string parentKey)
 		{
-			if (!GodotObject.IsInstanceValid(node) || node.IsQueuedForDeletion() || node is SubViewport || node is NMerchantSlot && node != root || node is NCreature || node is NCard && !includeCards || !includeButtons && node.GetType().Name.Contains("Button") && node.GetType().Name != "NMerchantButton" || node.Name == "MerchantHandContainer") yield break;
+			if (skipMerchantForeground && node.GetType().Name is "NMerchantDialogue" or "NSpeechBubbleVfx") yield break;
+			if (!GodotObject.IsInstanceValid(node) || node.IsQueuedForDeletion() || node is SubViewport || node is NMerchantSlot && node != root && !includeCards || node is NCreature || node is NCard && !includeCards || !includeButtons && node.GetType().Name.Contains("Button") && node.GetType().Name != "NMerchantButton" || node.Name == "MerchantHandContainer") yield break;
 			if (node is CanvasItem item)
 			{
 				if (!item.Visible) yield break;
@@ -403,6 +427,11 @@ internal sealed partial class LocalSpectatorSource : IDisposable
 				Texture2D? texture = null;
 				Rect2 rect = item is Control bounds ? new Rect2(Vector2.Zero, bounds.Size) : default;
 				var art = new ArtSnapshot { Key = item.GetInstanceId().ToString(), Parent = parentKey, Z = item.ZIndex, ZRelative = item.ZAsRelative, BehindParent = item.ShowBehindParent, ClipChildren = (int)item.ClipChildren, ClipContents = item is Control clipping && clipping.ClipContents };
+				if (item.GetClass() is "SpineSlotNode" or "SpineBoneNode")
+				{
+					art.AttachmentClass = item.GetClass();
+					art.AttachmentName = item.Get(art.AttachmentClass == "SpineSlotNode" ? "slot_name" : "bone_name").AsString();
+				}
 				if (item.GetClass() == "SpineSprite")
 				{
 					art.Skeleton = Path(item.Get("skeleton_data_res").As<Resource>());
@@ -519,7 +548,7 @@ internal sealed partial class LocalSpectatorSource : IDisposable
 
 	// Copy the already formatted native labels, including the game's hp/block
 	// fonts and colors. No Creature is bound to the spectator health display.
-	private IEnumerable<byte> CaptureLabelSteps(Node? root, List<TextSnapshot> result)
+	private IEnumerable<byte> CaptureLabelSteps(Node? root, List<TextSnapshot> result, bool skipMerchantSlots = false)
 	{
 		return WalkVisibleSteps(root, node =>
 		{
@@ -544,17 +573,17 @@ internal sealed partial class LocalSpectatorSource : IDisposable
 			result.Add(new TextSnapshot { Rich = true, Text = richLabel.Text.Replace("[ancient_banner]", "").Replace("[/ancient_banner]", ""), Font = Path(richLabel.GetThemeFont("normal_font")), FontSize = richLabel.GetThemeFontSize("normal_font_size"), OutlineSize = richLabel.GetThemeConstant("outline_size"), Transform = Transform(richLabel.GetGlobalTransform()), Size = new[] { richLabel.Size.X, richLabel.Size.Y }, Color = new[] { color.R, color.G, color.B, color.A }, OutlineColor = new[] { outline.R, outline.G, outline.B, outline.A }, Alignment = (int)richLabel.HorizontalAlignment, VerticalAlignment = (int)richLabel.VerticalAlignment, WrapMode = (int)richLabel.AutowrapMode });
 			result[^1].ArtKey = richLabel.GetInstanceId().ToString(); result[^1].LocalColor = ColorValues(richLabel.GetThemeColor("default_color") * richLabel.SelfModulate);
 			}
-		}, skipCards: true);
+		}, skipCards: true, skipMerchantSlots: skipMerchantSlots);
 	}
 
-	private static IEnumerable<byte> WalkVisibleSteps(Node? root, Action<Node> read, bool skipCards = false)
+	private static IEnumerable<byte> WalkVisibleSteps(Node? root, Action<Node> read, bool skipCards = false, bool skipMerchantSlots = false)
 	{
 		if (root == null) yield break;
 		var pending = new Stack<Node>(); pending.Push(root);
 		while (pending.Count > 0)
 		{
 			var node = pending.Pop();
-			if (!GodotObject.IsInstanceValid(node) || node.IsQueuedForDeletion() || node is SubViewport || node is NCreature || node is CanvasItem item && !item.IsVisibleInTree() || skipCards && node is NCard) continue;
+			if (!GodotObject.IsInstanceValid(node) || node.IsQueuedForDeletion() || node is SubViewport || node is NCreature || node is CanvasItem item && !item.IsVisibleInTree() || skipCards && node is NCard || skipMerchantSlots && (node is NMerchantSlot || node.GetType().Name is "NMerchantDialogue" or "NSpeechBubbleVfx")) continue;
 			read(node); yield return 0;
 			if (node is NCard || !GodotObject.IsInstanceValid(node) || node.IsQueuedForDeletion()) continue;
 			for (int i = node.GetChildCount() - 1; i >= 0; i--) pending.Push(node.GetChild(i));

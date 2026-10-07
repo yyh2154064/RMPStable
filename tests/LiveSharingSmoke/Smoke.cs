@@ -45,7 +45,11 @@ public static partial class Smoke
 		if (string.IsNullOrEmpty(Output) || steam < 0 || steam + 1 >= args.Length || args[steam + 1] != "off") return;
 		TaskHelper.RunSafely(Run());
 	}
-	private static async Task Frames(int count) { for (int i = 0; i < count; i++) await Game.ToSignal(Game.GetTree(), SceneTree.SignalName.ProcessFrame); }
+	private static async Task Frames(int count)
+	{
+		for (int i = 0; i < count; i++)
+		{ if (DisplayServer.GetName() == "headless") Engine.MaxFps = 30; await Game.ToSignal(Game.GetTree(), SceneTree.SignalName.ProcessFrame); }
+	}
 	private static void Check(bool condition, string label) { if (!condition) throw new Exception(label); GD.Print("[LiveSharingSmoke] PASS " + label); }
 	private static object? Field(string name) => _controller.GetField(name, Static)!.GetValue(null);
 	private static async Task Key(Key key)
@@ -58,11 +62,23 @@ public static partial class Smoke
 		// Keep the OS cursor at the injected position across layout/animation
 		// frames; otherwise native motion can replace the synthetic hover before
 		// release, cancelling clicks on small controls.
-		if (!pressed.HasValue) Game.GetViewport().WarpMouse(position);
+		if (!pressed.HasValue && DisplayServer.GetName() != "headless") Game.GetViewport().WarpMouse(position);
 		InputEvent input = pressed.HasValue
 			? new InputEventMouseButton { Position = position, GlobalPosition = position, ButtonIndex = MouseButton.Left, Pressed = pressed.Value }
 			: new InputEventMouseMotion { Position = position, GlobalPosition = position };
-		Game.GetViewport().PushInput(input, true); await Frames(3);
+		PushPointerInput(input); await Frames(3);
+	}
+	private static void PushPointerInput(InputEvent input)
+	{
+		Game.GetViewport().PushInput(input, true);
+		// Dummy rendering has no drawn viewport texture for the container to
+		// forward through. Exercise its child GUI with the same transformed event.
+		if (DisplayServer.GetName() != "headless" || Field("_view") is not { } view || input is not InputEventMouse mouse) return;
+		var panel = (Control)view.GetType().GetField("_panel", Instance)!.GetValue(view)!;
+		var surface = panel.GetNode<SubViewportContainer>("SpectatorContent/SpectatorSurface");
+		if (!panel.GetNode<Control>("SpectatorContent").GetGlobalRect().HasPoint(mouse.Position)) return;
+		var viewport = (SubViewport)view.GetType().GetField("_viewport", Instance)!.GetValue(view)!;
+		viewport.PushInput(input.XformedBy(surface.GetGlobalTransform().AffineInverse()), true);
 	}
 	private static async Task Click(Vector2 position) { await Pointer(position); await Pointer(position, true); await Pointer(position, false); }
 	private static async Task CheckPanelInput(Player player)
@@ -281,9 +297,13 @@ public static partial class Smoke
 		await Game.ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
 		((SubViewport)view.GetType().GetField("_viewport", Instance)!.GetValue(view)!).GetTexture().GetImage().SavePng(Path.Combine(Output, name + ".png"));
 		Game.GetViewport().GetTexture().GetImage().SavePng(Path.Combine(Output, name + "-embedded.png"));
-		overlay.Hide(); await Game.ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
-		Game.GetViewport().GetTexture().GetImage().SavePng(Path.Combine(Output, name + "-original.png"));
-		overlay.Show();
+		// Only an explicit comparison run hides the panel. Normal interaction
+		// tests remain visible throughout and preserve native mouse focus.
+		if (Environment.GetEnvironmentVariable("RMP_SMOKE_ORIGINAL") == "1")
+		{
+			overlay.Hide(); await Game.ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
+			Game.GetViewport().GetTexture().GetImage().SavePng(Path.Combine(Output, name + "-original.png")); overlay.Show();
+		}
 		((Control)view.GetType().GetField("_preview", Instance)!.GetValue(view)!).Visible = true;
 		// Screenshot capture temporarily hides the overlay. Allow the viewport's
 		// GUI hit testing to observe it again before the next synthetic click.
@@ -356,21 +376,33 @@ public static partial class Smoke
 			await RunManager.Instance.EnterRoomDebug(RoomType.Shop);
 			RunManager.Instance.ActionExecutor.Unpause();
 			await Frames(90);
-			NMerchantRoom.Instance!.OpenInventory();
+			if (Environment.GetEnvironmentVariable("RMP_SMOKE_CONTROL") != "1") NMerchantRoom.Instance!.OpenInventory();
 			await Frames(90);
-			File.WriteAllLines(Path.Combine(Output, "shop-tree.txt"), Descendants(NMerchantRoom.Instance).Select(n => n.GetPath() + " " + n.GetType().Name + "/" + n.GetClass() + " " + (n is Control c ? c.Position + " " + c.Size : "") + " " + (n is TextureRect t ? t.Texture?.ResourcePath : "") + " " + (n.GetClass() == "SpineSprite" ? string.Join(";", n.GetPropertyList().Select(p => p["name"].AsString()).Where(p => p.Contains("skeleton") || p.Contains("animation")).Select(p => p + "=" + n.Get(p))) : "")));
+			File.WriteAllLines(Path.Combine(Output, "shop-tree.txt"), Descendants(NMerchantRoom.Instance!).Select(n => n.GetPath() + " " + n.GetType().Name + "/" + n.GetClass() + " " + (n is Control c ? c.Position + " " + c.Size : "") + " " + (n is TextureRect t ? t.Texture?.ResourcePath : "") + " " + (n.GetClass() == "SpineSprite" ? string.Join(";", n.GetPropertyList().Select(p => p["name"].AsString()).Where(p => p.Contains("skeleton") || p.Contains("animation")).Select(p => p + "=" + n.Get(p))) : "")));
 			var realCard = Descendants(NRun.Instance!).OfType<NCard>().First();
 			File.WriteAllLines(Path.Combine(Output, "card-tree.txt"), Descendants(realCard).OfType<Control>().Select(c => c.GetPath() + " " + c.Position + " " + c.Size));
-			int windowCount = Descendants(Game.GetTree().Root).OfType<Window>().Count();
+			var nativeWindows = Descendants(Game.GetTree().Root).OfType<Window>().Select(w => w.GetInstanceId()).ToHashSet();
 			int foregroundFps = Engine.MaxFps;
 			bool initialFocus = DisplayServer.WindowIsFocused();
 			await Key(Godot.Key.F8);
 			Check(Field("_view") != null, "F8 opens spectator");
 			await SaveFrame("default-layout", 0);
-			Check(Descendants(Game.GetTree().Root).OfType<Window>().Count() == windowCount, "embedded spectator creates no native or embedded Window");
+			Check(Descendants(Game.GetTree().Root).OfType<Window>().All(w => nativeWindows.Contains(w.GetInstanceId())), "embedded spectator creates no native or embedded Window");
 			Check(DisplayServer.WindowIsFocused() != initialFocus || Engine.MaxFps == foregroundFps, "opening embedded panel preserves FPS limit when window focus is unchanged");
+			if (Environment.GetEnvironmentVariable("RMP_SMOKE_CONTROL") == "1")
+			{
+				Check(!NMerchantRoom.Instance!.Inventory.IsOpen, "first shop entry is tested before ever clicking merchant");
+				await CheckMerchantPortraits(); await ToggleControl(true);
+				await ClickNative(NMerchantRoom.Instance.MerchantButton); await Seconds(0.8); await ToggleControl(false);
+			}
 			await Inspect(state, "shop", 7);
-			if (Environment.GetEnvironmentVariable("RMP_SMOKE_CONTROL") == "1") { await CheckLocalControls(state); GD.Print("[LiveSharingSmoke] CONTROL ALL PASSED"); Game.GetTree().Quit(); return; }
+			if (Environment.GetEnvironmentVariable("RMP_SMOKE_CONTROL") == "1")
+			{
+				await CheckShopControls(state);
+				if (DisplayServer.GetName() != "headless") await CheckLocalControls(state);
+				else GD.Print("[LiveSharingSmoke] Headless mode validates commands and native state; visual pointer regressions require a later graphical run.");
+				await CheckWorkflowControls(state); GD.Print("[LiveSharingSmoke] CONTROL ALL PASSED"); Game.GetTree().Quit(); return;
+			}
 			await CheckSourceSelector(state);
 			await CheckPanelInput(state.Players[0]);
 			await CheckSourcePointer(state);

@@ -84,7 +84,7 @@ internal sealed partial class SpectatorView
 		_retainedArt[id] = retained with { Snapshot = art };
 		return false;
 	}
-	private static bool SameArtStructure(ArtSnapshot a, ArtSnapshot b) => a.Key == b.Key && a.Parent == b.Parent && a.Group == b.Group && a.Solid == b.Solid && a.Polygon == b.Polygon && (a.Points != null) == (b.Points != null) && a.Skeleton == b.Skeleton && a.Animation == b.Animation && a.Stretch == b.Stretch && a.FlipH == b.FlipH && a.FlipV == b.FlipV && a.BeginCap == b.BeginCap && a.EndCap == b.EndCap && a.Joint == b.Joint && a.Antialiased == b.Antialiased && SnapshotEquality.Array(a.PatchMargins, b.PatchMargins);
+	private static bool SameArtStructure(ArtSnapshot a, ArtSnapshot b) => a.Key == b.Key && a.Parent == b.Parent && a.Group == b.Group && a.Solid == b.Solid && a.Polygon == b.Polygon && (a.Points != null) == (b.Points != null) && a.Skeleton == b.Skeleton && a.AttachmentClass == b.AttachmentClass && a.AttachmentName == b.AttachmentName && a.Animation == b.Animation && a.Stretch == b.Stretch && a.FlipH == b.FlipH && a.FlipV == b.FlipV && a.BeginCap == b.BeginCap && a.EndCap == b.EndCap && a.Joint == b.Joint && a.Antialiased == b.Antialiased && SnapshotEquality.Array(a.PatchMargins, b.PatchMargins);
 	private void UpdateArtNode(ArtNode node, ArtSnapshot a, Transform2D local)
 	{
 		var p = node.Snapshot;

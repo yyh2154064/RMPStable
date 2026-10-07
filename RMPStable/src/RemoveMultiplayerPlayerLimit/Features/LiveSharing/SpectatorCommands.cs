@@ -86,6 +86,7 @@ internal sealed partial class LocalSpectatorSource
 	}
 	internal long SetControlMode(bool enabled)
 	{
+		if (!enabled) RestoreNativeInput();
 		_controlEnabled = enabled; _controlEpoch = System.Threading.Interlocked.Increment(ref _nextControlEpoch);
 		_commandResults.Clear(); _commandResultOrder.Clear();
 		_lastCommandRequest = 0;
@@ -94,10 +95,10 @@ internal sealed partial class LocalSpectatorSource
 	private string CurrentControlContext()
 	{
 		var state = RunManager.Instance.DebugOnlyGetState()?.Players.FirstOrDefault()?.PlayerCombatState;
-		return PageToken() + ":" + state?.TurnNumber + ":" + NPlayerHand.Instance?.CurrentMode + ":" + _controlRevision;
+		return PageToken() + ":" + NativeRoom?.GetInstanceId() + ":" + ActiveNativeUi?.GetInstanceId() + ":" + NativePopup?.GetInstanceId() + ":" + NTargetManager.Instance?.IsInSelection + ":" + state?.TurnNumber + ":" + NPlayerHand.Instance?.CurrentMode + ":" + _controlRevision;
 	}
 	private static bool Ready(Node node) => GodotObject.IsInstanceValid(node) && node.IsInsideTree() && !node.IsQueuedForDeletion() && node is CanvasItem item && item.IsVisibleInTree();
-	private static bool Unblocked() => NModalContainer.Instance?.OpenModal == null && NGame.Instance.InspectRelicScreen?.IsVisibleInTree() != true;
+	private static bool Unblocked() => NModalContainer.Instance?.OpenModal == null && NGame.Instance.InspectRelicScreen?.IsVisibleInTree() != true && NGame.Instance.InspectCardScreen?.IsVisibleInTree() != true;
 	private bool HandAvailable(Player player) => Unblocked() && NMapScreen.Instance?.IsOpen != true && NOverlayStack.Instance?.Peek() == null && NPlayerHand.Instance is { } hand && Ready(hand) && hand.CurrentMode == NPlayerHand.Mode.Play && CanPlayHand?.Invoke(hand, null) is true && player.PlayerCombatState != null;
 
 	private void CaptureControl(SpectatorSnapshot snapshot, Player player, Node? pageRoot)
@@ -165,6 +166,9 @@ internal sealed partial class LocalSpectatorSource
 				}
 			}
 		}
+		CaptureNativeUi(control, Add);
+		var publishedIds = new HashSet<string>(control.Actions.Select(a => a.Id));
+		foreach (var id in bindings.Keys.Where(id => !publishedIds.Contains(id)).ToArray()) bindings.Remove(id);
 		snapshot.Control = control;
 		_controlBindings = bindings; _publishedControlContext = control.Context;
 	}

@@ -20,6 +20,7 @@ internal sealed partial class SpectatorView : IDisposable
 	private readonly SubViewport _viewport;
 	private readonly Control _canvas;
 	private readonly Control _background;
+	private readonly Control _foreground;
 	private readonly Control _actors;
 	private readonly Control _actorSprites;
 	private readonly Control _actorState;
@@ -33,6 +34,8 @@ internal sealed partial class SpectatorView : IDisposable
 	private readonly Control _screen;
 	private readonly Control _inspect;
 	private readonly Control _hudHovers, _pileTargets, _browse, _modal;
+	private readonly Control _modalCards;
+	private List<CardSnapshot>? _renderedModalCards;
 	internal string BrowsePile { get; private set; } = "";
 	private string _browseKey = "";
 	private readonly Control _combatHud;
@@ -82,6 +85,7 @@ internal sealed partial class SpectatorView : IDisposable
 		_screenHovers = Area(_screen, Vector2.Zero, _page.Size);
 		_cards = Area(_page, Vector2.Zero, _page.Size);
 		_hud = Area(_page, Vector2.Zero, _page.Size);
+		_foreground = Area(_page, Vector2.Zero, _page.Size); _foreground.ZIndex = 100;
 		// Small spectator controls sit over the native composition rather than
 		// squeezing combat, rewards, and the merchant into a dashboard layout.
 		_header = new ColorRect { Size = new Vector2(1920, 74), Color = new Color(0.04f, 0.035f, 0.03f, 0.92f), MouseFilter = Control.MouseFilterEnum.Ignore };
@@ -100,6 +104,7 @@ internal sealed partial class SpectatorView : IDisposable
 		_preview = Area(_canvas, Vector2.Zero, new Vector2(1920, 1080));
 		_inspect = Area(_canvas, Vector2.Zero, new Vector2(1920, 1080));
 		_modal = Area(_canvas, Vector2.Zero, new Vector2(1920, 1080));
+		_modalCards = Area(_modal, Vector2.Zero, new Vector2(1920, 1080));
 		CreatePointer();
 		CreateControlLayer();
 		}
@@ -120,14 +125,22 @@ internal sealed partial class SpectatorView : IDisposable
 		_title.Text = snapshot.Character + "  ·  " + (_controlEnabled ? T("本机控制", "Local control") : T("只读观战", "Spectator"));
 		_summary.Text = snapshot.Summary;
 		_detail.Text = snapshot.Page == "combat" ? snapshot.Detail.Replace("   ", "\n") : "";
-		_status.Text = T("单人本地测试 · 悬停放大卡牌 · 在游戏窗口按观战快捷键开关", "Local test · hover to enlarge cards · toggle the hotkey in the game window");
+		_captureError = "";
+		RefreshStatus();
 		_deck.Text = _showDeck ? T("返回当前页面", "Current page") : T("查看牌组", "View deck");
 		_page.Scale = new Vector2(1920 / Math.Max(1, snapshot.Width), 1080 / Math.Max(1, snapshot.Height));
 		_page.Size = new Vector2(snapshot.Width, snapshot.Height);
 		_hudHovers.Scale = _pileTargets.Scale = _browse.Scale = _modal.Scale = _page.Scale;
 		UpdateControl(snapshot);
+		RetainArt(_foreground, snapshot.ForegroundArt); RetainLabels(_foreground, snapshot.ForegroundLabels);
 		_hudHovers.Size = _pileTargets.Size = _browse.Size = _modal.Size = _page.Size;
 		RetainArt(_modal, snapshot.ModalArt); RetainLabels(_modal, snapshot.ModalLabels);
+		_modal.MoveChild(_modalCards, _modal.GetChildCount() - 1);
+		if (!ReferenceEquals(_renderedModalCards, snapshot.ModalCards))
+		{
+			_renderedModalCards = snapshot.ModalCards; Clear(_modalCards);
+			DrawPageCards(new SpectatorSnapshot { Page = "inspection", Width = snapshot.Width, Height = snapshot.Height }, snapshot.ModalCards, _modalCards);
+		}
 		_modal.MouseFilter = snapshot.ModalArt.Count > 0 ? Control.MouseFilterEnum.Stop : Control.MouseFilterEnum.Ignore;
 		if (snapshot.ModalArt.Count > 0) { CloseInspect(); BrowsePile = ""; _browseKey = ""; }
 		UpdatePileBrowser(snapshot);
@@ -147,8 +160,8 @@ internal sealed partial class SpectatorView : IDisposable
 		if (_roomKey != roomKey)
 		{
 			_roomKey = roomKey;
-			Clear(_background);
-			DrawBackground(snapshot);
+			RetainArt(_background, snapshot.Background);
+			RetainLabels(_background, snapshot.BackgroundLabels);
 		}
 		string actorKey = snapshot.Revisions.Creatures.ToString();
 		RetainCreatureArt(snapshot.Creatures);
@@ -195,6 +208,10 @@ internal sealed partial class SpectatorView : IDisposable
 
 	internal void ShowError(string message)
 	{
+		// Preserve the last complete scene during transient capture failures.
+		// Clearing it on each retry caused full-panel flashes on transitions.
+		_captureError = message; SetControlEnabled(false); RefreshStatus();
+		if (_snapshot != null) return;
 		_snapshot = null; _deck.Disabled = true;
 		ClearMounted(_mountedCards); ClearMounted(_mountedLabels);
 		Clear(_preview); Clear(_cards); Clear(_actorSprites); Clear(_actorState); Clear(_offers); Clear(_inventory); Clear(_background); Clear(_hud); Clear(_underlay); Clear(_hudHovers); Clear(_pileTargets); Clear(_browse); Clear(_modal); BrowsePile = ""; _browseKey = "";
@@ -204,7 +221,7 @@ internal sealed partial class SpectatorView : IDisposable
 		_handNodes.Clear(); _underlayHandNodes.Clear();
 		_cardKey = _actorKey = _offerKey = _itemKey = _roomKey = _hudKey = _screenKey = "";
 		_header.Visible = _title.Visible = _summary.Visible = true;
-		_status.Text = T("状态暂不可用：", "State unavailable: ") + message;
+		RefreshStatus();
 		_summary.Text = T("等待有效的单人游戏状态", "Waiting for a valid singleplayer state");
 	}
 
@@ -225,6 +242,8 @@ internal sealed partial class SpectatorView : IDisposable
 		for (int i = 0; i < cards.Count; i++)
 		{
 			var card = cards[i];
+			if (snapshot.Page == "shop" && card.Sold)
+			{ DrawArt(cardRoot, card.Art); DrawLabels(cardRoot, card.Labels); continue; }
 			Transform2D transform;
 			if (card.Transform != null) transform = Matrix(card.Transform);
 			else
@@ -315,12 +334,17 @@ internal sealed partial class SpectatorView : IDisposable
 				if (art.Key.Length > 0) ancestors[art.Key] = (old.Drawing, matrix * new Transform2D(0, new Vector2(r[0], r[1])));
 				continue;
 			}
-			var holder = new Node2D { Transform = ancestor.Matrix.AffineInverse() * matrix, Modulate = ColorOf(art.Tint), ZIndex = art.Z, ZAsRelative = art.ZRelative, ShowBehindParent = art.BehindParent };
+			// Spine attachments must be direct native children of the SpineSprite.
+			// A generic wrapper loses the slot draw order, so fire hides the skull.
+			var holder = art.AttachmentClass.Length > 0 ? ClassDB.Instantiate(art.AttachmentClass).As<Node2D>() : new Node2D();
+			if (art.AttachmentClass.Length > 0) holder.Set(art.AttachmentClass == "SpineSlotNode" ? "slot_name" : "bone_name", art.AttachmentName);
+			holder.Transform = ancestor.Matrix.AffineInverse() * matrix; holder.Modulate = ColorOf(art.Tint); holder.ZIndex = art.Z; holder.ZAsRelative = art.ZRelative; holder.ShowBehindParent = art.BehindParent;
 			ancestor.Node.AddChild(holder);
 			CanvasItem drawing;
 			var texture = Asset<Texture2D>(art.Texture);
 			if (art.Region is { Length: 4 } region && texture != null) texture = new AtlasTexture { Atlas = texture, Region = Rectangle(region) };
-			if (art.Points != null)
+			if (art.AttachmentClass.Length > 0) drawing = holder;
+			else if (art.Points != null)
 			{
 				var points = Enumerable.Range(0, art.Points.Length / 2).Select(i => new Vector2(art.Points[i * 2], art.Points[i * 2 + 1])).ToArray();
 				drawing = art.Polygon ? new Polygon2D { Polygon = points, Texture = texture } : new Line2D { Points = points, Width = art.LineWidth, DefaultColor = Colors.White, BeginCapMode = (Line2D.LineCapMode)art.BeginCap, EndCapMode = (Line2D.LineCapMode)art.EndCap, JointMode = (Line2D.LineJointMode)art.Joint, Antialiased = art.Antialiased };
@@ -354,7 +378,7 @@ internal sealed partial class SpectatorView : IDisposable
 			drawing.SelfModulate = ColorOf(art.SelfTint); drawing.Material = SnapshotMaterial(art);
 			drawing.ClipChildren = (CanvasItem.ClipChildrenMode)art.ClipChildren;
 			if (drawing is Control control) { control.Position = new Vector2(r[0], r[1]); control.ClipContents = art.ClipContents; control.MouseFilter = Control.MouseFilterEnum.Ignore; }
-			holder.AddChild(drawing);
+			if (!ReferenceEquals(holder, drawing)) holder.AddChild(drawing);
 			rendered.Add(new ArtNode(art.Key, holder, drawing, art));
 			if (art.Key.Length > 0) ancestors[art.Key] = (drawing, matrix * new Transform2D(0, new Vector2(r[0], r[1])));
 		}

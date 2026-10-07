@@ -31,7 +31,14 @@ public static partial class Smoke
 	private static async Task ToggleControl(bool enabled)
 	{
 		var view = ControlView; var panel = (Control)view.GetType().GetField("_panel", Instance)!.GetValue(view)!;
-		if ((bool)view.GetType().GetField("_controlEnabled", Instance)!.GetValue(view)! != enabled) await Click(panel.GetNode<Button>("SpectatorControlToggle").GetGlobalRect().GetCenter());
+		if (enabled) await Until(() => NPlayerHand.Instance?.InCardPlay != true, "native hand is ready before enabling window control");
+		if ((bool)view.GetType().GetField("_controlEnabled", Instance)!.GetValue(view)! != enabled)
+		{
+			var toggle = panel.GetNode<Button>("SpectatorControlToggle"); await Pointer(toggle.GetGlobalRect().GetCenter()); await Seconds(0.3);
+			await Click(toggle.GetGlobalRect().GetCenter());
+			if ((bool)view.GetType().GetField("_controlEnabled", Instance)!.GetValue(view)! != enabled)
+			{ GD.Print("[LiveSharingSmoke] TOGGLE panel=" + panel.GetGlobalRect() + " button=" + toggle.GetGlobalRect() + " hand=" + NPlayerHand.Instance?.InCardPlay + " page=" + Prop(CurrentSnapshot, "Page")); await SaveFrame("toggle-failed", 0); }
+		}
 		Check((bool)view.GetType().GetField("_controlEnabled", Instance)!.GetValue(view)! == enabled, "real pointer switches control=" + enabled);
 	}
 	private static Vector2 CardControlPoint(object card)
@@ -45,8 +52,13 @@ public static partial class Smoke
 	}
 	private static async Task RefreshControl()
 	{
+		var previous = CurrentSnapshot;
 		_controller.GetMethod("CancelCapture", Static)!.Invoke(null, null);
-		_controller.GetField("_captureTimer", Static)!.SetValue(null, 0d); await Seconds(0.8);
+		_controller.GetField("_captureTimer", Static)!.SetValue(null, 0d);
+		await Seconds(0.8);
+		var watch = System.Diagnostics.Stopwatch.StartNew();
+		while ((ReferenceEquals(previous, CurrentSnapshot) || (string)ControlView.GetType().GetField("_pendingControlContext", Instance)!.GetValue(ControlView)! != "") && watch.Elapsed.TotalSeconds < 12) await Frames(1);
+		if (ReferenceEquals(previous, CurrentSnapshot)) throw new Exception("Timed out waiting for a newly published spectator snapshot");
 	}
 	private static async Task CheckLocalControls(RunState state)
 	{
@@ -101,8 +113,8 @@ public static partial class Smoke
 		var attack = ControlActions.First(a => (string)Prop(a, "Kind") == "play" && (bool)Prop(a, "RequiresTarget") && (bool)Prop(a, "Enabled"));
 		var attackCard = SnapshotCard((string)Prop(attack, "CardId")); var start = SpectatorPoint(CardControlPoint(attackCard));
 		fingerprint = Fingerprint(player);
-		await Pointer(start); Game.GetViewport().PushInput(new InputEventMouseButton { Position = start, GlobalPosition = start, ButtonIndex = MouseButton.Right, Pressed = true }, true); await Frames(3);
-		Game.GetViewport().PushInput(new InputEventMouseButton { Position = start, GlobalPosition = start, ButtonIndex = MouseButton.Right, Pressed = false }, true); await Frames(3);
+		await Pointer(start); PushPointerInput(new InputEventMouseButton { Position = start, GlobalPosition = start, ButtonIndex = MouseButton.Right, Pressed = true }); await Frames(3);
+		PushPointerInput(new InputEventMouseButton { Position = start, GlobalPosition = start, ButtonIndex = MouseButton.Right, Pressed = false }); await Frames(3);
 		Check((int)ControlView.GetType().GetField("_inspectIndex", Instance)!.GetValue(ControlView)! >= 0 && fingerprint == Fingerprint(player), "control mode right-click inspects without playing");
 		ControlView.GetType().GetMethod("CloseInspect", Instance)!.Invoke(ControlView, null);
 		await Pointer(start); await Pointer(start, true); await Pointer(SpectatorPoint(new Vector2(20, 20))); await Pointer(SpectatorPoint(new Vector2(20, 20)), false);
@@ -123,8 +135,11 @@ public static partial class Smoke
 		var targets = ((IEnumerable)Prop(ControlData, "Targets")).Cast<object>().ToArray(); var ids = ((IEnumerable)Prop(attack, "TargetIds")).Cast<string>().ToArray(); var targetData = targets.First(t => ids.Contains((string)Prop(t, "Id"))); var rect = (float[])Prop(targetData, "Rect");
 		var enemy = NCombatRoom.Instance!.CreatureNodes.First(n => "creature:" + n.GetInstanceId() == (string)Prop(targetData, "Id")).Entity; int hp = enemy.CurrentHp, energy = player.PlayerCombatState!.Energy;
 		await Pointer(start); await Pointer(start, true); await Pointer(SpectatorPoint(new Vector2(rect[0] + rect[2] / 2, rect[1] + rect[3] / 2)));
-		await Game.ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
-		((SubViewport)ControlView.GetType().GetField("_viewport", Instance)!.GetValue(ControlView)!).GetTexture().GetImage().SavePng(System.IO.Path.Combine(Output, "control-targeting.png"));
+		if (DisplayServer.GetName() != "headless")
+		{
+			await Game.ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
+			((SubViewport)ControlView.GetType().GetField("_viewport", Instance)!.GetValue(ControlView)!).GetTexture().GetImage().SavePng(System.IO.Path.Combine(Output, "control-targeting.png"));
+		}
 		await Pointer(SpectatorPoint(new Vector2(rect[0] + rect[2] / 2, rect[1] + rect[3] / 2)), false);
 		await Until(() => player.PlayerCombatState!.Energy < energy && enemy.CurrentHp < hp, "real spectator drag spends native energy and damages target");
 		var command = ControlView.GetType().GetField("_lastControlCommand", Instance)!.GetValue(ControlView)!; fingerprint = Fingerprint(player);

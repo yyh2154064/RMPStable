@@ -24,6 +24,9 @@ internal sealed class SpectatorSnapshot
 	public float Width { get; set; } = 1920;
 	public float Height { get; set; } = 1080;
 	public List<ArtSnapshot> Background { get; set; } = new();
+	public List<TextSnapshot> BackgroundLabels { get; set; } = new();
+	public List<ArtSnapshot> ForegroundArt { get; set; } = new();
+	public List<TextSnapshot> ForegroundLabels { get; set; } = new();
 	public List<CreatureSnapshot> Creatures { get; set; } = new();
 	public List<CardSnapshot> Cards { get; set; } = new();
 	public List<CardSnapshot> Deck { get; set; } = new();
@@ -37,6 +40,7 @@ internal sealed class SpectatorSnapshot
 	public List<PileSnapshot> Piles { get; set; } = new();
 	public List<ArtSnapshot> ModalArt { get; set; } = new();
 	public List<TextSnapshot> ModalLabels { get; set; } = new();
+	public List<CardSnapshot> ModalCards { get; set; } = new();
 	public float[]? DeckButtonRect { get; set; }
 	public List<CardSnapshot> UnderlayCards { get; set; } = new();
 	public List<ItemSnapshot> UnderlayItems { get; set; } = new();
@@ -225,6 +229,8 @@ internal sealed class ArtSnapshot
 	public bool Antialiased { get; set; }
 	public bool Solid { get; set; }
 	public string Skeleton { get; set; } = "";
+	public string AttachmentClass { get; set; } = "";
+	public string AttachmentName { get; set; } = "";
 	public string Animation { get; set; } = "";
 	public string Texture { get; set; } = "";
 	public string Material { get; set; } = "";
