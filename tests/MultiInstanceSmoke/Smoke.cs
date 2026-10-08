@@ -167,6 +167,7 @@ public static class Smoke
     }
     [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern nint GetParent(nint window);
     [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(nint window,out uint process);
+    [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool IsWindowVisible(nint window);
     [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool GetClientRect(nint window,out NativeRect rect);
     [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern nint SendMessageTimeoutW(nint window,uint message,nuint param,nint data,uint flags,uint timeout,out nuint result);
     [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)] private struct NativeRect { public int Left,Top,Right,Bottom; }
@@ -175,6 +176,7 @@ public static class Smoke
         await Until(()=>mirror.GetType().GetProperty("Window",Any)!.GetValue(mirror) is { } window && (bool)window.GetType().GetProperty("Attached",Any)!.GetValue(window)! && (bool)Field(process,"NativeAttached")!,"renderer HWND embedded in source clipping container");
         var host=mirror.GetType().GetProperty("Window",Any)!.GetValue(mirror)!;
         nint child=(nint)(long)Field(process,"Window")!;
+        await Until(()=>IsWindowVisible(child) && (long)Field(process,"DrawFrames")! > 0,"embedded battle HWND is visible and has a draw callback (visual pixels still require inspection)");
         nint container=(nint)host.GetType().GetProperty("Container",Any)!.GetValue(host)!;
         GetWindowThreadProcessId(child,out uint owner);
         Check(owner==((System.Diagnostics.Process)process.GetType().GetProperty("Child",Any)!.GetValue(process)!).Id && GetParent(child)==container,"only owned renderer HWND is attached");

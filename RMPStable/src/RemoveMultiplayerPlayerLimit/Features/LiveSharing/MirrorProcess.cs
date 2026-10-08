@@ -22,6 +22,9 @@ internal sealed class MirrorProcess : IDisposable
     internal bool LastIdle;
     internal long Window;
     internal bool DisplayReady, NativeAttached;
+    internal bool WindowVisible;
+    internal long DrawFrames;
+    internal string Phase = "启动中";
     internal double Fps, ProcessMs;
     internal System.Collections.Generic.List<MirrorHit> LastHits = new();
     private bool _disposed;

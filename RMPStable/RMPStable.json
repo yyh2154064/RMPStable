@@ -1,7 +1,7 @@
 {
   "id": "RMPStable",
   "name": "RMP Stable - Native Multi-instance Exploration",
-  "version": "0.3.9-multiInstance.2",
+  "version": "0.3.9-multiInstance.3",
   "author": "灰灰神教！",
   "description": "Experimental local singleplayer native combat window in a separate game process. Native HWND embedding without pixel transport; 120 FPS target and source-authoritative commands. Other pages and remote transport remain pending.",
   "dependencies": [],

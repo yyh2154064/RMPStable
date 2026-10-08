@@ -17,6 +17,7 @@ internal sealed class MirrorHost : IDisposable
     private bool _control;
     private bool _controlDirty;
     private long _intentRequest;
+    private string _lastDisplayStage = "";
     internal string Error { get; private set; } = "";
     internal string SourceHash { get; private set; } = "";
     internal bool Verified { get; private set; }
@@ -36,7 +37,19 @@ internal sealed class MirrorHost : IDisposable
                 { Error = "独立进程身份或游戏版本不一致"; Process.Dispose(); return; }
                 if (DisplayServer.GetName() != "headless") MirrorWin32.RequireOwned((nint)message.Window, Process.Child.Id);
                 Process.Window = message.Window;
-                Process.Authenticated = true; continue;
+                Process.Authenticated = true;
+                GD.Print("[RMP:Mirror:Window] authenticated pid=" + message.Process + " hwnd=" + message.Window);
+                continue;
+            }
+            // Window attachment/liveness is process-scoped, while combat hashes
+            // and permissions remain generation-scoped. Startup status can be
+            // sent before the first load command has reached the renderer.
+            if (message.Kind == "status")
+            {
+                Process.NativeAttached = message.Attached; Process.WindowVisible = message.WindowVisible;
+                Process.Phase = message.Phase; Process.DrawFrames = message.DrawFrames;
+                string stage = message.Phase + " attached=" + message.Attached + " visible=" + message.WindowVisible + " battleDrawn=" + (message.DrawFrames > 0);
+                if (stage != _lastDisplayStage) { _lastDisplayStage = stage; GD.Print("[RMP:Mirror:Window] " + stage); }
             }
             if (!Process.Wire.Identity.Current(message)) continue;
             if (message.Kind == "status")
@@ -101,6 +114,7 @@ internal sealed class MirrorHost : IDisposable
     {
         if (Window != null || DisplayServer.GetName() == "headless" || !Process.Authenticated) return;
         Window = new MirrorWindowHost((nint)Process.Window, Process.Child.Id);
+        GD.Print("[RMP:Mirror:Window] attach requested container=" + (long)Window.Container);
         _ = Process.Wire.Send(new MirrorMessage { Kind = "attach", Window = (long)Window.Container, Process = System.Environment.ProcessId });
     }
     public void Dispose() { Process.Dispose(); Window?.Dispose(); Window = null; }

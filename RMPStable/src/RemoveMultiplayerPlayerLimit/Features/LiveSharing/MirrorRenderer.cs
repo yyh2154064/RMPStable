@@ -50,6 +50,10 @@ internal sealed class MirrorRenderer : IDisposable
     private CanvasLayer? _noticeLayer;
     private Label? _notice;
     private string _error = "";
+    private string _phase = "等待主进程战斗数据";
+    private readonly Callable _drawCallback;
+    private long _drawFrames;
+    private double _diagnosticTimer;
     internal static bool IsRenderer => Environment.GetEnvironmentVariable("RMP_MULTI_ROLE") == "renderer";
     private static string Env(string name) => Environment.GetEnvironmentVariable("RMP_MULTI_" + name) ?? throw new InvalidDataException("Missing renderer identity");
     internal MirrorRenderer()
@@ -72,8 +76,16 @@ internal sealed class MirrorRenderer : IDisposable
         {
             DisplayServer.WindowSetVsyncMode(DisplayServer.VSyncMode.Disabled);
             _input = new MirrorWindowHook(MirrorWin32.OwnWindow,InterceptInput,noActivate: true);
+            _drawCallback = Callable.From(OnFrameDrawn);
+            RenderingServer.Singleton.Connect(RenderingServer.SignalName.FramePostDraw, _drawCallback);
         }
     }
+    private void OnFrameDrawn()
+    {
+        if (!_attached || _state == null || NCombatRoom.Instance?.IsVisibleInTree() != true || !MirrorWin32.IsWindowVisible(MirrorWin32.OwnWindow)) return;
+        if (++_drawFrames == 1) GD.Print("[RMP:Mirror:Window] first visible battle draw callback");
+    }
+    private void Stage(string phase) { _phase = phase; GD.Print("[RMP:Mirror:Load] " + phase); }
     internal void ProcessFrame(double delta)
     {
         _parentTimer -= delta;
@@ -94,7 +106,8 @@ internal sealed class MirrorRenderer : IDisposable
             {
                 case "attach":
                     if (_attached || message.Process != _parent) throw new InvalidDataException("Invalid native attachment");
-                    MirrorWin32.AttachOwn((nint)message.Window,_parent); _attached = true; break;
+                    MirrorWin32.AttachOwn((nint)message.Window,_parent); _attached = true;
+                    GD.Print("[RMP:Mirror:Window] attached parent=" + message.Window); break;
                 case "control":
                     if (message.Epoch <= _epoch) break;
                     _control = message.Control; _epoch = message.Epoch; CancelDrag(); break;
@@ -125,10 +138,18 @@ internal sealed class MirrorRenderer : IDisposable
             _ = _wire.Send(new MirrorMessage { Kind = "status", Generation = _generation, Events = _events, Idle = idle,
                 Hash = idle && _replay != null ? MirrorState.Hash(_state!) : "", Hits = idle ? CaptureHits() : new(), Room = _error,
                 DisplayReady = _state != null && NCombatRoom.Instance != null, Attached = _attached,
+                Phase = _phase, DrawFrames = _drawFrames,
+                WindowVisible = DisplayServer.GetName() != "headless" && MirrorWin32.IsWindowVisible(MirrorWin32.OwnWindow),
                 Fps = Performance.GetMonitor(Performance.Monitor.TimeFps), ProcessMs = Performance.GetMonitor(Performance.Monitor.TimeProcess) * 1000 });
             if (idle && _events > 0 && _uiDiagnostics++ < 8)
                 GD.Print("[RMP:Mirror:UI] hand=" + _state!.Players[0].PlayerCombatState?.Hand.Cards.Count + " holders=" + NPlayerHand.Instance?.ActiveHolders.Count +
                     " visible=" + NPlayerHand.Instance?.IsVisibleInTree() + " hits=" + string.Join(";", CaptureHits().Select(h => h.Kind + ":" + h.Index + ":" + string.Join(",",h.Rect))));
+        }
+        _diagnosticTimer -= delta;
+        if (_diagnosticTimer <= 0)
+        {
+            _diagnosticTimer = 5;
+            GD.Print("[RMP:Mirror:Progress] phase=" + _phase + " attached=" + _attached + " busy=" + _busy + " events=" + _events + " drawFrames=" + _drawFrames);
         }
         UpdateNotice();
     }
@@ -209,7 +230,7 @@ internal sealed class MirrorRenderer : IDisposable
             _notice = new Label { Position = new Vector2(16,16), MouseFilter = Control.MouseFilterEnum.Ignore };
             _noticeLayer.AddChild(_notice);
         }
-        _notice.Text = _error.Length > 0 ? "同步失败，控制已暂停" : !NativeIdle || _waitingForAuthority ? "状态同步中" : "";
+        _notice.Text = _error.Length > 0 ? "同步失败，控制已暂停：" + _error.Split('\n')[0] : !NativeIdle ? _phase : _waitingForAuthority ? "等待主进程确认" : "";
     }
     private List<MirrorHit> CaptureHits()
     {
@@ -235,7 +256,8 @@ internal sealed class MirrorRenderer : IDisposable
     {
         try
         {
-            _generation = message.Generation; _wire.Identity.Generation = _generation; _events = 0; _error = ""; _waitingForAuthority = false;
+            _generation = message.Generation; _wire.Identity.Generation = _generation; _events = 0; _error = ""; _waitingForAuthority = false; _drawFrames = 0;
+            Stage("重建战斗数据");
             RunManager.Instance.CleanUp(); _state = null; _replay = null;
             if (message.Room != "combat") throw new InvalidDataException("This exploration currently supports native combat replay only");
             var replay = MirrorState.Unpack<CombatReplay>(message.Payload);
@@ -246,7 +268,9 @@ internal sealed class MirrorRenderer : IDisposable
             RunManager.Instance.SetUpReplay(_state, replay);
 #endif
             RunManager.Instance.CombatStateSynchronizer.IsDisabled = true;
+            Stage("加载角色资源");
             await PreloadManager.LoadRunAssets(_state.Players.Select(p => p.Character));
+            Stage("加载地图资源");
             await PreloadManager.LoadActAssets(_state.Act);
             RunManager.Instance.Launch();
             NGame.Instance.RootSceneContainer.SetCurrentScene(NRun.Create(_state));
@@ -260,9 +284,13 @@ internal sealed class MirrorRenderer : IDisposable
             manager.ChecksumTracker.LoadReplayChecksums(null!, replay.nextChecksumId);
             manager.PlayerChoiceSynchronizer.FastForwardChoiceIds(replay.choiceIds);
             manager.RewardsSetSynchronizer.FastForwardRewardIds(replay.rewardIds);
+            Stage("创建原版战斗场景");
             await manager.LoadIntoLatestMapCoord(AbstractRoom.FromSerializable(replay.serializableRun.PreFinishedRoom, _state));
+            Stage("等待原版战斗初始化");
             while (manager.ActionExecutor.IsPaused) await Frame();
+            Stage("回放主进程战斗事件");
             await ReplayEvents(replay);
+            Stage("战斗数据已同步");
         }
         catch (Exception e) { _error = e.ToString(); GD.PrintErr("[RMP:Mirror] " + _error); }
         finally { _busy = false; }
@@ -325,5 +353,10 @@ internal sealed class MirrorRenderer : IDisposable
         if (message.Highlight > 0) arrow.SetHighlightingOn(message.Highlight == 2); else arrow.SetHighlightingOff();
     }
     private void Quit() { Dispose(); ((SceneTree)Engine.GetMainLoop()).Quit(); }
-    public void Dispose() { _input?.Dispose(); _input = null; _wire.Dispose(); }
+    public void Dispose()
+    {
+        if (DisplayServer.GetName() != "headless" && RenderingServer.Singleton.IsConnected(RenderingServer.SignalName.FramePostDraw, _drawCallback))
+            RenderingServer.Singleton.Disconnect(RenderingServer.SignalName.FramePostDraw, _drawCallback);
+        _input?.Dispose(); _input = null; _wire.Dispose();
+    }
 }

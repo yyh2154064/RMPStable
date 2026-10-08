@@ -31,6 +31,9 @@ internal sealed class MirrorMessage
     public bool Accepted { get; set; }
     public bool DisplayReady { get; set; }
     public bool Attached { get; set; }
+    public bool WindowVisible { get; set; }
+    public long DrawFrames { get; set; }
+    public string Phase { get; set; } = "";
     public double Fps { get; set; }
     public double ProcessMs { get; set; }
     public string Build { get; set; } = "";

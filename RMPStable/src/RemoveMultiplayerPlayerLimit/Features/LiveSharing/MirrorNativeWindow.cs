@@ -20,6 +20,7 @@ internal static class MirrorWin32
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] internal delegate nint Procedure(nint window, uint message, nuint wparam, nint lparam);
     [DllImport("user32.dll", SetLastError = true)] internal static extern uint GetWindowThreadProcessId(nint window, out uint process);
     [DllImport("user32.dll")] internal static extern bool IsWindow(nint window);
+    [DllImport("user32.dll")] internal static extern bool IsWindowVisible(nint window);
     [DllImport("user32.dll")] internal static extern bool IsIconic(nint window);
     [DllImport("user32.dll")] internal static extern nint GetParent(nint window);
     [DllImport("user32.dll", SetLastError = true)] internal static extern nint SetParent(nint window, nint parent);
@@ -110,6 +111,7 @@ internal sealed class MirrorWindowHost : IDisposable
     private bool _visible, _escape, _disposed;
     private readonly System.Collections.Generic.HashSet<nuint> _forwardKeys = new();
     internal bool Attached => MirrorWin32.Owned(_child, _childProcess) && MirrorWin32.GetParent(_child) == Container;
+    internal bool Visible => Attached && MirrorWin32.IsWindowVisible(Container) && MirrorWin32.IsWindowVisible(_child);
     internal MirrorWindowHost(nint child, int childProcess)
     {
         _parent = MirrorWin32.OwnWindow; _child = child; _childProcess = childProcess;
@@ -174,7 +176,11 @@ internal sealed class MirrorWindowHost : IDisposable
             if (MirrorWin32.SetWindowRgn(Container,region,true) == 0) { MirrorWin32.DeleteObject(region); throw new InvalidOperationException("Native mirror clipping failed"); }
         }
         show &= content.IsVisibleInTree() && !MirrorWin32.IsIconic(_parent);
-        if (_visible != show) { _visible = show; MirrorWin32.ShowWindow(Container,show ? 8 : 0); }
+        if (_visible != show)
+        {
+            _visible = show; MirrorWin32.ShowWindow(Container,show ? 8 : 0);
+            GD.Print("[RMP:Mirror:Window] container=" + (show ? "visible" : "hidden") + " attached=" + Attached + " bounds=" + _last);
+        }
     }
     private void RestoreStyle()
     {

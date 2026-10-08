@@ -34,9 +34,9 @@ internal sealed partial class SpectatorView : IDisposable
     internal void Update(SpectatorSnapshot snapshot, bool verified, string error)
     {
         _snapshot = snapshot; UpdateSources(snapshot.Sources, snapshot.SourceId);
-        _status.Text = error.Length > 0 ? T("独立游戏同步失败，控制已暂停", "Independent game synchronization failed; control paused") : snapshot.Page != "combat" ?
+        _status.Text = error.Length > 0 ? T("独立游戏同步失败，控制已暂停：", "Independent game synchronization failed; control paused: ") + error : snapshot.Page != "combat" ?
             T("当前探索版本仅支持战斗，其他页面尚未接入", "This exploration supports combat; other pages are pending") :
-            T("正在连接原生游戏窗口…", "Connecting native game window…");
+            T("独立窗口：", "Independent window: ") + _mirror.Process.Phase;
     }
     private void SetControlEnabled(bool enabled)
     {
@@ -59,7 +59,10 @@ internal sealed partial class SpectatorView : IDisposable
         _mirror.AttachWindow();
         var host = _mirror.Window;
         bool combat = _snapshot?.Page == "combat" && _mirror.Error.Length == 0;
-        host?.Layout(_content,combat && _mirror.Process.DisplayReady && _mirror.Process.NativeAttached && SceneMonitor.FindSettingsScreen()?.IsVisibleInTree() != true);
+        // Show the authenticated HWND before scene readiness. A hidden native
+        // ancestor must not be a prerequisite for the first scene draw/loading.
+        host?.Layout(_content,combat && host.Attached && SceneMonitor.FindSettingsScreen()?.IsVisibleInTree() != true);
+        _status.Visible = host?.Visible != true;
         if (host?.TakeEscape() == true) SetPreferredControl(false);
         _status.Size = new Vector2(Math.Max(1,_content.Size.X-28),Math.Max(1,_content.Size.Y-28));
         LiveSharingController.RouteMapInput(_panel.GetGlobalRect().HasPoint(ShellPointer()));
