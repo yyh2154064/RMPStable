@@ -58,7 +58,7 @@ internal sealed partial class SpectatorView
 			var created = DrawArt(parent, art, root);
 			_retainedArt[id] = new ArtLayer(root, created.ToDictionary(n => n.Key), art); return true;
 		}
-		if (SnapshotEquality.List(retained.Snapshot, art, SnapshotEquality.Equal)) return false;
+		if (!art.Any(a => a.Particle != null) && SnapshotEquality.List(retained.Snapshot, art, SnapshotEquality.Equal)) return false;
 		bool structureChanged = retained.Snapshot.Count != art.Count;
 		for (int i = 0; !structureChanged && i < art.Count; i++) structureChanged = !SameArtStructure(retained.Snapshot[i], art[i]);
 		if (structureChanged)
@@ -88,6 +88,7 @@ internal sealed partial class SpectatorView
 	private void UpdateArtNode(ArtNode node, ArtSnapshot a, Transform2D local)
 	{
 		var p = node.Snapshot;
+		if (a.Particle != null) UpdateParticle(node.Drawing, a.Particle);
 		if (a.Skeleton.Length > 0 && node.Drawing.GetClass() == "SpineSprite")
 		{
 			var state = new MegaCrit.Sts2.Core.Bindings.MegaSpine.MegaSprite(node.Drawing).GetAnimationState();

@@ -55,6 +55,9 @@ internal static class LiveSharingController
 	private static bool _wasDown;
 	private static double _settingsTimer, _captureTimer, _drawingTimer, _sinceCapture;
 	private static double _pointerTimer;
+	internal const double MotionInterval = 1d / 60;
+	private static long _motionSamples;
+	private static double _lastEffectCpuMs, _lastEffectRenderMs;
 	private static bool _dirty;
 	private static readonly bool TransportTest = System.Environment.GetEnvironmentVariable("RMP_SPECTATOR_TRANSPORT_TEST") == "1";
 	private static IEnumerator<byte>? _captureWork;
@@ -119,8 +122,15 @@ internal static class LiveSharingController
 		_pointerTimer -= delta;
 		if (_pointerTimer <= 0)
 		{
-			_pointerTimer = 1d / 30;
-			try { _view.UpdatePointer(_source.CapturePointer(_view.PointerExclusion)); _view.UpdateAnimations(_source.CaptureAnimations()); }
+			_pointerTimer = Math.Max(0, _pointerTimer + MotionInterval);
+			try
+			{
+				_view.UpdatePointer(_source.CapturePointer(_view.PointerExclusion)); _view.UpdateAnimations(_source.CaptureAnimations());
+				long started = Stopwatch.GetTimestamp(); var effects = _source.CaptureEffects();
+				_lastEffectCpuMs = (Stopwatch.GetTimestamp() - started) * 1000d / Stopwatch.Frequency;
+				started = Stopwatch.GetTimestamp(); _view.UpdateEffects(effects);
+				_lastEffectRenderMs = (Stopwatch.GetTimestamp() - started) * 1000d / Stopwatch.Frequency; _motionSamples++;
+			}
 			catch (Exception ex) { if (_lastError != ex.Message) Log.Warn("[RMP:LiveSharing] Pointer update: " + ex.Message); _lastError = ex.Message; }
 		}
 		_lastCaptureSliceMs = 0;
@@ -132,7 +142,7 @@ internal static class LiveSharingController
 		if (_captureWork != null && pageToken != _capturePage) { CancelCapture(); _captureTimer = 0; _dirty = true; }
 		if (_drawingTimer <= 0)
 		{
-			_drawingTimer = 0.05;
+			_drawingTimer = MotionInterval;
 			try { if (_source.CaptureMapDrawings() is { } drawings) _view.UpdateMapDrawings(drawings); }
 			catch (Exception ex) { if (_lastError != ex.Message) Log.Warn("[RMP:LiveSharing] Drawing update: " + ex.Message); _lastError = ex.Message; }
 		}
@@ -159,7 +169,7 @@ internal static class LiveSharingController
 			if (!more)
 			{
 				_captureWork.Dispose(); _captureWork = null; _lastCaptureFrames = _captureFrames; _lastCaptureTotalMs = _captureCpuMs;
-				_captureTimer = Math.Clamp(_captureCpuMs * 0.004, 0.05, 0.25); _sinceCapture = 0; _drawingTimer = 0.05;
+				_captureTimer = Math.Clamp(_captureCpuMs * 0.004, 0.05, 0.25); _sinceCapture = 0;
 			}
 		}
 		catch (Exception ex)

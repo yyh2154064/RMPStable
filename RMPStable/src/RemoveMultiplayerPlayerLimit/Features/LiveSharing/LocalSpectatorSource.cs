@@ -410,7 +410,7 @@ internal sealed partial class LocalSpectatorSource : IDisposable
 		foreach (var step in CaptureArtSteps(root, result, includeButtons, visibleRegion, includeCards)) { }
 		return result;
 	}
-	private IEnumerable<byte> CaptureArtSteps(Node? root, List<ArtSnapshot> result, bool includeButtons = false, Rect2? visibleRegion = null, bool includeCards = false, bool skipMerchantForeground = false)
+	private IEnumerable<byte> CaptureArtSteps(Node? root, List<ArtSnapshot> result, bool includeButtons = false, Rect2? visibleRegion = null, bool includeCards = false, bool skipMerchantForeground = false, bool includeParticles = false)
 	{
 		if (root == null) yield break;
 		IEnumerable<byte> Visit(Node node, string parentKey)
@@ -427,6 +427,7 @@ internal sealed partial class LocalSpectatorSource : IDisposable
 				Texture2D? texture = null;
 				Rect2 rect = item is Control bounds ? new Rect2(Vector2.Zero, bounds.Size) : default;
 				var art = new ArtSnapshot { Key = item.GetInstanceId().ToString(), Parent = parentKey, Z = item.ZIndex, ZRelative = item.ZAsRelative, BehindParent = item.ShowBehindParent, ClipChildren = (int)item.ClipChildren, ClipContents = item is Control clipping && clipping.ClipContents };
+				if (includeParticles && item is GpuParticles2D or CpuParticles2D) art.Particle = CaptureParticle(item);
 				if (item.GetClass() is "SpineSlotNode" or "SpineBoneNode")
 				{
 					art.AttachmentClass = item.GetClass();

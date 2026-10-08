@@ -168,6 +168,7 @@ public static partial class Smoke
 		await ClickAction(targetAction);
 		await Until(() => !potionHolder.HasPotion && potionTarget.Entity.CurrentHp < potionHp, "spectator target uses real fire potion on selected enemy");
 		await CheckCombatAnimations();
+		await CheckEffects();
 		// Disposable fixtures reduce combat duration; every actual play/reward
 		// decision still goes through a real mouse click in the spectator panel.
 		foreach (var creature in NCombatRoom.Instance!.CreatureNodes.Where(n => n.Entity.IsEnemy && n.Entity.IsAlive)) creature.Entity.SetCurrentHpInternal(1);

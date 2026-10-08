@@ -214,6 +214,7 @@ internal sealed class TextSnapshot
 // resource paths let another client draw the same background from its own assets.
 internal sealed class ArtSnapshot
 {
+	public ParticleSnapshot? Particle { get; set; }
 	public string Key { get; set; } = "";
 	public string Parent { get; set; } = "";
 	public bool Group { get; set; }

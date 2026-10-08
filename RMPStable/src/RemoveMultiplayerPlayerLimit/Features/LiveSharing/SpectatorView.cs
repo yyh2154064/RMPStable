@@ -71,9 +71,13 @@ internal sealed partial class SpectatorView : IDisposable
 		Solid(_canvas, new Rect2(0, 0, 1920, 1080), new Color("10151f"));
 		_page = Area(_canvas, Vector2.Zero, new Vector2(1920, 1080));
 		_background = Area(_page, Vector2.Zero, _page.Size);
+		_effectBack = Area(_page, Vector2.Zero, _page.Size);
+		_effectBackLabels = Area(_page, Vector2.Zero, _page.Size);
 		_actors = Area(_page, Vector2.Zero, _page.Size);
 		_actorSprites = Area(_actors, Vector2.Zero, _page.Size);
 		_actorState = Area(_actors, Vector2.Zero, _page.Size);
+		_effectFront = Area(_page, Vector2.Zero, _page.Size);
+		_effectFrontLabels = Area(_page, Vector2.Zero, _page.Size);
 		_underlay = Area(_page, Vector2.Zero, _page.Size);
 		_combatHud = Area(_page, Vector2.Zero, _page.Size);
 		_combatHudText = Area(_page, Vector2.Zero, _page.Size);
@@ -346,7 +350,8 @@ internal sealed partial class SpectatorView : IDisposable
 			CanvasItem drawing;
 			var texture = Asset<Texture2D>(art.Texture);
 			if (art.Region is { Length: 4 } region && texture != null) texture = new AtlasTexture { Atlas = texture, Region = Rectangle(region) };
-			if (art.AttachmentClass.Length > 0) drawing = holder;
+			if (art.Particle != null) drawing = CreateParticle(art.Particle);
+			else if (art.AttachmentClass.Length > 0) drawing = holder;
 			else if (art.Points != null)
 			{
 				var points = Enumerable.Range(0, art.Points.Length / 2).Select(i => new Vector2(art.Points[i * 2], art.Points[i * 2 + 1])).ToArray();
@@ -382,6 +387,7 @@ internal sealed partial class SpectatorView : IDisposable
 			drawing.ClipChildren = (CanvasItem.ClipChildrenMode)art.ClipChildren;
 			if (drawing is Control control) { control.Position = new Vector2(r[0], r[1]); control.ClipContents = art.ClipContents; control.MouseFilter = Control.MouseFilterEnum.Ignore; }
 			if (!ReferenceEquals(holder, drawing)) holder.AddChild(drawing);
+			if (art.Particle != null) UpdateParticle(drawing, art.Particle);
 			rendered.Add(new ArtNode(art.Key, holder, drawing, art));
 			if (art.Key.Length > 0) ancestors[art.Key] = (drawing, matrix * new Transform2D(0, new Vector2(r[0], r[1])));
 		}
