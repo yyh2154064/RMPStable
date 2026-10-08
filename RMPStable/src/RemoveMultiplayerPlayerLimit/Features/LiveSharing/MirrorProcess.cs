@@ -18,11 +18,16 @@ internal sealed class MirrorProcess : IDisposable
     internal Process Child { get; }
     internal bool Authenticated { get; set; }
     internal string LastHash = "";
+    internal string LastDrawingHash = "";
     internal int LastEvents;
     internal bool LastIdle;
+    internal long LastControlEpoch;
+    internal bool LastControlEnabled;
     internal long Window;
     internal bool DisplayReady, NativeAttached;
     internal bool WindowVisible;
+    internal bool TargetArrowVisible;
+    internal string Presentation = "";
     internal long DrawFrames;
     internal string Phase = "启动中";
     internal double Fps, ProcessMs;
@@ -49,13 +54,14 @@ internal sealed class MirrorProcess : IDisposable
         // are deliberately excluded. Replica saves can never reach the source.
         string account = Path.Combine(DirectoryPath, "Roaming", "SlayTheSpire2", "default", "1");
         Directory.CreateDirectory(account);
+        bool diagnosticTest = Environment.GetEnvironmentVariable("RMP_MULTI_TEST") == "1";
         var settings = new SettingsSave
         {
             SchemaVersion = SaveManager.Instance.SettingsSave.SchemaVersion, Language = SaveManager.Instance.SettingsSave.Language,
             Fullscreen = false, WindowPosition = new Vector2I(-30000,-30000), WindowSize = new Vector2I(1280,720),
             SkipIntroLogo = true, SeenEaDisclaimer = true, FpsLimit = 120, LimitFpsInBackground = false, VolumeMaster = 0,
             ModSettings = new ModSettings { PlayerAgreedToModLoading = true,
-                ModList = ModManager.Mods.Select(mod => new SettingsSaveMod(mod) { IsEnabled = mod.manifest?.id == "RMPStable" }).ToList() }
+                ModList = ModManager.Mods.Select(mod => new SettingsSaveMod(mod) { IsEnabled = mod.manifest?.id == "RMPStable" || diagnosticTest && mod.manifest?.id == "MultiInstanceSmoke" }).ToList() }
         };
         File.WriteAllText(Path.Combine(account, "settings.save"), JsonSerializationUtility.ToJson(settings));
         foreach (string relative in new[] { "saves/progress.save", "saves/prefs.save" })
@@ -76,6 +82,7 @@ internal sealed class MirrorProcess : IDisposable
         start.Environment["RMP_MULTI_SESSION"] = session; start.Environment["RMP_MULTI_SECRET"] = secret;
         start.Environment["RMP_MULTI_SOURCE"] = source.ToString(); start.Environment["RMP_MULTI_PARENT"] = Environment.ProcessId.ToString();
         start.Environment["RMP_MULTI_PROFILE_ROOT"] = DirectoryPath;
+        if (diagnosticTest) start.Environment["RMP_MULTI_RENDERER_TEST"] = "1";
         // Original game resources stay read-only. In isolated tests the PCK is
         // outside the copied executable directory, so preserve --main-pack.
         start.ArgumentList.Add("--main-pack"); start.ArgumentList.Add(mainPack);

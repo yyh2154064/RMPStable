@@ -34,13 +34,12 @@ internal sealed partial class SpectatorView : IDisposable
     internal void Update(SpectatorSnapshot snapshot, bool verified, string error)
     {
         _snapshot = snapshot; UpdateSources(snapshot.Sources, snapshot.SourceId);
-        _status.Text = error.Length > 0 ? T("独立游戏同步失败，控制已暂停：", "Independent game synchronization failed; control paused: ") + error : snapshot.Page != "combat" ?
-            T("当前探索版本仅支持战斗，其他页面尚未接入", "This exploration supports combat; other pages are pending") :
+        _status.Text = error.Length > 0 ? T("独立游戏同步失败，控制已暂停：", "Independent game synchronization failed; control paused: ") + error :
             T("独立窗口：", "Independent window: ") + _mirror.Process.Phase;
     }
     private void SetControlEnabled(bool enabled)
     {
-        if (_controlEnabled != enabled || _epoch == 0)
+        if (_controlEnabled != enabled || _epoch == 0 || _mirror.ControlEpoch != _epoch)
         {
             _controlEnabled = enabled; _epoch = _setControl(enabled); _mirror.Control(enabled,_epoch);
             _modeTween?.Kill(); _modeTween = _modeThumb.CreateTween();
@@ -58,14 +57,17 @@ internal sealed partial class SpectatorView : IDisposable
     {
         _mirror.AttachWindow();
         var host = _mirror.Window;
-        bool combat = _snapshot?.Page == "combat" && _mirror.Error.Length == 0;
-        // Show the authenticated HWND before scene readiness. A hidden native
-        // ancestor must not be a prerequisite for the first scene draw/loading.
-        host?.Layout(_content,combat && host.Attached && SceneMonitor.FindSettingsScreen()?.IsVisibleInTree() != true);
+        bool sourceDialog = QuickSl.QuickSlController.ConfirmationOpen || LiveSharingController.SourceMenuOpen;
+        _overlay.Visible = !sourceDialog;
+        bool combat = _snapshot != null && _mirror.Error.Length == 0;
+        if (combat && _mirror.ControlEpoch != _epoch) SetControlEnabled(_controlEnabled);
+        // Scene construction runs while hidden; expose only the current scene
+        // so SL cannot briefly display the previous run as ready for input.
+        host?.Layout(_content,combat && _mirror.Process.DisplayReady && host.Attached && SceneMonitor.FindSettingsScreen()?.IsVisibleInTree() != true && !QuickSl.QuickSlController.ConfirmationOpen && !LiveSharingController.SourceMenuOpen);
         _status.Visible = host?.Visible != true;
         if (host?.TakeEscape() == true) SetPreferredControl(false);
         _status.Size = new Vector2(Math.Max(1,_content.Size.X-28),Math.Max(1,_content.Size.Y-28));
-        LiveSharingController.RouteMapInput(_panel.GetGlobalRect().HasPoint(ShellPointer()));
+        LiveSharingController.RouteMapInput(!sourceDialog && _panel.GetGlobalRect().HasPoint(ShellPointer()));
     }
     private TResource? Asset<TResource>(string path) where TResource : Resource => ResourceLoader.Exists(path) ? ResourceLoader.Load<TResource>(path) : null;
     public void Dispose()

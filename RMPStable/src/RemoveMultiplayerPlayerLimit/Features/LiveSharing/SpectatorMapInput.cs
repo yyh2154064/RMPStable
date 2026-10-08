@@ -33,8 +33,25 @@ internal sealed partial class LocalSpectatorSource
 	}
 	private bool ExecuteMapInput(NMapScreen map, string payload)
 	{
+		if (payload.StartsWith("moves:", StringComparison.Ordinal))
+		{
+			var points = payload.Substring(6).Split(';');
+			if (points.Length is < 1 or > 64 || _remoteMapStroke != map.Drawings || !map.Drawings.IsLocalDrawing()) return false;
+			var positions = new Vector2[points.Length];
+			for (int i = 0; i < points.Length; i++)
+			{
+				var coordinates = points[i].Split(',');
+				if (coordinates.Length != 2 || !float.TryParse(coordinates[0], NumberStyles.Float, CultureInfo.InvariantCulture, out float px) ||
+					!float.TryParse(coordinates[1], NumberStyles.Float, CultureInfo.InvariantCulture, out float py) || !float.IsFinite(px) || !float.IsFinite(py) ||
+					!map.GetViewportRect().HasPoint(new Vector2(px, py))) return false;
+				positions[i] = map.Drawings.GetGlobalTransform().AffineInverse() * new Vector2(px, py);
+			}
+			foreach (var position in positions) map.Drawings.UpdateCurrentLinePositionLocal(position);
+			return true;
+		}
 		var parts = payload.Split(',');
-		if (parts.Length != 3 || !float.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out float x) || !float.TryParse(parts[2], NumberStyles.Float, CultureInfo.InvariantCulture, out float y) || !float.IsFinite(x) || !float.IsFinite(y) || !map.GetViewportRect().HasPoint(new Vector2(x, y))) return false;
+		if (parts.Length != 3 || !float.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out float x) || !float.TryParse(parts[2], NumberStyles.Float, CultureInfo.InvariantCulture, out float y) || !float.IsFinite(x) || !float.IsFinite(y) ||
+			parts[0] is not "end" and not "cancel" && !map.GetViewportRect().HasPoint(new Vector2(x, y))) return false;
 		var drawings = map.Drawings;
 		Vector2 local = drawings.GetGlobalTransform().AffineInverse() * new Vector2(x, y);
 		switch (parts[0])

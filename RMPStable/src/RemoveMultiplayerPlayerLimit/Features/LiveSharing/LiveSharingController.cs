@@ -6,7 +6,13 @@ using MegaCrit.Sts2.Core.Logging;
 using MegaCrit.Sts2.Core.Multiplayer.Game;
 using MegaCrit.Sts2.Core.Nodes;
 using MegaCrit.Sts2.Core.Nodes.CommonUi;
+using MegaCrit.Sts2.Core.Nodes.GodotExtensions;
+using MegaCrit.Sts2.Core.Nodes.Screens.Capstones;
+using MegaCrit.Sts2.Core.Nodes.Screens.PauseMenu;
+using MegaCrit.Sts2.Core.Helpers;
+using System.Threading.Tasks;
 using MegaCrit.Sts2.Core.Runs;
+using MegaCrit.Sts2.Core.Saves;
 using RemoveMultiplayerPlayerLimit.Infrastructure;
 namespace RemoveMultiplayerPlayerLimit.Features.LiveSharing;
 
@@ -21,8 +27,12 @@ internal static partial class LiveSharingController
     private static bool _wasDown, _rendererFailed;
     private static bool _openFailed;
     private static string _lastError = "";
+    private static bool _restoring, _restorePrepared;
+    internal static bool SourceMenuOpen { get; private set; }
+    private static bool _sourceMenuStarting;
+    private static MegaCrit.Sts2.Core.Multiplayer.Replay.CombatReplay? _restoreOldCheckpoint;
     internal static uint NativeHotkey { get; private set; } = 0x77;
-    internal static void Initialize() { Suspend(); }
+    internal static void Initialize() { Suspend(); MirrorJournal.Initialize(); }
     internal static void RouteMapInput(bool insidePanel) => _source?.RouteNativeMapInput(insidePanel);
     internal static void ProcessFrame(double delta)
     {
@@ -46,17 +56,35 @@ internal static partial class LiveSharingController
         bool down = key != Key.None && Input.IsKeyPressed(key), pressed = down && !_wasDown; _wasDown = down;
         SpectatorPreferences.LoadProfile(Suspend);
         var state = GameStateAccessor.GetRunState();
+        if (SourceMenuOpen && !_sourceMenuStarting && (state == null || NCapstoneContainer.Instance?.CurrentCapstoneScreen == null && NModalContainer.Instance?.OpenModal == null)) SourceMenuOpen = false;
+        if (SourceMenuOpen && state?.IsGameOver == true) { Close(); SourceMenuOpen = false; }
         var service = RunManager.Instance.NetService;
+        if (!RunManager.Instance.IsInProgress && SaveManager.Instance.IsProfileInitialized && NGame.Instance?.MainMenu?.IsNodeReady() == true &&
+            service?.Type is not NetGameType.Host and not NetGameType.Client) EnsureMirror(1);
         bool local = RunManager.Instance.IsInProgress && state?.Players.Count == 1 && NRun.Instance?.IsNodeReady() == true && service != null && service.Type != NetGameType.Host && service.Type != NetGameType.Client;
-        if (!local) { if (_view != null) Suspend(); return; }
-        ulong session = NRun.Instance.GetInstanceId(); if (_view != null && session != _session) Suspend();
+        if (service?.Type is NetGameType.Host or NetGameType.Client) { if (_mirror != null) Suspend(); return; }
+        if (!local || _restoring)
+        {
+            if (_restoring && _restorePrepared) PublishRestoreCheckpoint();
+            if (!_restoring && _session != 0) { HideView(); _mirror?.Invalidate(); _session = 0; }
+            _mirror?.Tick(null, delta);
+            return;
+        }
+        EnsureMirror(state!);
+        ulong session = NRun.Instance.GetInstanceId();
+        if (session != _session)
+        {
+            HideView(); _source?.Dispose(); _source = new LocalSpectatorSource(); _session = session;
+        }
         bool settings = SceneMonitor.FindSettingsScreen()?.IsVisibleInTree() == true;
         if (pressed && !settings && _view != null) { Close(); return; }
         if (pressed) _openFailed = false;
         if (_view == null && !settings && !_openFailed && (pressed || SpectatorPreferences.Current.Open)) Open(state!);
-        if (_source == null || _mirror == null || _view == null) return;
+        if (_source == null || _mirror == null) return;
+        bool wasVerified = _mirror.Verified;
         _mirror.Tick(state!, delta); _captureTimer -= delta;
-        if (_captureTimer <= 0)
+        if (_mirror.Verified != wasVerified) _captureTimer = 0;
+        if (_view != null && _captureTimer <= 0)
         {
             _captureTimer = .05;
             var snapshot = _source.CaptureCommands(state!);
@@ -67,12 +95,43 @@ internal static partial class LiveSharingController
     internal static void Open(RunState state)
     {
         if (_view != null) return;
-        _session = NRun.Instance.GetInstanceId(); _source = new LocalSpectatorSource(); _mirror = new MirrorHost(state.Players[0].NetId);
+        EnsureMirror(state);
+        _session = NRun.Instance.GetInstanceId(); _source ??= new LocalSpectatorSource();
         var relicRow = LocalSpectatorSource.Descendants<MegaCrit.Sts2.Core.Nodes.Relics.NRelicInventoryHolder>(NRun.Instance.GlobalUi.RelicInventory).Where(n => n.IsVisibleInTree()).Select(n => n.GetGlobalRect()).OrderBy(r => r.Position.Y).FirstOrDefault();
         SpectatorPreferences.DefaultTop = relicRow.Size.Y > 0 ? relicRow.Position.Y + relicRow.Size.Y * 3 / 5 : 116;
         _view = new SpectatorView(Close, _mirror, enabled => _source?.SetControlMode(enabled) ?? 0);
-        _mirror.Intent = message => ReceiveIntent(state,message);
         _captureTimer = 0; SpectatorPreferences.Current.Open = true; SpectatorPreferences.Save();
+    }
+    private static void EnsureMirror(RunState state)
+        => EnsureMirror(state.Players[0].NetId);
+    private static void EnsureMirror(ulong source)
+    {
+        if (_openFailed) return;
+        if (_mirror != null && _mirror.Process.Wire.Identity.Source != source) Suspend();
+        if (_mirror != null) return;
+        // Prewarm when a singleplayer run is ready, before the first F8.
+        _mirror = new MirrorHost(source);
+        _mirror.Intent = message =>
+        {
+            var current = GameStateAccessor.GetRunState();
+            if (!_restoring && current != null) ReceiveIntent(current, message);
+        };
+    }
+    internal static void BeginSingleplayerRestore()
+    {
+        if (MirrorRenderer.IsRenderer) return;
+        _restoreOldCheckpoint = MirrorJournal.Checkpoint;
+        _restoring = true; _restorePrepared = false; HideView(); _mirror?.Invalidate(); _session = 0;
+    }
+    internal static void PrepareSingleplayerRestore() { _restorePrepared = true; }
+    internal static void EndSingleplayerRestore() { _restoring = false; _restorePrepared = false; }
+    internal static void PublishRestoreCheckpoint()
+    {
+        if (!MirrorRenderer.IsRenderer && _restoring && _restorePrepared)
+        {
+            if (GameStateAccessor.GetRunState() is { } state) MirrorJournal.EnsureCheckpoint(state);
+            if (MirrorJournal.Checkpoint is { } replay && !ReferenceEquals(replay, _restoreOldCheckpoint)) _mirror?.PublishCheckpoint(replay, true);
+        }
     }
     private static SpectatorCommandResult Execute(RunState state, SpectatorCommand command)
     {
@@ -83,26 +142,63 @@ internal static partial class LiveSharingController
     {
         var result = ResolveIntent(state,message);
         if (_mirror?.Process.Authenticated == true)
-            _ = _mirror.Process.Wire.Send(new MirrorMessage { Kind = "result", Generation = message.Generation, Epoch = message.Epoch, Request = message.Request, Accepted = result.Accepted, Room = result.Message });
+            _ = _mirror.Process.Wire.Send(new MirrorMessage { Kind = "result", Generation = message.Generation, Epoch = message.Epoch, Request = message.Request, Model = message.Model, Accepted = result.Accepted, Room = result.Message });
     }
     internal static SpectatorCommandResult ResolveIntent(RunState state, MirrorMessage message)
     {
         SpectatorCommandResult Reject(string text) => new() { RequestId = message.Request, Message = text };
         if (message.Kind != "intent" || message.Request <= 0 || _mirror?.AuthorizeIntent(state,message) != true || _source == null || _view?.ControlEnabled != true || _view.Epoch != message.Epoch)
             return Reject("状态或控制权限已变化，请重新操作");
+        if (message.Model == "menu")
+        {
+            if (message.Value is not "GiveUp" and not "SaveAndQuit" and not "Compendium" and not "RmpQuickSl" || SourceMenuOpen ||
+                NModalContainer.Instance?.OpenModal != null || NRun.Instance?.GlobalUi.TopBar.Pause.IsEnabled != true) return Reject("当前无法执行此操作");
+            if (message.Value == "RmpQuickSl") QuickSl.QuickSlController.RequestFromMirror();
+            else
+            {
+                SourceMenuOpen = _sourceMenuStarting = true;
+                TaskHelper.RunSafely(ActivateSourceMenu(state, message));
+            }
+            return new() { RequestId = message.Request, Accepted = true, Message = "已提交" };
+        }
         var snapshot = _source.CaptureCommands(state);
-        if (snapshot.Page != "combat") return Reject("当前页面不支持控制");
         var action = snapshot.Control.Actions.FirstOrDefault(a => a.Enabled && a.Kind == message.Model &&
-            (a.Kind == "endTurn" && message.Index == -1 || a.Kind == "play" && a.NativeIndex == message.Index));
+            (message.NodeKey.Length > 0 ? a.NativePath == message.NodeKey :
+            a.Kind == "endTurn" && message.Index == -1 || a.Kind == "play" && a.NativeIndex == message.Index));
         if (action == null) return Reject("当前无法执行此操作");
         var target = snapshot.Control.Targets.FirstOrDefault(t => t.NativeIndex == message.TargetIndex && action.TargetIds.Contains(t.Id));
         if (action.RequiresTarget && target == null) return Reject("目标已失效");
         return Execute(state,new SpectatorCommand { Session = snapshot.Session, SourceId = snapshot.SourceId, Context = snapshot.Control.Context,
-            Epoch = message.Epoch, RequestId = message.Request, ActionId = action.Id, TargetId = action.RequiresTarget ? target!.Id : "" });
+            Epoch = message.Epoch, RequestId = message.Request, ActionId = action.Id, TargetId = action.RequiresTarget ? target!.Id : action.Kind is "scroll" or "mapInput" ? message.Value : "" });
     }
-    internal static void Close() { SpectatorPreferences.Current.Open = false; SpectatorPreferences.Save(); Suspend(); }
+    private static async Task ActivateSourceMenu(RunState state, MirrorMessage message)
+    {
+        try
+        {
+            NRun.Instance.GlobalUi.TopBar.Pause.ForceClick();
+            for (int frame = 0; frame < 30; frame++)
+            {
+                if (!ReferenceEquals(state, GameStateAccessor.GetRunState()) || _mirror?.Process.Wire.Identity.Current(message) != true || _view?.Epoch != message.Epoch) return;
+                if (NCapstoneContainer.Instance?.CurrentCapstoneScreen is Node root && LocalSpectatorSource.Descendants<NPauseMenuButton>(root)
+                    .FirstOrDefault(b => b.Name.ToString() == message.Value && b.IsNodeReady() && b.IsEnabled && b.IsVisibleInTree()) is { } button)
+                { button.ForceClick(); return; }
+                await NGame.Instance.ToSignal(NGame.Instance.GetTree(), SceneTree.SignalName.ProcessFrame);
+            }
+        }
+        finally
+        {
+            _sourceMenuStarting = false;
+            if (NCapstoneContainer.Instance?.CurrentCapstoneScreen == null && NModalContainer.Instance?.OpenModal == null) SourceMenuOpen = false;
+        }
+    }
+    internal static void Close() { SpectatorPreferences.Current.Open = false; SpectatorPreferences.Save(); HideView(); }
+    private static void HideView()
+    {
+        _view?.Dispose(); _view = null; _mirror?.Window?.Hide(); RouteMapInput(false);
+    }
     internal static void Suspend()
     {
-        _view?.Dispose(); _view = null; _mirror?.Dispose(); _mirror = null; _source?.Dispose(); _source = null; _session = 0;
+        SourceMenuOpen = _sourceMenuStarting = false;
+        HideView(); _mirror?.Dispose(); _mirror = null; _source?.Dispose(); _source = null; _session = 0;
     }
 }

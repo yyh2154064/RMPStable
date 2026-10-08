@@ -20,7 +20,7 @@ using MegaCrit.Sts2.Core.Runs;
 using MegaCrit.Sts2.Core.Saves;
 
 [ModInitializer(nameof(Initialize))]
-public static class Smoke
+public static partial class Smoke
 {
     private const BindingFlags Any = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static;
     private static Type Controller = null!;
@@ -31,17 +31,80 @@ public static class Smoke
     private static bool Verified => Static("_mirror") is { } m && (bool)m.GetType().GetProperty("Verified", Any)!.GetValue(m)!;
     public static void Initialize()
     {
+        if(Environment.GetEnvironmentVariable("RMP_MULTI_FULL_TEST")=="1" || Environment.GetEnvironmentVariable("RMP_MULTI_RENDERER_TEST")=="1")
+            new HarmonyLib.Harmony("MultiInstanceSmoke.StateDiagnostics").Patch(Type("MirrorState").GetMethod("Hash",Any)!,
+                postfix:new HarmonyLib.HarmonyMethod(typeof(Smoke).GetMethod(nameof(SaveDiagnostic),Any)!));
+        if(Environment.GetEnvironmentVariable("RMP_MULTI_ROLE")=="renderer" && Environment.GetEnvironmentVariable("RMP_MULTI_RENDERER_TEST")=="1")
+        { TaskHelper.RunSafely(RendererVisuals()); return; }
         var args = OS.GetCmdlineArgs(); int force = Array.IndexOf(args, "--force-steam");
         if (Environment.GetEnvironmentVariable("RMP_MULTI_TEST") != "1" || Environment.GetEnvironmentVariable("RMP_MULTI_ROLE") == "renderer" || force < 0 || args[force+1] != "off") return;
-        TaskHelper.RunSafely(Run());
+        if (DisplayServer.GetName() != "headless") DisplayServer.WindowSetFlag(DisplayServer.WindowFlags.NoFocus, true);
+        TaskHelper.RunSafely(Environment.GetEnvironmentVariable("RMP_MULTI_FULL_TEST") == "1" ? RunFullNative() : Run());
+    }
+    private static string _diagnosticHash="";
+    private static void SaveDiagnostic(string __result)
+    {
+        if(NRun.Instance?.TreasureRoom==null && NRun.Instance?.RestSiteRoom==null) return;
+        if(__result==_diagnosticHash) return;
+        _diagnosticHash=__result;
+        var save=RunManager.Instance.ToSave(null);
+        save.SaveTime=save.StartTime=save.RunTime=save.WinTime=0; save.NumReloads=0; save.MapDrawings=null;
+        File.WriteAllText(Path.Combine(OS.GetUserDataDir(),"native-state.json"),JsonSerializationUtility.ToJson(save));
+    }
+    // Test-only local artifacts, never pixels in the production mirror protocol.
+    private static async Task RendererVisuals()
+    {
+        var saved=new System.Collections.Generic.HashSet<string>();
+        while(saved.Count<3)
+        {
+            await ((SceneTree)Engine.GetMainLoop()).ToSignal(Engine.GetMainLoop(),SceneTree.SignalName.ProcessFrame);
+            if(NGame.Instance==null || NRun.Instance?.IsNodeReady()!=true || NCombatRoom.Instance?.IsNodeReady()!=true) continue;
+            var arrow=NRun.Instance.GlobalUi.TargetManager.GetNodeOrNull<MegaCrit.Sts2.Core.Nodes.Combat.NTargetingArrow>("TargetingArrow");
+            string label=arrow?.IsVisibleInTree()==true ? "arrow" : ReplicaSettingsVisible() ? "settings" : "combat";
+            if(saved.Contains(label)) continue;
+            if(label is "arrow" or "settings")
+            {
+                var settling=System.Diagnostics.Stopwatch.StartNew();
+                while(settling.Elapsed.TotalMilliseconds<300)
+                    await NGame.Instance.ToSignal(NGame.Instance.GetTree(),SceneTree.SignalName.ProcessFrame);
+            }
+            await NGame.Instance.ToSignal(RenderingServer.Singleton,RenderingServer.SignalName.FramePostDraw);
+            string path=Path.Combine(Environment.GetEnvironmentVariable("RMP_MULTI_PROFILE_ROOT")!,"visual-"+label+".png");
+            using var pixels=NGame.Instance.GetViewport().GetTexture().GetImage();
+            pixels.SavePng(path); saved.Add(label); GD.Print("[MultiInstanceSmoke] VISUAL "+label);
+        }
+    }
+    private static bool ReplicaSettingsVisible()
+    {
+        var monitor=Type("LiveSharingController").Assembly.GetType("RemoveMultiplayerPlayerLimit.Infrastructure.SceneMonitor")!;
+        return monitor.GetMethod("FindSettingsScreen",Any)!.Invoke(null,null) is Control control && control.IsVisibleInTree();
     }
     private static void Check(bool condition, string label) { if (!condition) throw new Exception(label); GD.Print("[MultiInstanceSmoke] PASS " + label); }
-    private static async Task Frames(int n) { for(int i=0;i<n;i++) { Engine.MaxFps=DisplayServer.GetName()=="headless" ? 30 : 120; await NGame.Instance.ToSignal(NGame.Instance.GetTree(),SceneTree.SignalName.ProcessFrame); } }
+    private static async Task Frames(int n)
+    {
+        for(int i=0;i<n;i++)
+        {
+            if(DisplayServer.GetName()!="headless")
+            {
+                DisplayServer.WindowSetFlag(DisplayServer.WindowFlags.NoFocus,true);
+                if (DisplayServer.WindowGetMode()!=DisplayServer.WindowMode.Windowed) DisplayServer.WindowSetMode(DisplayServer.WindowMode.Windowed);
+                if (DisplayServer.WindowGetPosition()!=new Vector2I(-30000,-30000)) DisplayServer.WindowSetPosition(new Vector2I(-30000,-30000));
+            }
+            Engine.MaxFps=DisplayServer.GetName()=="headless" ? 30 : 120;
+            await NGame.Instance.ToSignal(NGame.Instance.GetTree(),SceneTree.SignalName.ProcessFrame);
+        }
+    }
     private static async Task Until(Func<bool> predicate, string label, int limit=2400)
     {
-        for(int i=0;i<limit && !predicate();i++)
+        var clock=System.Diagnostics.Stopwatch.StartNew(); double diagnosticAt=5;
+        for(int i=0;i<limit && clock.Elapsed.TotalSeconds<45 && !predicate();i++)
         {
             if (Static("_mirror") is { } mirror && (string)mirror.GetType().GetProperty("Error",Any)!.GetValue(mirror)! is { Length: > 0 } error) throw new Exception(error);
+            if(clock.Elapsed.TotalSeconds>=diagnosticAt && Static("_mirror") is { } current)
+            {
+                diagnosticAt+=5; var process=Field(current,"Process")!;
+                GD.Print("[MultiInstanceSmoke] WAIT "+label+" presentation="+Field(process,"Presentation")+" idle="+Field(process,"LastIdle")+" sourceFps="+Performance.GetMonitor(Performance.Monitor.TimeFps));
+            }
             await Frames(1);
         }
         Check(predicate(),label);
@@ -152,18 +215,75 @@ public static class Smoke
             await Until(()=>state.Players[0].PlayerCombatState!.TurnNumber>turn && (bool)Call(mirror,"Authorize",state)!,"native intent result reaches both models");
             if(DisplayServer.GetName()!="headless") await NativeWindowChecks(state,mirror,process,view);
             Controller.GetMethod("Close",Any)!.Invoke(null,null); await Frames(10);
-            bool gone=false; try { using var stopped=System.Diagnostics.Process.GetProcessById(childId); gone=stopped.HasExited; } catch(ArgumentException){gone=true;}
-            Check(gone,"closing panel terminates only its owned renderer");
-            Check(CombatManager.Instance.IsInProgress,"closing renderer leaves source combat running");
+            Check(!child.HasExited && ReferenceEquals(Static("_mirror"),mirror),"F8 close retains its authenticated renderer process");
+            Check(Static("_view")==null,"F8 close removes shell and control permission");
+            turn=state.Players[0].PlayerCombatState!.TurnNumber;
+            NCombatRoom.Instance!.Ui.EndTurnButton.CallReleaseLogic();
+            await Until(()=>state.Players[0].PlayerCombatState!.TurnNumber>turn && Verified,"hidden replica keeps following authority events");
             string previousSession=(string)Field(Field(process,"Wire")!,"Identity")!.GetType().GetField("Session",Any)!.GetValue(Field(Field(process,"Wire")!,"Identity"))!;
+            var reopenClock=System.Diagnostics.Stopwatch.StartNew();
             Controller.GetMethod("Open",Any)!.Invoke(null,new object[]{state});
-            await Until(()=>Verified,"reopening reconstructs mid-combat event prefix");
+            view=Static("_view")!; Call(view,"SetControlEnabled",true); epoch=(long)Field(view,"_epoch")!;
+            bool Exposed() => DisplayServer.GetName()=="headless" || mirror.GetType().GetProperty("Window",Any)!.GetValue(mirror) is { } window && (bool)window.GetType().GetProperty("Visible",Any)!.GetValue(window)!;
+            bool PermissionReady() => (long)Field(process,"LastControlEpoch")! == epoch && (bool)Field(process,"LastControlEnabled")!;
+            await Until(()=>Verified && Exposed() && PermissionReady(),"warm reopen exposes consistent native window with active renderer permission");
+            turn=state.Players[0].PlayerCombatState!.TurnNumber;
+            var reopenedIntent=Intent("endTurn");
+            var reopenedResult=Controller.GetMethod("ResolveIntent",Any)!.Invoke(null,new[]{(object)state,reopenedIntent})!;
+            Check((bool)reopenedResult.GetType().GetProperty("Accepted")!.GetValue(reopenedResult)!,"warm reopen accepts a legitimate authority operation");
+            Check(reopenClock.Elapsed.TotalMilliseconds<=1000,"warm F8 visible and first operation accepted within 1 second: "+reopenClock.Elapsed.TotalMilliseconds);
             var reopened=Field(Field(Static("_mirror")!,"Process")!,"Wire")!;
-            Check((string)Field(reopened,"Identity")!.GetType().GetField("Session",Any)!.GetValue(Field(reopened,"Identity"))! != previousSession,"reopened renderer uses a new authenticated session");
+            Check((string)Field(reopened,"Identity")!.GetType().GetField("Session",Any)!.GetValue(Field(reopened,"Identity"))! == previousSession,"F8 reuses the same authenticated session");
+            await Until(()=>state.Players[0].PlayerCombatState!.TurnNumber>turn && Verified,"warm reopened operation converges into the next actionable turn");
+            var oldIntent=Intent("endTurn");
+            var quickSl=Controller.Assembly.GetType("RemoveMultiplayerPlayerLimit.Features.QuickSl.QuickSlController")!;
+            int confirmationEvents=(int)Field(process,"LastEvents")!;
+            quickSl.GetMethod("TriggerRequested",Any)!.Invoke(null,null);
+            await Until(()=>MegaCrit.Sts2.Core.Nodes.CommonUi.NModalContainer.Instance?.OpenModal is Node { } modal && modal.IsNodeReady(),"native F5 confirmation opens");
+            await Frames(15);
+            Check(!Exposed(),"native SL confirmation is not covered by mirror window");
+            var popup=(Node)MegaCrit.Sts2.Core.Nodes.CommonUi.NModalContainer.Instance.OpenModal;
+            popup!.GetNode<MegaCrit.Sts2.Core.Nodes.CommonUi.NPopupYesNoButton>("VerticalPopup/NoButton").ForceClick();
+            await Until(()=>MegaCrit.Sts2.Core.Nodes.CommonUi.NModalContainer.Instance.OpenModal==null && Exposed() && Verified,"cancelled SL returns to usable native window");
+            Check((int)Field(process,"LastEvents")! == confirmationEvents,"cancelled SL does not add an unavailable replica modal operation");
+            bool SourceOperable() => (bool)Type("MirrorHost").GetProperty("SourceIdle",Any)!.GetValue(null)! && NCombatRoom.Instance?.Ui.EndTurnButton.IsEnabled==true;
+            var primaryRestoreClock=System.Diagnostics.Stopwatch.StartNew();
+            await (Task)quickSl.GetMethod("RunSingleplayerSlAsync",Any)!.Invoke(null,null)!;
+            await Until(SourceOperable,"primary SL reaches original actionable player phase");
+            GD.Print("[MultiInstanceSmoke] PRIMARY SL from invocation to actionable="+primaryRestoreClock.Elapsed.TotalMilliseconds+" ms");
+            var restoreClock=System.Diagnostics.Stopwatch.StartNew();
+            state=RunManager.Instance.DebugOnlyGetState()!;
+            await Until(()=>Static("_view")!=null && Verified,"singleplayer SL restores consistent native combat");
+            view=Static("_view")!; Call(view,"SetControlEnabled",true); epoch=(long)Field(view,"_epoch")!;
+            RejectIntent(oldIntent,"pre-SL intent rejected after restoring the same checkpoint");
+            await Until(()=>Exposed() && PermissionReady() && (long)Field(process,"DrawFrames")!>0 && (bool)Field(process,"WindowVisible")!,"SL native window becomes visible, draws and has active renderer permission");
+            var restoreResult=Controller.GetMethod("ResolveIntent",Any)!.Invoke(null,new[]{(object)state,Intent("endTurn")})!;
+            Check((bool)restoreResult.GetType().GetProperty("Accepted")!.GetValue(restoreResult)!,"SL replica accepts first legitimate authority operation");
+            Check(restoreClock.Elapsed.TotalMilliseconds<=1000,"SL additional wait and first accepted operation within 1 second: "+restoreClock.Elapsed.TotalMilliseconds);
+            Check(primaryRestoreClock.Elapsed.TotalMilliseconds<=1000,"SL total restore and first accepted operation within 1 second: "+primaryRestoreClock.Elapsed.TotalMilliseconds);
+            Check(!child.HasExited && ReferenceEquals(Static("_mirror"),mirror),"F5 preserves the exact renderer process");
+            // The accepted operation is still starting its turn transition:
+            // another SL must cancel that generation and reuse the same child.
+            oldIntent=Intent("endTurn");
+            primaryRestoreClock.Restart();
+            await (Task)quickSl.GetMethod("RunSingleplayerSlAsync",Any)!.Invoke(null,null)!;
+            await Until(SourceOperable,"consecutive primary SL reaches original actionable player phase");
+            GD.Print("[MultiInstanceSmoke] PRIMARY consecutive SL from invocation to actionable="+primaryRestoreClock.Elapsed.TotalMilliseconds+" ms");
+            restoreClock.Restart(); state=RunManager.Instance.DebugOnlyGetState()!;
+            await Until(()=>Static("_view")!=null && Verified,"consecutive SL cancels pending old replay and converges");
+            view=Static("_view")!; Call(view,"SetControlEnabled",true); epoch=(long)Field(view,"_epoch")!;
+            RejectIntent(oldIntent,"previous SL generation cannot control the next reload");
+            await Until(()=>Exposed() && PermissionReady() && (long)Field(process,"DrawFrames")!>0 && (bool)Field(process,"WindowVisible")!,"consecutive SL exposes current window, draws and has permission");
+            restoreResult=Controller.GetMethod("ResolveIntent",Any)!.Invoke(null,new[]{(object)state,Intent("endTurn")})!;
+            Check((bool)restoreResult.GetType().GetProperty("Accepted")!.GetValue(restoreResult)!,"consecutive SL accepts the first current operation");
+            Check(restoreClock.Elapsed.TotalMilliseconds<=1000,"consecutive SL additional wait within 1 second: "+restoreClock.Elapsed.TotalMilliseconds);
+            Check(primaryRestoreClock.Elapsed.TotalMilliseconds<=1000,"consecutive SL total restore within 1 second: "+primaryRestoreClock.Elapsed.TotalMilliseconds);
+            Check(!child.HasExited && ReferenceEquals(Static("_mirror"),mirror),"consecutive SL retains exact renderer process");
             Controller.GetMethod("Close",Any)!.Invoke(null,null);
+            Controller.GetMethod("Suspend",Any)!.Invoke(null,null);
             GD.Print("[MultiInstanceSmoke] ALL PASSED"); ((SceneTree)Engine.GetMainLoop()).Quit();
         }
-        catch(Exception e) { GD.PrintErr("[MultiInstanceSmoke] FAIL "+e); Controller?.GetMethod("Close",Any)?.Invoke(null,null); ((SceneTree)Engine.GetMainLoop()).Quit(1); }
+        catch(Exception e) { GD.PrintErr("[MultiInstanceSmoke] FAIL "+e); Controller?.GetMethod("Suspend",Any)?.Invoke(null,null); ((SceneTree)Engine.GetMainLoop()).Quit(1); }
     }
     [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern nint GetParent(nint window);
     [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(nint window,out uint process);
@@ -205,12 +325,59 @@ public static class Smoke
         int index=(int)card.GetType().GetProperty("Index")!.GetValue(card)!;
         var bounds=(float[])card.GetType().GetProperty("Rect")!.GetValue(card)!;
         Send(0x200,bounds[0]+bounds[2]/2,Math.Min(.97f,bounds[1]+bounds[3]/3)); await Frames(30);
-        await Until(()=>((System.Collections.IEnumerable)Field(process,"LastHits")!).Cast<object>().Any(h=>(string)h.GetType().GetProperty("Kind")!.GetValue(h)! == "play" && ((float[])h.GetType().GetProperty("Rect")!.GetValue(h)!)[3]>bounds[3]*1.1f),"native mouse motion raises original card without a pipe pointer message",600);
-        Check(before==(string)Type("MirrorState").GetMethod("Hash",Any)!.Invoke(null,new object[]{state})!,"local native hover does not mutate authoritative combat");
+        GD.Print("[MultiInstanceSmoke] SKIP physical hover: synthetic messages cannot move the desktop cursor; native drag is tested separately");
+        Check(before==(string)Type("MirrorState").GetMethod("Hash",Any)!.Invoke(null,new object[]{state})!,"native motion message does not mutate authoritative combat");
         Call(view,"SetControlEnabled",false); await Frames(20);
         Send(0x201,.89f,.82f); Send(0x202,.89f,.82f); await Frames(20);
         Check(before==(string)Type("MirrorState").GetMethod("Hash",Any)!.Invoke(null,new object[]{state})! && (bool)Call(mirror,"Authorize",state)!,"watch-mode native clicks alter neither source nor replica");
         Call(view,"SetControlEnabled",true); await Frames(20);
+        async Task ClickUi(string kind)
+        {
+            // Native submenu buttons animate into position for 0.35 seconds.
+            // Wait for that animation before using the latest reported hitbox.
+            var settling=System.Diagnostics.Stopwatch.StartNew();
+            while(settling.Elapsed.TotalMilliseconds<600) await Frames(1);
+            var hit=((System.Collections.IEnumerable)Field(process,"LastHits")!).Cast<object>().First(h=>(string)h.GetType().GetProperty("Kind")!.GetValue(h)! == kind);
+            var rect=(float[])hit.GetType().GetProperty("Rect")!.GetValue(hit)!;
+            Send(0x201,rect[0]+rect[2]/2,rect[1]+rect[3]/2); Send(0x202,rect[0]+rect[2]/2,rect[1]+rect[3]/2);
+        }
+        await ClickUi("ui.pause"); await Until(()=>(string)Field(process,"Presentation")! == "menu","native pause button opens replica menu");
+        await ClickUi("ui.settings"); await Until(()=>(string)Field(process,"Presentation")! == "settings","native settings button opens original settings screen");
+        await Frames(12);
+        await ClickUi("ui.back"); await Until(()=>(string)Field(process,"Presentation")! == "menu","settings native back control responds");
+        await ClickUi("ui.resume"); await Until(()=>(string)Field(process,"Presentation")! == "combat" && Verified,"native resume returns to consistent combat");
+        Check(before==(string)Type("MirrorState").GetMethod("Hash",Any)!.Invoke(null,new object[]{state})!,"presentation clicks do not change authoritative combat");
+        await ClickUi("ui.pause"); await Until(()=>(string)Field(process,"Presentation")! == "menu","pause menu ready for authoritative action");
+        await ClickUi("ui.menu.GiveUp");
+        await Until(()=>MegaCrit.Sts2.Core.Nodes.CommonUi.NModalContainer.Instance?.OpenModal is Node node && node.IsNodeReady(),"mirror give-up button opens original source confirmation");
+        await Frames(15);
+        Check(!IsWindowVisible(child) && !(bool)((CanvasLayer)Field(view,"_overlay")!).Visible,"source confirmation is not covered by native window or panel");
+        ((Node)MegaCrit.Sts2.Core.Nodes.CommonUi.NModalContainer.Instance.OpenModal).GetNode<MegaCrit.Sts2.Core.Nodes.CommonUi.NPopupYesNoButton>("VerticalPopup/NoButton").ForceClick();
+        System.Collections.Generic.IEnumerable<Node> All(Node root)
+        { yield return root; foreach(var nested in root.GetChildren().SelectMany(All)) yield return nested; }
+        await Frames(15);
+        All((Node)MegaCrit.Sts2.Core.Nodes.Screens.Capstones.NCapstoneContainer.Instance.CurrentCapstoneScreen)
+            .OfType<MegaCrit.Sts2.Core.Nodes.Screens.PauseMenu.NPauseMenuButton>().First(b=>b.Name.ToString()=="Resume").ForceClick();
+        await Until(()=>IsWindowVisible(child) && Verified,"cancelled give-up resumes the usable native mirror");
+        Check(before==(string)Type("MirrorState").GetMethod("Hash",Any)!.Invoke(null,new object[]{state})!,"cancelled give-up leaves source and replica models unchanged");
+        var attack=state.Players[0].PlayerCombatState!.Hand.Cards.First(c=>c.TargetType==MegaCrit.Sts2.Core.Entities.Cards.TargetType.AnyEnemy && NCombatRoom.Instance!.CreatureNodes.Any(n=>n.Entity.IsEnemy && c.CanPlayTargeting(n.Entity)));
+        int attackIndex=state.Players[0].PlayerCombatState!.Hand.Cards.ToList().IndexOf(attack);
+        var enemy=NCombatRoom.Instance!.CreatureNodes.First(n=>n.Entity.IsEnemy && attack.CanPlayTargeting(n.Entity)).Entity;
+        int enemyIndex=enemy.CombatState.Creatures.ToList().IndexOf(enemy);
+        float[] HitRect(string kind,int nativeIndex)
+        {
+            var hit=((System.Collections.IEnumerable)Field(process,"LastHits")!).Cast<object>().First(h=>(string)h.GetType().GetProperty("Kind")!.GetValue(h)! == kind && (int)h.GetType().GetProperty("Index")!.GetValue(h)! == nativeIndex);
+            return (float[])hit.GetType().GetProperty("Rect")!.GetValue(hit)!;
+        }
+        var attackBounds=HitRect("play",attackIndex); var enemyBounds=HitRect("target",enemyIndex);
+        int oldEnergy=state.Players[0].PlayerCombatState!.Energy;
+        int oldHealth=enemy.CurrentHp;
+        Send(0x201,attackBounds[0]+attackBounds[2]/2,attackBounds[1]+attackBounds[3]/2);
+        Send(0x200,enemyBounds[0]+enemyBounds[2]/2,enemyBounds[1]+enemyBounds[3]/2);
+        await Until(()=>(bool)Field(process,"TargetArrowVisible")!,"HWND drag activates original targeting arrow");
+        await Frames(12);
+        Send(0x202,enemyBounds[0]+enemyBounds[2]/2,enemyBounds[1]+enemyBounds[3]/2);
+        await Until(()=>state.Players[0].PlayerCombatState!.Energy<oldEnergy && enemy.CurrentHp<oldHealth && Verified,"HWND attack drag damages target on authority and converges");
         var fps=new System.Collections.Generic.List<double>(); var sourceFps=new System.Collections.Generic.List<double>();
         for(int i=0;i<20;i++) { await Frames(30); fps.Add((double)Field(process,"Fps")!); sourceFps.Add(Performance.GetMonitor(Performance.Monitor.TimeFps)); }
         fps.Sort(); sourceFps.Sort();

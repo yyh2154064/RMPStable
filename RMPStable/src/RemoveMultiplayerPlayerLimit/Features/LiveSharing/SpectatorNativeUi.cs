@@ -43,7 +43,9 @@ internal sealed partial class LocalSpectatorSource
 		_pausedNativeInput.Clear();
 	}
 	private static Control? NativeRoom => new Control?[] { NRun.Instance?.EventRoom, NRun.Instance?.MerchantRoom, NRun.Instance?.RestSiteRoom, NRun.Instance?.TreasureRoom, NRun.Instance?.MapRoom, NRun.Instance?.CombatRoom }.FirstOrDefault(n => n != null && Ready(n));
-	private static Control? ActiveNativeUi => NModalContainer.Instance?.OpenModal as Control
+	internal static bool PendingNativeChoice => NTargetManager.Instance?.IsInSelection == true || NOverlayStack.Instance?.Peek() is MegaCrit.Sts2.Core.Nodes.Screens.CardSelection.NCardGridSelectionScreen ||
+		NModalContainer.Instance?.OpenModal != null || NPlayerHand.Instance?.CurrentMode is NPlayerHand.Mode.SimpleSelect or NPlayerHand.Mode.UpgradeSelect;
+	internal static Control? ActiveNativeUi => NModalContainer.Instance?.OpenModal as Control
 		?? (NGame.Instance?.InspectCardScreen?.IsVisibleInTree() == true ? NGame.Instance.InspectCardScreen : null)
 		?? (NGame.Instance?.InspectRelicScreen?.IsVisibleInTree() == true ? NGame.Instance.InspectRelicScreen : null)
 		?? NCapstoneContainer.Instance?.CurrentCapstoneScreen as Control
@@ -84,7 +86,7 @@ internal sealed partial class LocalSpectatorSource
 					() => Active(node) && targeting.IsInSelection && targeting.AllowedToTargetNode(node), _ =>
 					{ targeting.OnNodeHovered(node); targeting._Input(new InputEventMouseButton { ButtonIndex = MouseButton.Left, Pressed = false }); return !targeting.IsInSelection; });
 			}
-			add(new() { Id = "cancel-target", Kind = "cancel", Label = T("取消目标", "Cancel targeting") }, () => targeting.IsInSelection,
+            add(new() { Id = "cancel-target", Kind = "cancel", NativePath = MirrorNativeUi.Key(targeting), Label = T("取消目标", "Cancel targeting") }, () => targeting.IsInSelection,
 				_ => { targeting.CancelTargeting(); return true; });
 			return;
 		}
@@ -97,7 +99,7 @@ internal sealed partial class LocalSpectatorSource
 		{
 			PauseNativeInput(popup);
 			roots = new() { popup }; control.Actions.Clear();
-			add(new() { Id = "cancel-popup:" + popup.GetInstanceId(), Kind = "cancel" }, () => Ready(popup), _ => { popup.Remove(); return true; });
+			add(new() { Id = "cancel-popup:" + popup.GetInstanceId(), Kind = "cancel", NativePath = MirrorNativeUi.Key(popup) }, () => Ready(popup), _ => { popup.Remove(); return true; });
 		}
 		foreach (var ui in roots)
 		{
@@ -140,7 +142,7 @@ internal sealed partial class LocalSpectatorSource
 					_ => { if (MerchantSelect!.Invoke(slot, null) is not Task task) return false; TaskHelper.RunSafely(task); return true; });
 			}
 	}
-	private static bool ScrollNative(Control node, string direction)
+	internal static bool ScrollNative(Control node, string direction)
 	{
 		var parts = direction.Split(':');
 		if (parts[0] is not "up" and not "down" || parts.Length > 2) return false;

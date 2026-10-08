@@ -88,6 +88,7 @@ internal sealed class MirrorWindowHook : IDisposable
     private readonly Func<uint, nuint, nint, bool> _intercept;
     private readonly bool _noActivate;
     private bool _disposed;
+    private int _inputErrors;
     internal MirrorWindowHook(nint window, Func<uint, nuint, nint, bool> intercept, bool noActivate = false)
     {
         MirrorWin32.RequireOwned(window, System.Environment.ProcessId);
@@ -100,7 +101,7 @@ internal sealed class MirrorWindowHook : IDisposable
     {
         // No exception may unwind into user32. Input fails closed.
         try { if (!_disposed && _intercept(message, wparam, lparam)) return 0; }
-        catch { if (MirrorWin32.Button(message) || MirrorWin32.Keyboard(message)) return 0; }
+        catch (Exception error) { if (_inputErrors++ < 4) GD.PrintErr("[RMP:Mirror:Input] native dispatch failed: " + error); if (MirrorWin32.Button(message) || MirrorWin32.Keyboard(message)) return 0; }
         if (_noActivate && message == MirrorWin32.MouseActivate) return 3;
         return MirrorWin32.Call(_previous, window, message, wparam, lparam);
     }
@@ -155,11 +156,16 @@ internal sealed class MirrorWindowHost : IDisposable
         }
         // Keep the configured spectator hotkey handled by the source; all
         // gameplay keys over the replica are blocked before Godot sees them.
-        if ((uint)key == LiveSharingController.NativeHotkey) { _forwardKeys.Add(key); return false; }
+        if ((uint)key == LiveSharingController.NativeHotkey || (uint)key == QuickSl.QuickSlController.NativeHotkey) { _forwardKeys.Add(key); return false; }
         if (message == MirrorWin32.KeyDown && key == 0x1B) _escape = true;
         return true;
     }
     internal bool TakeEscape() { bool value = _escape; _escape = false; return value; }
+    internal void Hide()
+    {
+        _visible = false; _positioned = false;
+        if (MirrorWin32.Owned(_child, _childProcess)) MirrorWin32.ShowWindowAsync(_child, 0);
+    }
     internal void Layout(Control content, bool show)
     {
         if (!Attached) return;

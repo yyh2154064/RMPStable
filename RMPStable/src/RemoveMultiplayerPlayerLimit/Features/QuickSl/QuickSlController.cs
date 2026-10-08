@@ -73,6 +73,9 @@ internal static class QuickSlController
 	private static bool _hotkeyWasDown;
 	private static bool _popupOpen;
 	private static bool _operationRunning;
+	internal static uint NativeHotkey { get; private set; } = 0x74;
+    internal static bool ConfirmationOpen => _popupOpen;
+    internal static void RequestFromMirror() => TriggerRequested();
 	private static RecoveryState? _recovery;
 
 	private static Key GetHotkey()
@@ -299,6 +302,7 @@ internal static class QuickSlController
 	private static void PollHotkey()
 	{
 		Key key = _inputRegistered ? GetHotkey() : Key.F5;
+		NativeHotkey = key >= Key.F1 && key <= Key.F35 ? (uint)(0x70 + (int)(key - Key.F1)) : (uint)key;
 		bool down = key != Key.None && Input.IsKeyPressed(key);
 		if (down && !_hotkeyWasDown && RunManager.Instance?.IsInProgress == true)
 		{
@@ -341,6 +345,8 @@ internal static class QuickSlController
 			return;
 		}
 		_operationRunning = true;
+		var restoreClock = System.Diagnostics.Stopwatch.StartNew();
+		void RestoreStage(string stage) => Log.Info("[RMP:QuickSL:Timing] " + stage + "=" + restoreClock.Elapsed.TotalMilliseconds.ToString("F1", System.Globalization.CultureInfo.InvariantCulture) + "ms");
 		try
 		{
 			Task? pendingSave = SaveManager.Instance.CurrentRunSaveTask;
@@ -355,13 +361,44 @@ internal static class QuickSlController
 				throw new InvalidOperationException($"The native run checkpoint could not be read (status={result.Status}).");
 			}
 			SerializableRun save = result.SaveData;
+			RestoreStage("save read");
 			RunState runState = RunState.FromSerializable(save);
-			await NGame.Instance.Transition.FadeOut(0.35f, runState.Players[0].Character.CharacterSelectTransitionPath);
+			var previousState = RunManager.Instance.DebugOnlyGetState();
+			bool warmAssets = previousState != null && previousState.Act.Id == runState.Act.Id &&
+				previousState.Players.Select(p=>p.Character.Id).SequenceEqual(runState.Players.Select(p=>p.Character.Id));
+			LiveSharing.LiveSharingController.BeginSingleplayerRestore();
+			LiveSharing.MirrorFastRestore.Source = true;
+			await NGame.Instance.Transition.FadeOut(0.03f, runState.Players[0].Character.CharacterSelectTransitionPath);
+			RestoreStage("fade out");
 			RunManager.Instance.CleanUp();
+			RestoreStage("cleanup");
 			await RunManager.Instance.SetUpSavedSingleplayer(runState, save);
+			RestoreStage("setup native saved run");
+			LiveSharing.LiveSharingController.PrepareSingleplayerRestore();
+			LiveSharing.MirrorJournal.PrimeRestore(save);
 			NGame.Instance.ReactionContainer.InitializeNetworking(new NetSingleplayerGameService());
-			await NGame.Instance.LoadRun(runState, save.PreFinishedRoom);
-			await NGame.Instance.Transition.FadeIn(0.35f);
+			if (warmAssets)
+			{
+				RunManager.Instance.Launch();
+				NGame.Instance.RootSceneContainer.SetCurrentScene(NRun.Create(runState));
+				await RunManager.Instance.GenerateMap();
+				RestoreStage("scene and map");
+				await RunManager.Instance.LoadIntoLatestMapCoord(MegaCrit.Sts2.Core.Rooms.AbstractRoom.FromSerializable(save.PreFinishedRoom, runState));
+				RestoreStage("native room loaded");
+				if (RunManager.Instance.MapDrawingsToLoad != null)
+				{
+					NRun.Instance.GlobalUi.MapScreen.Drawings.LoadDrawings(RunManager.Instance.MapDrawingsToLoad);
+					RunManager.Instance.MapDrawingsToLoad = null;
+				}
+			}
+			else await NGame.Instance.LoadRun(runState, save.PreFinishedRoom);
+			if (MegaCrit.Sts2.Core.Nodes.Rooms.NCombatRoom.Instance != null)
+				while (MegaCrit.Sts2.Core.Combat.CombatManager.Instance.IsStarting || MegaCrit.Sts2.Core.Combat.CombatManager.Instance.IsInProgress && runState.Players[0].PlayerCombatState?.Phase != MegaCrit.Sts2.Core.Combat.PlayerTurnPhase.Play && !LiveSharing.LocalSpectatorSource.PendingNativeChoice)
+					await NGame.Instance.ToSignal(NGame.Instance.GetTree(), SceneTree.SignalName.ProcessFrame);
+			LiveSharing.MirrorFastRestore.Source = false;
+			RestoreStage("native player phase");
+			await NGame.Instance.Transition.FadeIn(0.03f);
+			RestoreStage("ready");
 			Log.Info("[RMP:QuickSL] Singleplayer checkpoint reloaded directly without showing the main menu.");
 		}
 		catch (Exception ex)
@@ -378,6 +415,9 @@ internal static class QuickSlController
 		}
 		finally
 		{
+			LiveSharing.MirrorFastRestore.Source = false;
+			LiveSharing.LiveSharingController.EndSingleplayerRestore();
+			LiveSharing.MirrorJournal.FinishRestore();
 			_operationRunning = false;
 		}
 	}

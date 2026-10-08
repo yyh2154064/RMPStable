@@ -75,8 +75,15 @@ internal sealed partial class LocalSpectatorSource
 	private static bool SelectorActive(Node selection, Node node)
 	{
 		if (!Ready(selection) || !Ready(node) || !RewardAwaited(selection)) return false;
-		var preview = selection is NDeckCardSelectScreen ? SelectionPreview?.GetValue(selection) as Control : null;
+		var preview = ActiveSelectionPreview(selection);
 		return preview?.IsVisibleInTree() != true || preview.IsAncestorOf(node);
+	}
+	private static Control? ActiveSelectionPreview(Node selection)
+	{
+		for (var type = selection.GetType(); type != null; type = type.BaseType)
+			foreach (var name in new[] { "_previewContainer", "_upgradeSinglePreviewContainer", "_upgradeMultiPreviewContainer" })
+				if (type.GetField(name, BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.DeclaredOnly)?.GetValue(selection) is Control preview && Ready(preview)) return preview;
+		return null;
 	}
 
 	private string CardControlId(CardModel card)
@@ -97,7 +104,7 @@ internal sealed partial class LocalSpectatorSource
 		var state = RunManager.Instance.DebugOnlyGetState()?.Players.FirstOrDefault()?.PlayerCombatState;
 		return PageToken() + ":" + NativeRoom?.GetInstanceId() + ":" + ActiveNativeUi?.GetInstanceId() + ":" + NativePopup?.GetInstanceId() + ":" + NTargetManager.Instance?.IsInSelection + ":" + state?.TurnNumber + ":" + NPlayerHand.Instance?.CurrentMode + ":" + _controlRevision;
 	}
-	private static bool Ready(Node node) => GodotObject.IsInstanceValid(node) && node.IsInsideTree() && !node.IsQueuedForDeletion() && node is CanvasItem item && item.IsVisibleInTree();
+	private static bool Ready(Node node) => GodotObject.IsInstanceValid(node) && node.IsInsideTree() && node.IsNodeReady() && !node.IsQueuedForDeletion() && node is CanvasItem item && item.IsVisibleInTree();
 	private static bool Unblocked() => NModalContainer.Instance?.OpenModal == null && NGame.Instance.InspectRelicScreen?.IsVisibleInTree() != true && NGame.Instance.InspectCardScreen?.IsVisibleInTree() != true;
 	private bool HandAvailable(Player player) => Unblocked() && NMapScreen.Instance?.IsOpen != true && NOverlayStack.Instance?.Peek() == null && NPlayerHand.Instance is { } hand && Ready(hand) && hand.CurrentMode == NPlayerHand.Mode.Play && CanPlayHand?.Invoke(hand, null) is true && player.PlayerCombatState != null;
 
@@ -107,6 +114,8 @@ internal sealed partial class LocalSpectatorSource
 		var bindings = new Dictionary<string, CommandBinding>();
 		void Add(ControlActionSnapshot action, Func<bool> available, Func<string, bool> execute)
 		{
+			if (action.Kind != "play" && action.NativePath.Length == 0 && ulong.TryParse(action.Id.Substring(action.Id.LastIndexOf(':') + 1), out var instance) &&
+				GodotObject.InstanceFromId(instance) is Node node) action.NativePath = MirrorNativeUi.Key(node);
 			if (action.MapAttached && NMapScreen.Instance?.GetNodeOrNull<Control>("TheMap") is { } map &&
 				_capturedTransforms.TryGetValue(map.GetInstanceId().ToString(), out var capturedMap))
 			{
@@ -115,7 +124,7 @@ internal sealed partial class LocalSpectatorSource
 			}
 			action.Enabled = available(); control.Actions.Add(action); bindings[action.Id] = new(available, execute);
 		}
-		if (snapshot.Page == "combat" && NCombatRoom.Instance is { } combat && player.PlayerCombatState is { } state)
+		if (snapshot.Page == "combat" && MegaCrit.Sts2.Core.Combat.CombatManager.Instance.IsInProgress && NCombatRoom.Instance is { } combat && Ready(combat) && combat.Ui?.Hand != null && player.PlayerCombatState is { } state)
 		{
 			var hand = combat.Ui.Hand;
 			bool Selecting() => Unblocked() && Ready(hand) && NMapScreen.Instance?.IsOpen != true && NOverlayStack.Instance?.Peek() == null && hand.CurrentMode is NPlayerHand.Mode.SimpleSelect or NPlayerHand.Mode.UpgradeSelect;
@@ -130,7 +139,7 @@ internal sealed partial class LocalSpectatorSource
 			}
 			else
 			{
-			var creatures = combat.CreatureNodes.Where(n => Ready(n) && n.Entity.IsAlive).ToArray();
+			var creatures = combat.CreatureNodes.Where(n => Ready(n) && n.Entity.CombatState != null && n.Entity.IsAlive).ToArray();
 			foreach (var node in creatures) control.Targets.Add(new() { NativeIndex = node.Entity.CombatState.Creatures.ToList().IndexOf(node.Entity), Id = "creature:" + node.GetInstanceId(), Enemy = node.Entity.IsEnemy, Rect = GlobalRect(node.Hitbox) });
 			foreach (var card in state.Hand.Cards.ToArray())
 			{
@@ -144,8 +153,8 @@ internal sealed partial class LocalSpectatorSource
 					return card.TryManualPlay(node?.Entity);
 				});
 			}
-			var end = combat.Ui.EndTurnButton;
-			Add(new() { Id = "end:" + end.GetInstanceId(), Kind = "endTurn", Label = T("结束回合", "End turn"), Rect = GlobalRect(end) }, () => Unblocked() && Ready(end) && end.IsEnabled && HandAvailable(player), _ => { end.CallReleaseLogic(); return true; });
+			if (combat.Ui.EndTurnButton is { } end)
+				Add(new() { Id = "end:" + end.GetInstanceId(), Kind = "endTurn", Label = T("结束回合", "End turn"), Rect = GlobalRect(end) }, () => Unblocked() && Ready(end) && end.IsEnabled && HandAvailable(player), _ => { end.CallReleaseLogic(); return true; });
 			}
 		}
 		else if (snapshot.Page is "reward" or "selection" && pageRoot != null)

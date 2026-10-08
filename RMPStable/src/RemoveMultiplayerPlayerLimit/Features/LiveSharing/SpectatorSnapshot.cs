@@ -145,6 +145,7 @@ internal sealed class ControlSnapshot
 
 internal sealed class ControlActionSnapshot
 {
+    public string NativePath { get; set; } = "";
     public int NativeIndex { get; set; } = -1;
 	public bool MapAttached { get; set; }
 	public string Id { get; set; } = "";

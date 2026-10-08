@@ -73,13 +73,16 @@ internal sealed partial class LocalSpectatorSource : IDisposable
 			_participant = new ParticipantSnapshot { Id = sourceId, Name = PlatformUtil.GetPlayerNameRaw(RunManager.Instance.NetService.Platform, player.NetId) };
 			_participantExpires = Time.GetTicksMsec() + 5000;
 		}
-		bool battle = MegaCrit.Sts2.Core.Combat.CombatManager.Instance.IsInProgress && NCombatRoom.Instance != null &&
-			NMapScreen.Instance?.IsOpen != true && ReferenceEquals(ActiveNativeUi, NCombatRoom.Instance) && NativePopup == null &&
-			NPlayerHand.Instance?.CurrentMode == NPlayerHand.Mode.Play;
+		var root = ActiveNativeUi;
+		var overlay = NOverlayStack.Instance?.Peek() as Control;
+		string page = NMapScreen.Instance?.IsOpen == true ? "map" : overlay is NCardRewardSelectionScreen ? "reward" :
+			overlay is NRewardsScreen ? "loot" : overlay != null || NCapstoneContainer.Instance?.CurrentCapstoneScreen != null || NModalContainer.Instance?.OpenModal != null ? "selection" :
+            root != null && root == NCombatRoom.Instance ? "combat" : root != null && root == NRun.Instance.EventRoom ? "event" : root != null && root == NRun.Instance.RestSiteRoom ? "rest" :
+            root != null && root == NRun.Instance.MerchantRoom ? "shop" : root != null && root == NRun.Instance.TreasureRoom ? "treasure" : "mapRoom";
 		var size = NRun.Instance.GetViewportRect().Size;
 		var result = new SpectatorSnapshot { Session = NRun.Instance.GetInstanceId().ToString(), SourceId = sourceId,
-			Sources = new() { _participant }, Page = battle ? "combat" : "pending", Width = size.X, Height = size.Y };
-		CaptureControl(result, player, battle ? NCombatRoom.Instance : null);
+			Sources = new() { _participant }, Page = page, Width = size.X, Height = size.Y };
+		CaptureControl(result, player, root);
 		return result;
 	}
 
