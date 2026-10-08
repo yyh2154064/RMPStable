@@ -292,7 +292,7 @@ internal sealed partial class LocalSpectatorSource : IDisposable
 			var pageCards = new List<NCard>();
 			foreach (var step in WalkVisibleSteps(pageRoot, node => { if (node is NCard card && card.Model != null) pageCards.Add(card); })) yield return step;
 			foreach (var card in pageCards) { snap.Cards.Add(CaptureCard(card.Model!, PileType.None, card)); yield return 0; }
-			if (page == "map") snap.Drawings = CaptureDrawings(mapScreen!.Drawings);
+			if (page == "map") { snap.Drawings = CaptureDrawings(mapScreen!.Drawings); snap.MapDrawingMode = (int)mapScreen.Drawings.GetLocalDrawingMode(false); }
 		}
 		if (page == "event")
 		{
@@ -435,7 +435,10 @@ internal sealed partial class LocalSpectatorSource : IDisposable
 				if (item.GetClass() == "SpineSprite")
 				{
 					art.Skeleton = Path(item.Get("skeleton_data_res").As<Resource>());
-					art.Animation = new MegaSprite(item).GetAnimationState().GetCurrentAnimationName(0) ?? "";
+					var track = new MegaSprite(item).GetAnimationState().GetCurrent(0);
+					art.Animation = track?.GetAnimationName() ?? "";
+					art.AnimationTime = track?.GetTrackTime() ?? 0;
+					art.AnimationLoop = track?.BoundObject.HasMethod("get_loop") == true && track.BoundObject.Call("get_loop").AsBool();
 				}
 				if (item is Sprite2D sprite)
 				{

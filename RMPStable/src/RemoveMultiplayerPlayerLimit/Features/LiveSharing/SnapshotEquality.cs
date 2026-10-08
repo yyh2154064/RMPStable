@@ -248,6 +248,7 @@ internal static class SnapshotEquality
 			a.Skeleton == b.Skeleton &&
 			a.AttachmentClass == b.AttachmentClass && a.AttachmentName == b.AttachmentName &&
 			a.Animation == b.Animation &&
+			a.AnimationLoop == b.AnimationLoop && a.AnimationTime == b.AnimationTime &&
 			a.Texture == b.Texture &&
 			a.Material == b.Material &&
 			a.Shader == b.Shader &&

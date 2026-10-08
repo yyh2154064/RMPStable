@@ -37,7 +37,15 @@ internal sealed partial class LocalSpectatorSource
 		{
 			StaticTip(top.Hp, "HIT_POINTS"); StaticTip(top.Gold, "MONEY_POUCH"); StaticTip(top.Map, "ROOM_MAP");
 			if (NativeTip(top.PortraitTip, "_hoverTip") is { } portrait) Tip(top.PortraitTip, new[] { portrait });
-			var prefix = top.RoomIcon.GetType().GetMethod("GetHoverTipPrefixForRoomType", BindingFlags.Instance | BindingFlags.NonPublic)?.Invoke(top.RoomIcon, null) as string;
+			// Unknown-node travel updates map history before BaseRoom exists.
+			// The game's optional tooltip resolver dereferences that room; a
+			// missing tooltip must not invalidate the whole scene or its controls.
+			string? prefix = null;
+			if (run.BaseRoom != null)
+			{
+				try { prefix = top.RoomIcon.GetType().GetMethod("GetHoverTipPrefixForRoomType", BindingFlags.Instance | BindingFlags.NonPublic)?.Invoke(top.RoomIcon, null) as string; }
+				catch (TargetInvocationException ex) when (ex.InnerException is NullReferenceException or ArgumentOutOfRangeException) { }
+			}
 			if (prefix != null) StaticTip(top.RoomIcon, prefix);
 			bool secondOnly = run.Map.SecondBossMapPoint != null && run.CurrentMapPoint == run.Map.BossMapPoint;
 			bool both = run.Act.SecondBossEncounter != null && !secondOnly;

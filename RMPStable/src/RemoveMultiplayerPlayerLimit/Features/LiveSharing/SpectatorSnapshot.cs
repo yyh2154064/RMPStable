@@ -9,6 +9,7 @@ namespace RemoveMultiplayerPlayerLimit.Features.LiveSharing;
 // available to integration tests to exercise the future transport boundary.
 internal sealed class SpectatorSnapshot
 {
+	public int MapDrawingMode { get; set; }
 	public int Schema { get; set; } = 1;
 	public SpectatorRevisions Revisions { get; set; } = new();
 	public string Session { get; set; } = "";
@@ -232,6 +233,8 @@ internal sealed class ArtSnapshot
 	public string AttachmentClass { get; set; } = "";
 	public string AttachmentName { get; set; } = "";
 	public string Animation { get; set; } = "";
+	public bool AnimationLoop { get; set; } = true;
+	public float AnimationTime { get; set; }
 	public string Texture { get; set; } = "";
 	public string Material { get; set; } = "";
 	public string Shader { get; set; } = "";

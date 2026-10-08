@@ -84,10 +84,17 @@ internal sealed partial class SpectatorView
 		_retainedArt[id] = retained with { Snapshot = art };
 		return false;
 	}
-	private static bool SameArtStructure(ArtSnapshot a, ArtSnapshot b) => a.Key == b.Key && a.Parent == b.Parent && a.Group == b.Group && a.Solid == b.Solid && a.Polygon == b.Polygon && (a.Points != null) == (b.Points != null) && a.Skeleton == b.Skeleton && a.AttachmentClass == b.AttachmentClass && a.AttachmentName == b.AttachmentName && a.Animation == b.Animation && a.Stretch == b.Stretch && a.FlipH == b.FlipH && a.FlipV == b.FlipV && a.BeginCap == b.BeginCap && a.EndCap == b.EndCap && a.Joint == b.Joint && a.Antialiased == b.Antialiased && SnapshotEquality.Array(a.PatchMargins, b.PatchMargins);
+	private static bool SameArtStructure(ArtSnapshot a, ArtSnapshot b) => a.Key == b.Key && a.Parent == b.Parent && a.Group == b.Group && a.Solid == b.Solid && a.Polygon == b.Polygon && (a.Points != null) == (b.Points != null) && a.Skeleton == b.Skeleton && a.AttachmentClass == b.AttachmentClass && a.AttachmentName == b.AttachmentName && a.Stretch == b.Stretch && a.FlipH == b.FlipH && a.FlipV == b.FlipV && a.BeginCap == b.BeginCap && a.EndCap == b.EndCap && a.Joint == b.Joint && a.Antialiased == b.Antialiased && SnapshotEquality.Array(a.PatchMargins, b.PatchMargins);
 	private void UpdateArtNode(ArtNode node, ArtSnapshot a, Transform2D local)
 	{
 		var p = node.Snapshot;
+		if (a.Skeleton.Length > 0 && node.Drawing.GetClass() == "SpineSprite")
+		{
+			var state = new MegaCrit.Sts2.Core.Bindings.MegaSpine.MegaSprite(node.Drawing).GetAnimationState();
+			var track = state.GetCurrent(0);
+			if (p.Animation != a.Animation && a.Animation.Length > 0) { state.SetAnimation(a.Animation, a.AnimationLoop); track = state.GetCurrent(0); }
+			if (track != null) { track.SetLoop(a.AnimationLoop); if (Math.Abs(track.GetTrackTime() - a.AnimationTime) > 0.15f) track.SetTrackTime(a.AnimationTime); }
+		}
 		if (p.Texture != a.Texture || !SnapshotEquality.Array(p.Region, a.Region))
 		{
 			Texture2D? texture = Asset<Texture2D>(a.Texture);

@@ -138,3 +138,12 @@ volume zero and lower only the test process priority during concurrent gameplay.
 Normal screenshot collection keeps the spectator visible. Set
 `RMP_SMOKE_ORIGINAL=1` only for a dedicated image comparison run that temporarily
 hides the panel to capture the original scene.
+
+The feedback suite also checks normal question events and unknown map nodes,
+reward hover node retention, hidden target collision rectangles, profile-scoped
+control preference and new permission epochs, consecutive/fractional wheel
+input, translated map strokes and all three drawing tools. Native character
+and enemy animation tests cover action tracks, repeated identical actions,
+secondary track removal and JSON motion transport. Headless checks establish
+native state and retained nodes; they do not establish final pixel appearance,
+OS pointer forwarding, particle parity or a continuous three-act run.

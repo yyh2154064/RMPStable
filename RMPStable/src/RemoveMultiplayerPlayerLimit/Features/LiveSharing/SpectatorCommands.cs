@@ -86,7 +86,7 @@ internal sealed partial class LocalSpectatorSource
 	}
 	internal long SetControlMode(bool enabled)
 	{
-		if (!enabled) RestoreNativeInput();
+		if (!enabled) { StopRemoteMapStroke(); RestoreNativeInput(); }
 		_controlEnabled = enabled; _controlEpoch = System.Threading.Interlocked.Increment(ref _nextControlEpoch);
 		_commandResults.Clear(); _commandResultOrder.Clear();
 		_lastCommandRequest = 0;
@@ -190,7 +190,10 @@ internal sealed partial class LocalSpectatorSource
 		{
 			if (_controlBindings.TryGetValue(command.ActionId, out var binding) && binding.Available() && binding.Execute(command.TargetId))
 			{
-				_controlRevision++; result.Accepted = true; result.Message = T("已提交，等待游戏更新", "Submitted; waiting for game update");
+				// Pointer streams and wheel ticks leave decision context intact, so
+				// consecutive events are not discarded while a snapshot is in flight.
+				if (!command.ActionId.StartsWith("scroll") && !command.ActionId.StartsWith("map-input:")) _controlRevision++;
+				result.Accepted = true; result.Message = T("已提交，等待游戏更新", "Submitted; waiting for game update");
 			}
 		}
 		catch (Exception ex) { result.Message = T("操作失败：", "Action failed: ") + ex.GetBaseException().Message; }

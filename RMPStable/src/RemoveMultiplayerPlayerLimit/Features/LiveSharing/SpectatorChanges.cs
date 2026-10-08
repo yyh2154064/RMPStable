@@ -72,6 +72,7 @@ internal sealed partial class LocalSpectatorSource
 	}
 	public void Dispose()
 	{
+		UnbindAnimations();
 		SetControlMode(false); _controlBindings.Clear(); _controlCardIds.Clear();
 		if (_watchedDeck != null) _watchedDeck.ContentsChanged -= DeckChanged;
 		foreach (var card in new List<CardModel>(_watchedCards)) WatchCard(card, false);

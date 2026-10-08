@@ -115,11 +115,14 @@ internal sealed partial class SpectatorView : IDisposable
 	{
 		if (snapshot.Schema != 1) throw new InvalidOperationException("Unsupported spectator snapshot version.");
 		string revisionSession = snapshot.Session + ":" + snapshot.SourceId;
-		if (_revisionSession != revisionSession)
+		bool changedSession = _revisionSession != revisionSession;
+		bool recovering = _captureError.Length > 0;
+		if (changedSession)
 		{ _revisionSession = revisionSession; SetControlEnabled(false); CloseInspect(); _showDeck = false; BrowsePile = ""; _browseKey = ""; _hudKey = _roomKey = _actorKey = _itemKey = _offerKey = _cardKey = _screenKey = ""; }
 		UpdateSources(snapshot.Sources, snapshot.SourceId);
 		if (_sourcePage != snapshot.Page) { CloseInspect(); _showDeck = false; BrowsePile = ""; _browseKey = ""; _cardKey = ""; _sourcePage = snapshot.Page; }
 		_snapshot = snapshot;
+		if ((changedSession || recovering) && SpectatorPreferences.Current.ControlMode) SetControlEnabled(true);
 		UpdatePointer(snapshot.Pointer);
 		_deck.Disabled = false;
 		_title.Text = snapshot.Character + "  ·  " + (_controlEnabled ? T("本机控制", "Local control") : T("只读观战", "Spectator"));
@@ -193,7 +196,7 @@ internal sealed partial class SpectatorView : IDisposable
 		string cardKey = _showDeck + snapshot.Page + ":" + (_showDeck || snapshot.Page == "deck" ? snapshot.Revisions.Deck : snapshot.Revisions.Cards);
 		if (_cardKey != cardKey || screenRebuilt)
 		{
-			if ((!screenRebuilt || snapshot.Page == "map") && TryMoveHand(snapshot, cards)) { _cardKey = cardKey; return; }
+			if ((!screenRebuilt || snapshot.Page is "map" or "reward") && TryMoveHand(snapshot, cards)) { _cardKey = cardKey; return; }
 			_handNodes.Clear(); _underlayHandNodes.Clear();
 			_cardKey = cardKey; ClearMounted(_mountedCards); Clear(_preview); Clear(_cards); Clear(_underlay);
 			if (snapshot.Page is not "combat" and not "shop" && snapshot.UnderlayPage.Length > 0 && !_showDeck)
@@ -263,7 +266,7 @@ internal sealed partial class SpectatorView : IDisposable
 			drawingParent.AddChild(holder);
 			DrawCard(holder, card, Vector2.Zero, 1, centered: true);
 			var hitboxHolder = new Node2D { Transform = transform }; cardRoot.AddChild(hitboxHolder);
-			if (destination == null && snapshot.Page == "combat") _handNodes.Add((holder, hitboxHolder, card));
+			if (destination == null && snapshot.Page is "combat" or "reward") _handNodes.Add((holder, hitboxHolder, card));
 			else if (destination == _underlay && snapshot.Page == "combat") _underlayHandNodes.Add((holder, hitboxHolder, card));
 			var hitbox = Area(hitboxHolder, new Vector2(-160, -230), new Vector2(320, 450));
 			hitbox.MouseFilter = Control.MouseFilterEnum.Stop;
@@ -297,7 +300,7 @@ internal sealed partial class SpectatorView : IDisposable
 		if (_showDeck) return false;
 		if (snapshot.Page == "map" && cards.Count == 0 && snapshot.UnderlayPage == "combat" && snapshot.UnderlayItems.Count == 0)
 		{ nodes = _underlayHandNodes; cards = snapshot.UnderlayCards; }
-		else if (snapshot.Page != "combat") return false;
+		else if (snapshot.Page is not "combat" and not "reward") return false;
 		if (nodes.Count != cards.Count) return false;
 		for (int i = 0; i < cards.Count; i++)
 			if (cards[i].Transform == null || !SnapshotEquality.SameCardFace(nodes[i].Card, cards[i])) return false;
@@ -358,7 +361,7 @@ internal sealed partial class SpectatorView : IDisposable
 				var spine = ClassDB.Instantiate("SpineSprite").As<Node2D>();
 				spine.Set("skeleton_data_res", skeleton);
 				drawing = spine;
-				if (art.Animation.Length > 0) Callable.From(() => { if (GodotObject.IsInstanceValid(spine)) new MegaSprite(spine).GetAnimationState().SetAnimation(art.Animation); }).CallDeferred();
+				if (art.Animation.Length > 0) Callable.From(() => { if (!GodotObject.IsInstanceValid(spine)) return; var state = new MegaSprite(spine).GetAnimationState(); state.SetAnimation(art.Animation, art.AnimationLoop); state.GetCurrent(0)?.SetTrackTime(art.AnimationTime); }).CallDeferred();
 			}
 			else if (art.PatchMargins is { Length: 4 } margins)
 			{

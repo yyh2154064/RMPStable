@@ -152,8 +152,12 @@ public static partial class Smoke
 		var potionHolder = Descendants(NRun.Instance!.GlobalUi.TopBar.PotionContainer).OfType<NPotionHolder>().First(h => h.HasPotion && h.Potion!.Model is MegaCrit.Sts2.Core.Models.Potions.FirePotion);
 		await ClickNative(potionHolder); await RefreshControl();
 		var popup = Descendants(NRun.Instance.GlobalUi.TopBar).OfType<NPotionPopup>().First(p => !p.IsMarkedForRemoval);
-		Check(!popup.IsProcessingInput(), "native potion popup cannot consume viewer coordinates");
-		await Key(Godot.Key.Escape); await RefreshControl();
+		_controller.GetMethod("RouteMapInput", Static)!.Invoke(null, new object[] { true });
+		Check(!popup.IsProcessingInput(), "native potion popup cannot consume viewer coordinates inside panel");
+		_controller.GetMethod("RouteMapInput", Static)!.Invoke(null, new object[] { false });
+		Check(popup.IsProcessingInput(), "original popup input is restored outside panel without changing selected mode");
+		if (DisplayServer.GetName() == "headless") await ClickAction(ControlActions.First(a => ((string)Prop(a, "Id")).StartsWith("cancel-popup:")));
+		else { await Key(Godot.Key.Escape); await RefreshControl(); }
 		Check(!Descendants(NRun.Instance.GlobalUi.TopBar).OfType<NPotionPopup>().Any(p => !p.IsMarkedForRemoval) && potionHolder.HasPotion, "spectator Escape cancels popup without consuming potion");
 		await ClickNative(potionHolder); await RefreshControl();
 		popup = Descendants(NRun.Instance.GlobalUi.TopBar).OfType<NPotionPopup>().First(p => !p.IsMarkedForRemoval);
@@ -163,6 +167,7 @@ public static partial class Smoke
 		var potionTarget = NCombatRoom.Instance!.CreatureNodes.First(n => "target:" + n.GetInstanceId() == (string)Prop(targetAction, "Id")); int potionHp = potionTarget.Entity.CurrentHp;
 		await ClickAction(targetAction);
 		await Until(() => !potionHolder.HasPotion && potionTarget.Entity.CurrentHp < potionHp, "spectator target uses real fire potion on selected enemy");
+		await CheckCombatAnimations();
 		// Disposable fixtures reduce combat duration; every actual play/reward
 		// decision still goes through a real mouse click in the spectator panel.
 		foreach (var creature in NCombatRoom.Instance!.CreatureNodes.Where(n => n.Entity.IsEnemy && n.Entity.IsAlive)) creature.Entity.SetCurrentHpInternal(1);
@@ -189,6 +194,7 @@ public static partial class Smoke
 			await ClickNative(rewardButton);
 			if (NOverlayStack.Instance.Peek() is NCardRewardSelectionScreen)
 			{
+				await CheckRewardRetention((NCardRewardSelectionScreen)NOverlayStack.Instance.Peek()!);
 				int beforeDeck = player.Deck.Cards.Count;
 				await ClickAction(ControlActions.First(a => (string)Prop(a, "Kind") == "select" && (bool)Prop(a, "Enabled")));
 				await Until(() => player.Deck.Cards.Count == beforeDeck + 1 && NOverlayStack.Instance.Peek() == loot, "battle reward card returns to original reward list");
@@ -221,6 +227,6 @@ public static partial class Smoke
 		await Until(() => player.Relics.Count > relics, "event option executes original relic decision"); await RefreshControl();
 		await ClickNative(Descendants(NEventRoom.Instance!).OfType<NEventOptionButton>().First(b => b.IsEnabled && b.Option.IsProceed));
 		await Until(() => NMapScreen.Instance!.IsOpen, "event proceed reaches native map");
-		await SaveFrame("workflow-event-map", 0); await ToggleControl(false);
+		await SaveFrame("workflow-event-map", 0); await CheckFeedbackMapAndEvents(state); await ToggleControl(false);
 	}
 }

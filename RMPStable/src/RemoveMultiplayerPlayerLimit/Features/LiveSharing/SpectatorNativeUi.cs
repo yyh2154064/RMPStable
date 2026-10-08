@@ -32,17 +32,17 @@ internal sealed partial class LocalSpectatorSource
 	{
 		// These native _Input callbacks otherwise consume the viewer's window
 		// coordinates as source clicks before the panel can submit a command.
-		if (!_controlEnabled || node == null || !node.IsProcessingInput()) return;
+		if (!_controlEnabled || !_mapInputInPanel || node == null || !node.IsProcessingInput()) return;
 		_pausedNativeInput.Add(node); node.SetProcessInput(false);
 	}
 	private void RestoreNativeInput()
 	{
 		foreach (var node in _pausedNativeInput)
 			if (GodotObject.IsInstanceValid(node) && node.IsInsideTree() &&
-				(node is NTargetManager { IsInSelection: true } || node is NPotionPopup { IsMarkedForRemoval: false })) node.SetProcessInput(true);
+				(node is NMapDrawingInput || node is NTargetManager { IsInSelection: true } || node is NPotionPopup { IsMarkedForRemoval: false })) node.SetProcessInput(true);
 		_pausedNativeInput.Clear();
 	}
-	private static Control? NativeRoom => NRun.Instance?.CombatRoom ?? (Control?)NRun.Instance?.MerchantRoom ?? NRun.Instance?.EventRoom ?? (Control?)NRun.Instance?.RestSiteRoom ?? NRun.Instance?.TreasureRoom ?? (Control?)NRun.Instance?.MapRoom;
+	private static Control? NativeRoom => new Control?[] { NRun.Instance?.EventRoom, NRun.Instance?.MerchantRoom, NRun.Instance?.RestSiteRoom, NRun.Instance?.TreasureRoom, NRun.Instance?.MapRoom, NRun.Instance?.CombatRoom }.FirstOrDefault(n => n != null && Ready(n));
 	private static Control? ActiveNativeUi => NModalContainer.Instance?.OpenModal as Control
 		?? (NGame.Instance?.InspectCardScreen?.IsVisibleInTree() == true ? NGame.Instance.InspectCardScreen : null)
 		?? (NGame.Instance?.InspectRelicScreen?.IsVisibleInTree() == true ? NGame.Instance.InspectRelicScreen : null)
@@ -66,6 +66,7 @@ internal sealed partial class LocalSpectatorSource
 	private void CaptureNativeUi(ControlSnapshot control, Action<ControlActionSnapshot, Func<bool>, Func<string, bool>> add)
 	{
 		_pausedNativeInput.RemoveWhere(n => !GodotObject.IsInstanceValid(n) || !n.IsInsideTree());
+		RouteNativeMapInput(_mapInputInPanel);
 		var root = ActiveNativeUi;
 		if (root == null) return;
 		bool Active(Node node) => ActiveNativeUi == root && Ready(root) && Ready(node);
@@ -104,9 +105,11 @@ internal sealed partial class LocalSpectatorSource
 			{
 				if (ParentOf<NCardHolder>(button) != null || ParentOf<NMerchantSlot>(button) != null || ParentOf<NCreature>(button) != null) continue;
 				if (control.Actions.Any(a => a.Id.EndsWith(":" + button.GetInstanceId()))) continue;
-				bool Enabled() => Active(button) && SelectorActive(ui, button) && button.IsEnabled && Clickable(button) && (popup == null || Ready(popup)) && (button is not NMapPoint point || MapTravelable?.GetValue(point) is true);
+				bool Enabled() => Active(button) && SelectorActive(ui, button) && button.IsEnabled && Clickable(button) && (popup == null || Ready(popup)) &&
+					(button is not MegaCrit.Sts2.Core.Nodes.Events.NEventOptionButton option || !option.Option.IsLocked) &&
+					(button is not NMapPoint point || MapTravelable?.GetValue(point) is true && NMapScreen.Instance.Drawings.GetLocalDrawingMode() == DrawingMode.None && !NMapScreen.Instance.Drawings.IsLocalDrawing());
 				add(new() { Id = "native:" + button.GetInstanceId(), Kind = "native", Label = T("执行游戏内操作", "Activate game control"), Rect = Rect(ClickRect(button)) }, Enabled,
-					_ => { button.ForceClick(); return true; });
+					_ => { button.ForceClick(); RouteNativeMapInput(_mapInputInPanel); return true; });
 			}
 			// Different scenes connect different handlers to holder.Pressed. Keep
 			// those original handlers (deck inspection, event/upgrade selection).
@@ -123,7 +126,10 @@ internal sealed partial class LocalSpectatorSource
 				add(new() { Id = "scroll:" + scroll.GetInstanceId(), Kind = "scroll", Rect = GlobalRect(scroll) }, () => Active(scroll), direction => ScrollNative(scroll, direction));
 		}
 		if (root is NMapScreen map)
+		{
 			add(new() { Id = "scroll-map:" + map.GetInstanceId(), Kind = "scroll", Rect = GlobalRect(map) }, () => Active(map), direction => ScrollNative(map, direction));
+			add(new() { Id = "map-input:" + map.GetInstanceId(), Kind = "mapInput", Rect = GlobalRect(map) }, () => Active(map), payload => ExecuteMapInput(map, payload));
+		}
 		if (popup == null)
 		foreach (var inventory in Descendants<NMerchantInventory>(root).Where(i => Ready(i) && i.IsOpen))
 			foreach (var slot in Descendants<NMerchantSlot>(inventory).Where(s => Clickable(s.Hitbox)))
@@ -136,8 +142,13 @@ internal sealed partial class LocalSpectatorSource
 	}
 	private static bool ScrollNative(Control node, string direction)
 	{
-		if (direction is not "up" and not "down") return false;
-		using var input = new InputEventMouseButton { ButtonIndex = direction == "up" ? MouseButton.WheelUp : MouseButton.WheelDown, Pressed = true, Factor = 1 };
+		var parts = direction.Split(':');
+		if (parts[0] is not "up" and not "down" || parts.Length > 2) return false;
+		float steps = 1;
+		if (parts.Length == 2 && (!float.TryParse(parts[1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out steps) || !float.IsFinite(steps) || steps is <= 0 or > 64)) return false;
+		// Native wheel helper ignores Factor. Its pan path preserves fractional
+		// ticks while producing exactly the original 40 source pixels per tick.
+		using var input = new InputEventPanGesture { Delta = new Vector2(0, (parts[0] == "up" ? -1 : 1) * steps * 0.8f) };
 		node.Call("ProcessScrollEvent", input);
 		return true;
 	}

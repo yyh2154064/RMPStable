@@ -71,8 +71,8 @@ internal sealed partial class SpectatorView
 				container.Scale = Vector2.One * (content.Size.X / 1920);
 				titleFill.Size = new Vector2(content.Size.X, navigationHeight - inset);
 				titlebar.Scale = dismiss.Scale = _pin.Scale = _controlToggle.Scale = Vector2.One * navigationScale;
-				titlebar.Size = new Vector2(width / navigationScale - 166, titleHeight); LayoutSources(width / navigationScale - 198);
-				_controlToggle.Position = new Vector2(width - 160 * navigationScale, 3 * navigationScale);
+				titlebar.Size = new Vector2(width / navigationScale - 222, titleHeight); LayoutSources(width / navigationScale - 254);
+				_controlToggle.Position = new Vector2(width - 216 * navigationScale, 3 * navigationScale);
 				_pin.Position = new Vector2(width - 94 * navigationScale, 3 * navigationScale);
 				dismiss.Position = new Vector2(width - 56 * navigationScale, 3 * navigationScale); resize.Position = panel.Size - resize.Size;
 				panel.Position = new Vector2(Math.Clamp(panel.Position.X, 0, Math.Max(0, bounds.X - panel.Size.X)), Math.Clamp(panel.Position.Y, 0, Math.Max(0, bounds.Y - panel.Size.Y)));

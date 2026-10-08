@@ -157,16 +157,18 @@ public static partial class Smoke
 		await ToggleControl(false); var expired = source.GetType().GetMethod("ExecuteCommand", Instance)!.Invoke(source, new[] { command })!;
 		Check(!(bool)Prop(expired, "Accepted"), "revoked control epoch rejects old command");
 		await ToggleControl(true); await Key(Godot.Key.F8); await Key(Godot.Key.F8); await RefreshControl();
-		Check(!(bool)ControlView.GetType().GetField("_controlEnabled", Instance)!.GetValue(ControlView)!, "close reopen never restores control permission");
+		Check((bool)ControlView.GetType().GetField("_controlEnabled", Instance)!.GetValue(ControlView)!, "close reopen restores preferred control mode");
 		await ToggleControl(true);
 		var newSource = Field("_source")!;
 		var oldPanelCommand = newSource.GetType().GetMethod("ExecuteCommand", Instance)!.Invoke(newSource, new[] { command })!;
 		Check(!(bool)Prop(oldPanelCommand, "Accepted") && (long)Prop(command, "Epoch") != (long)ControlView.GetType().GetField("_controlEpoch", Instance)!.GetValue(ControlView)!, "reconstructed panel never reuses old control permission generation");
 		await Click(new Vector2(20, 500));
-		Check(!(bool)ControlView.GetType().GetField("_controlEnabled", Instance)!.GetValue(ControlView)!, "local game pointer takes priority and exits spectator control");
+		Check((bool)ControlView.GetType().GetField("_controlEnabled", Instance)!.GetValue(ControlView)!, "local game pointer preserves spectator mode selection");
 		await ToggleControl(true); var panel = (Control)ControlView.GetType().GetField("_panel", Instance)!.GetValue(ControlView)!;
+		long sourceEpoch = (long)ControlView.GetType().GetField("_controlEpoch", Instance)!.GetValue(ControlView)!;
 		await Click(panel.GetNode<Button>("SpectatorTitlebar/SpectatorSourceSelector/SpectatorSource1").GetGlobalRect().GetCenter());
-		Check(!(bool)ControlView.GetType().GetField("_controlEnabled", Instance)!.GetValue(ControlView)!, "source request immediately revokes control before new snapshot"); await RefreshControl();
+		await RefreshControl();
+		Check((bool)ControlView.GetType().GetField("_controlEnabled", Instance)!.GetValue(ControlView)! && sourceEpoch != (long)ControlView.GetType().GetField("_controlEpoch", Instance)!.GetValue(ControlView)!, "source confirmation restores preferred mode with a fresh permission epoch");
 		await SaveFrame("control-completed");
 	}
 }

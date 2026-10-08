@@ -68,9 +68,9 @@ internal sealed partial class SpectatorView
 		for (int i = 0; i < creatures.Count; i++)
 		{
 			var c = creatures[i]; string key = CreatureKey(c, i); live.Add(key);
-			if (_creatureSprites.TryGetValue(key, out var old) && old.Snapshot.VisualScene == c.VisualScene && old.Snapshot.Animation == c.Animation)
+			if (_creatureSprites.TryGetValue(key, out var old) && old.Snapshot.VisualScene == c.VisualScene)
 			{
-				if (!SnapshotEquality.Array(old.Snapshot.Transform, c.Transform)) old.Holder.Transform = Matrix(c.Transform);
+				if (_latestMotion?.Creatures.Any(m => m.EntityKey == key) != true && !SnapshotEquality.Array(old.Snapshot.Transform, c.Transform)) old.Holder.Transform = Matrix(c.Transform);
 				_creatureSprites[key] = (old.Holder, c); continue;
 			}
 			if (old.Holder != null) { _actorSprites.RemoveChild(old.Holder); old.Holder.QueueFree(); }

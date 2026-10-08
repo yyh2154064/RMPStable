@@ -26,7 +26,8 @@ internal sealed partial class SpectatorView
 	private Node2D? _dragVisual;
 	private Line2D? _dragArrow;
 	private Vector2 _dragStart;
-	private readonly List<Panel> _targetHighlights = new();
+	private Panel _modeThumb = null!;
+	private Tween? _modeTween;
 	private bool _outsideLeftDown, _escapeDown;
 	private string _captureError = "";
 	private readonly Dictionary<string, Button> _actionButtons = new();
@@ -50,10 +51,19 @@ internal sealed partial class SpectatorView
 	}
 	private Button CreateControlToggle()
 	{
-		var button = new Button { Name = "SpectatorControlToggle", Text = T("观战", "Watch"), ToggleMode = true, FocusMode = Control.FocusModeEnum.None, Size = new Vector2(60, 36), TooltipText = T("切换本机控制：拖动出牌、点击选牌；右键查看详情", "Local control: drag to play, click to choose; right-click to inspect") };
-		button.AddThemeFontSizeOverride("font_size", 16);
-		button.Toggled += SetControlEnabled;
+		var button = new Button { Name = "SpectatorControlToggle", ToggleMode = true, FocusMode = Control.FocusModeEnum.None, Size = new Vector2(116, 36), TooltipText = T("观战 / 控制（记住选择）", "Watch / Control (remember selection)") };
+		button.AddThemeStyleboxOverride("normal", new StyleBoxFlat { BgColor = new Color("152126"), CornerRadiusTopLeft = 16, CornerRadiusTopRight = 16, CornerRadiusBottomLeft = 16, CornerRadiusBottomRight = 16 });
+		_modeThumb = new Panel { Position = new Vector2(2, 2), Size = new Vector2(56, 32), MouseFilter = Control.MouseFilterEnum.Ignore };
+		_modeThumb.AddThemeStyleboxOverride("panel", new StyleBoxFlat { BgColor = new Color("42696f"), CornerRadiusTopLeft = 14, CornerRadiusTopRight = 14, CornerRadiusBottomLeft = 14, CornerRadiusBottomRight = 14 });
+		button.AddChild(_modeThumb);
+		Text(button, T("观战", "Watch"), new Rect2(2, 2, 56, 32), 14, HorizontalAlignment.Center);
+		Text(button, T("控制", "Control"), new Rect2(58, 2, 56, 32), 14, HorizontalAlignment.Center);
+		button.Toggled += SetPreferredControl;
 		return button;
+	}
+	private void SetPreferredControl(bool enabled)
+	{
+		SpectatorPreferences.Current.ControlMode = enabled; SpectatorPreferences.Save(); SetControlEnabled(enabled);
 	}
 	private void CreateControlLayer()
 	{
@@ -65,25 +75,27 @@ internal sealed partial class SpectatorView
 	}
 	private void LocalControlInputEvent(InputEvent input)
 	{
-		if (_controlEnabled && input is InputEventKey { Keycode: Key.Escape, Pressed: true, Echo: false })
+		if (input is InputEventMouse mouse) LiveSharingController.RouteMapInput(_panel.GetGlobalRect().HasPoint(mouse.Position));
+		if (_controlEnabled && _panel.GetGlobalRect().HasPoint(_panel.GetViewport().GetMousePosition()) && input is InputEventKey { Keycode: Key.Escape, Pressed: true, Echo: false })
 		{
 			_escapeDown = true;
 			if (_dragCard != null) CancelControlDrag();
 			else if (CanControlPage && _snapshot!.Control.Actions.FirstOrDefault(a => a.Kind == "cancel" && a.Enabled) is { } cancel) SubmitControl(cancel.Id);
-			else SetControlEnabled(false);
+			else SetPreferredControl(false);
 			_overlay.GetViewport().SetInputAsHandled(); return;
 		}
 		if (!_controlEnabled || input is not InputEventMouseButton { ButtonIndex: MouseButton.Left } button || _panel.GetGlobalRect().HasPoint(button.Position)) return;
-		if (button.Pressed && _dragCard == null) SetControlEnabled(false);
-		else if (!button.Pressed && _dragCard != null) CancelControlDrag();
+		if (_mapStroke) EndMapStroke();
+		if (_dragCard != null) CancelControlDrag();
 	}
 	private void SetControlEnabled(bool enabled)
 	{
 		enabled &= _setControl != null && _executeCommand != null && _snapshot != null;
 		if (_controlEnabled == enabled) { _controlToggle.SetPressedNoSignal(enabled); return; }
-		_controlEnabled = enabled; _controlEpoch = _setControl?.Invoke(enabled) ?? 0;
-		_controlToggle.SetPressedNoSignal(enabled); _controlToggle.Text = enabled ? T("控制", "Control") : T("观战", "Watch");
-		_controlToggle.Modulate = enabled ? new Color("efc851") : Colors.White;
+		EndMapStroke(); _controlEnabled = enabled; _controlEpoch = _setControl?.Invoke(enabled) ?? 0;
+		_controlToggle.SetPressedNoSignal(enabled);
+		_modeTween?.Kill(); _modeTween = _modeThumb.CreateTween();
+		_modeTween.TweenProperty(_modeThumb, "position:x", enabled ? 58f : 2f, 0.16).SetTrans(Tween.TransitionType.Cubic).SetEase(Tween.EaseType.Out);
 		CancelControlDrag(); _pendingControlContext = ""; _controlMessage = ""; _renderedControl = null;
 		if (_snapshot != null) { CloseInspect(); UpdateControl(_snapshot); }
 	}
@@ -96,7 +108,7 @@ internal sealed partial class SpectatorView
 		if (ReferenceEquals(snapshot.Control, _renderedControl)) return;
 		_renderedControl = snapshot.Control;
 		var present = new HashSet<string>();
-		foreach (var action in snapshot.Control.Actions.Where(a => a.CardId.Length == 0 && a.Kind != "scroll"))
+		foreach (var action in snapshot.Control.Actions.Where(a => a.CardId.Length == 0 && a.Kind is not "scroll" and not "mapInput"))
 		{
 			var rect = Rectangle(action.Rect);
 			if (rect.Size.X <= 0 || rect.Size.Y <= 0) continue;
@@ -122,7 +134,8 @@ internal sealed partial class SpectatorView
 		var result = _executeCommand!(request);
 		_lastControlResult = result;
 		_controlMessage = result.Message;
-		if (result.Accepted)
+		bool continuous = _snapshot.Control.Actions.Any(a => a.Id == actionId && a.Kind is "scroll" or "mapInput");
+		if (result.Accepted && !continuous)
 		{
 			_pendingControlContext = request.Context; _pendingControlTime = 0;
 			foreach (var button in _actionButtons.Values) button.Disabled = true;
@@ -147,22 +160,17 @@ internal sealed partial class SpectatorView
 		_dragVisual = new Node2D { Position = _dragStart, ZIndex = 10 }; _controlLayer.AddChild(_dragVisual);
 		DrawCard(_dragVisual, card, Vector2.Zero, 0.8f, centered: true);
 		_dragArrow = new Line2D { Width = 5, DefaultColor = new Color("efc851"), Antialiased = true, ZIndex = 11 }; _controlLayer.AddChild(_dragArrow);
-		foreach (var target in _snapshot.Control.Targets.Where(t => action.TargetIds.Contains(t.Id)))
-		{
-			var rect = Rectangle(target.Rect); var highlight = new Panel { Position = rect.Position * _page.Scale, Size = rect.Size * _page.Scale, MouseFilter = Control.MouseFilterEnum.Ignore };
-			highlight.AddThemeStyleboxOverride("panel", new StyleBoxFlat { BgColor = new Color(1, 0.8f, 0.2f, 0.08f), BorderColor = new Color("efc851"), BorderWidthLeft = 2, BorderWidthRight = 2, BorderWidthTop = 2, BorderWidthBottom = 2 });
-			_controlLayer.AddChild(highlight); _targetHighlights.Add(highlight);
-		}
 		return true;
 	}
 	private void ControlInputEvent(InputEvent input)
 	{
+		if (HandleMapInput(input)) return;
 		if (CanControlPage && _dragCard == null && input is InputEventMouseButton { Pressed: true } click)
 		{
 			if (click.ButtonIndex is MouseButton.WheelUp or MouseButton.WheelDown)
 			{
 				var scroll = _snapshot!.Control.Actions.LastOrDefault(a => a.Kind == "scroll" && a.Enabled && Rectangle(a.Rect).HasPoint(click.Position / _page.Scale));
-				if (scroll != null) { SubmitControl(scroll.Id, click.ButtonIndex == MouseButton.WheelUp ? "up" : "down"); _viewport.SetInputAsHandled(); }
+				if (scroll != null) { SubmitControl(scroll.Id, (click.ButtonIndex == MouseButton.WheelUp ? "up:" : "down:") + Math.Clamp(click.Factor, 0.01f, 64).ToString(System.Globalization.CultureInfo.InvariantCulture)); _viewport.SetInputAsHandled(); }
 			}
 			else if (click.ButtonIndex == MouseButton.Right && _snapshot!.Control.Actions.FirstOrDefault(a => a.Kind == "cancel") is { } cancel)
 			{ SubmitControl(cancel.Id); _viewport.SetInputAsHandled(); }
@@ -188,15 +196,17 @@ internal sealed partial class SpectatorView
 	{
 		if (_dragVisual != null) { _dragVisual.GetParent()?.RemoveChild(_dragVisual); _dragVisual.QueueFree(); }
 		if (_dragArrow != null) { _dragArrow.GetParent()?.RemoveChild(_dragArrow); _dragArrow.QueueFree(); }
-		foreach (var panel in _targetHighlights) { panel.GetParent()?.RemoveChild(panel); panel.QueueFree(); }
-		_targetHighlights.Clear(); _dragCard = null; _dragAction = null; _dragVisual = null; _dragArrow = null;
+		_dragCard = null; _dragAction = null; _dragVisual = null; _dragArrow = null;
 	}
 	private void ProcessControl()
 	{
 		if (_controlLayer == null) return;
 		bool escape = Input.IsKeyPressed(Key.Escape);
 		bool outside = Input.IsMouseButtonPressed(MouseButton.Left) && !_panel.GetGlobalRect().HasPoint(_panel.GetViewport().GetMousePosition());
-		if (_controlEnabled && ((outside && !_outsideLeftDown && _dragCard == null) || (escape && !_escapeDown && _dragCard == null) || MegaCrit.Sts2.Core.Nodes.Combat.NPlayerHand.Instance?.InCardPlay == true)) SetControlEnabled(false);
+		bool inside = _panel.GetGlobalRect().HasPoint(_panel.GetViewport().GetMousePosition());
+		LiveSharingController.RouteMapInput(inside);
+		if (!inside && _mapStroke) EndMapStroke();
+		if (_controlEnabled && outside && !_outsideLeftDown) CancelControlDrag();
 		_outsideLeftDown = outside; _escapeDown = escape;
 		_controlLayer.Visible = CanControlPage;
 		if (_dragVisual != null)
@@ -215,7 +225,7 @@ internal sealed partial class SpectatorView
 	private void RefreshStatus()
 	{
 		string text = _captureError.Length > 0 ? T("状态暂不可用：", "State unavailable: ") + _captureError
-			: _controlEnabled ? T("本机控制 · 拖牌出牌 · 点击决策 · 右键查看 · Esc 退出", "Local control · drag to play · click to decide · right-click to inspect · Esc exits") + (_controlMessage.Length > 0 ? " · " + _controlMessage : "")
+			: _controlEnabled ? T("本机控制 · 拖牌出牌 · 点击决策 · 地图右键绘画", "Local control · drag to play · click to decide · right-drag to draw on map") + (_controlMessage.Length > 0 ? " · " + _controlMessage : "")
 			: T("单人本地测试 · 悬停放大卡牌 · 在游戏窗口按观战快捷键开关", "Local test · hover to enlarge cards · toggle the hotkey in the game window");
 		if (_status.Text != text) _status.Text = text;
 	}

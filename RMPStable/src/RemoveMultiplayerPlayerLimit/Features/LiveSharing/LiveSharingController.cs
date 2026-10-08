@@ -50,6 +50,7 @@ internal static class LiveSharingController
 		BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
 	private static SpectatorView? _view;
 	private static LocalSpectatorSource? _source;
+	internal static void RouteMapInput(bool insidePanel) => _source?.RouteNativeMapInput(insidePanel);
 	private static ulong _session;
 	private static bool _wasDown;
 	private static double _settingsTimer, _captureTimer, _drawingTimer, _sinceCapture;
@@ -106,7 +107,7 @@ internal static class LiveSharingController
 				}, enabled => _source?.SetControlMode(enabled) ?? 0, command =>
 				{
 					var result = _source?.ExecuteCommand(command) ?? new SpectatorCommandResult { RequestId = command.RequestId, Message = "Source unavailable" };
-					CancelCapture(); _captureTimer = 0; _dirty = true;
+					if (!command.ActionId.StartsWith("scroll") && !command.ActionId.StartsWith("map-input:")) { CancelCapture(); _captureTimer = 0; _dirty = true; }
 					return result;
 				});
 				SpectatorPreferences.Current.Open = true; SpectatorPreferences.Save();
@@ -119,7 +120,7 @@ internal static class LiveSharingController
 		if (_pointerTimer <= 0)
 		{
 			_pointerTimer = 1d / 30;
-			try { _view.UpdatePointer(_source.CapturePointer(_view.PointerExclusion)); }
+			try { _view.UpdatePointer(_source.CapturePointer(_view.PointerExclusion)); _view.UpdateAnimations(_source.CaptureAnimations()); }
 			catch (Exception ex) { if (_lastError != ex.Message) Log.Warn("[RMP:LiveSharing] Pointer update: " + ex.Message); _lastError = ex.Message; }
 		}
 		_lastCaptureSliceMs = 0;

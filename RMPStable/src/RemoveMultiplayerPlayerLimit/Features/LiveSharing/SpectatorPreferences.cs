@@ -17,6 +17,7 @@ internal sealed class SpectatorPreferences
 	public float Width { get; set; }
 	public int DockEdge { get; set; }
 	public bool Pinned { get; set; }
+	public bool ControlMode { get; set; }
 	public string SourceId { get; set; } = "";
 	internal static SpectatorPreferences Current { get; private set; } = new();
 	internal static float DefaultTop { get; set; } = 116;
