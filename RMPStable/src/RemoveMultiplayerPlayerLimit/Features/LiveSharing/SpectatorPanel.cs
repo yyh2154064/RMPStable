@@ -6,7 +6,7 @@ namespace RemoveMultiplayerPlayerLimit.Features.LiveSharing;
 
 internal sealed partial class SpectatorView
 {
-	private (CanvasLayer Overlay, Control Panel, SubViewport Viewport) CreatePanel(Action close)
+	private (CanvasLayer Overlay, Control Panel, Control Content) CreatePanel(Action close)
 	{
 		var root = ((SceneTree)Engine.GetMainLoop()).Root;
 		var overlay = new CanvasLayer { Name = "RmpLocalSpectator", Layer = 90 };
@@ -45,10 +45,7 @@ internal sealed partial class SpectatorView
 			// surface. A single layout calculation owns the frame and picture edges.
 			var content = new Control { Name = "SpectatorContent", Position = new Vector2(inset, titleHeight), ClipContents = true, MouseFilter = Control.MouseFilterEnum.Stop };
 			panel.AddChild(content);
-			var container = new SubViewportContainer { Name = "SpectatorSurface", Position = Vector2.Zero, Size = new Vector2(1920, 1080), MouseFilter = Control.MouseFilterEnum.Stop };
-			content.AddChild(container);
-			var viewport = new SubViewport { Name = "SpectatorViewport", Size = new Vector2I(1920, 1080), Disable3D = true, HandleInputLocally = true, RenderTargetUpdateMode = SubViewport.UpdateMode.Always };
-			container.AddChild(viewport);
+			// A native child HWND occupies this rectangle; no screenshot surface.
 			// The surface consumes pointer events throughout the read-only view,
 			// including empty spaces, so they cannot click the game underneath it.
 			var resize = new Control { Name = "SpectatorResize", Size = new Vector2(16, 16), MouseFilter = Control.MouseFilterEnum.Stop, MouseDefaultCursorShape = Control.CursorShape.Fdiagsize };
@@ -68,7 +65,6 @@ internal sealed partial class SpectatorView
 				content.Size = new Vector2(width - inset * 2, (width - inset * 2) * 9 / 16);
 				content.Position = new Vector2(inset, navigationHeight);
 				panel.Size = new Vector2(width, navigationHeight + content.Size.Y + inset);
-				container.Scale = Vector2.One * (content.Size.X / 1920);
 				titleFill.Size = new Vector2(content.Size.X, navigationHeight - inset);
 				titlebar.Scale = dismiss.Scale = _pin.Scale = _controlToggle.Scale = Vector2.One * navigationScale;
 				titlebar.Size = new Vector2(width / navigationScale - 222, titleHeight); LayoutSources(width / navigationScale - 254);
@@ -105,7 +101,7 @@ internal sealed partial class SpectatorView
 			overlay.TreeExiting += () => { root.SizeChanged -= Resized; tree.ProcessFrame -= ProcessDocking; _dockTween?.Kill(); };
 			// _panel is assigned by the constructor after this factory returns.
 			Callable.From(() => { if (GodotObject.IsInstanceValid(panel) && panel.IsInsideTree()) { _expandedPosition = DockPosition(false); SlidePanel(false, true); } }).CallDeferred();
-			return (overlay, panel, viewport);
+			return (overlay, panel, content);
 		}
 		catch { overlay.QueueFree(); throw; }
 	}

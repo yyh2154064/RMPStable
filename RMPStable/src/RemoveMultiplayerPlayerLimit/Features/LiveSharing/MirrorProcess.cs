@@ -20,6 +20,9 @@ internal sealed class MirrorProcess : IDisposable
     internal string LastHash = "";
     internal int LastEvents;
     internal bool LastIdle;
+    internal long Window;
+    internal bool DisplayReady, NativeAttached;
+    internal double Fps, ProcessMs;
     internal System.Collections.Generic.List<MirrorHit> LastHits = new();
     private bool _disposed;
     internal MirrorProcess(ulong source)
@@ -47,7 +50,7 @@ internal sealed class MirrorProcess : IDisposable
         {
             SchemaVersion = SaveManager.Instance.SettingsSave.SchemaVersion, Language = SaveManager.Instance.SettingsSave.Language,
             Fullscreen = false, WindowPosition = new Vector2I(-30000,-30000), WindowSize = new Vector2I(1280,720),
-            SkipIntroLogo = true, SeenEaDisclaimer = true, FpsLimit = 30, VolumeMaster = 0,
+            SkipIntroLogo = true, SeenEaDisclaimer = true, FpsLimit = 120, LimitFpsInBackground = false, VolumeMaster = 0,
             ModSettings = new ModSettings { PlayerAgreedToModLoading = true,
                 ModList = ModManager.Mods.Select(mod => new SettingsSaveMod(mod) { IsEnabled = mod.manifest?.id == "RMPStable" }).ToList() }
         };
@@ -73,11 +76,18 @@ internal sealed class MirrorProcess : IDisposable
         // Original game resources stay read-only. In isolated tests the PCK is
         // outside the copied executable directory, so preserve --main-pack.
         start.ArgumentList.Add("--main-pack"); start.ArgumentList.Add(mainPack);
-        foreach (string value in new[] { "--force-steam", "off", "--windowed", "--position", "-30000,-30000", "--resolution", "1280x720", "--max-fps", "30", "--rendering-method", "gl_compatibility", "--log-file", Path.Combine(DirectoryPath, "renderer.log") }) start.ArgumentList.Add(value);
+        string renderingMethod = DisplayServer.GetName() == "headless" ? "gl_compatibility" : RenderingServer.GetCurrentRenderingMethod();
+        foreach (string value in new[] { "--force-steam", "off", "--windowed", "--position", "-30000,-30000", "--resolution", "1280x720", "--max-fps", "120", "--rendering-method", renderingMethod, "--log-file", Path.Combine(DirectoryPath, "renderer.log") }) start.ArgumentList.Add(value);
+        if (DisplayServer.GetName() != "headless")
+        {
+            start.ArgumentList.Add("--rendering-driver"); start.ArgumentList.Add(RenderingServer.GetCurrentRenderingDriverName());
+        }
         if (Environment.GetEnvironmentVariable("RMP_MULTI_HEADLESS") == "1") start.ArgumentList.Add("--headless");
         try { Child = Process.Start(start) ?? throw new IOException("Renderer process did not start"); }
         catch { Wire.Dispose(); throw; }
-        try { Child.PriorityClass = ProcessPriorityClass.BelowNormal; } catch { }
+        // The renderer participates in interactive input. Artificially lowering
+        // its scheduling priority causes avoidable latency under source load.
+        try { Child.PriorityClass = ProcessPriorityClass.Normal; } catch { }
         _ = Wire.ConnectAsync();
     }
     public void Dispose()

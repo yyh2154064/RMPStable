@@ -12,6 +12,7 @@ using MegaCrit.Sts2.Core.Assets;
 using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.GameActions;
 using MegaCrit.Sts2.Core.Entities.Multiplayer;
+using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Multiplayer.Replay;
@@ -31,13 +32,23 @@ internal sealed class MirrorRenderer : IDisposable
     private readonly MirrorWire _wire;
     private readonly int _parent;
     private bool _hello, _busy;
-    private bool _drawing;
     private int _uiDiagnostics;
     private long _generation;
     private RunState? _state;
     private CombatReplay? _replay;
     private int _events;
-    private double _statusTimer, _frameTimer, _parentTimer;
+    private double _statusTimer, _parentTimer;
+    private readonly Queue<MirrorMessage> _stateMessages = new();
+    private readonly System.Collections.Concurrent.ConcurrentQueue<(uint Message, Vector2 Point)> _buttons = new();
+    private MirrorWindowHook? _input;
+    private bool _control, _attached, _lastIdle, _waitingForAuthority;
+    private long _epoch, _request, _dragGeneration;
+    private int _dragIndex = -1, _dragEvents, _submittedEvents;
+    private string _dragHash = "";
+    private CardModel? _dragCard;
+    private Vector2 _pointer = new(-1,-1), _dragStart;
+    private CanvasLayer? _noticeLayer;
+    private Label? _notice;
     private string _error = "";
     internal static bool IsRenderer => Environment.GetEnvironmentVariable("RMP_MULTI_ROLE") == "renderer";
     private static string Env(string name) => Environment.GetEnvironmentVariable("RMP_MULTI_" + name) ?? throw new InvalidDataException("Missing renderer identity");
@@ -56,7 +67,12 @@ internal sealed class MirrorRenderer : IDisposable
         _ = _wire.ConnectAsync();
         AudioServer.SetBusMute(0, true);
         if (DisplayServer.GetName() != "headless") DisplayServer.WindowSetFlag(DisplayServer.WindowFlags.NoFocus, true);
-        Engine.MaxFps = 30;
+        Engine.MaxFps = 120;
+        if (DisplayServer.GetName() != "headless")
+        {
+            DisplayServer.WindowSetVsyncMode(DisplayServer.VSyncMode.Disabled);
+            _input = new MirrorWindowHook(MirrorWin32.OwnWindow,InterceptInput,noActivate: true);
+        }
     }
     internal void ProcessFrame(double delta)
     {
@@ -69,50 +85,131 @@ internal sealed class MirrorRenderer : IDisposable
         }
         if (_wire.Error.Length > 0) { Quit(); return; }
         if (!_wire.Connected || NGame.Instance == null) return;
-        if (!_hello) { _hello = true; _ = _wire.Send(new MirrorMessage { Kind = "hello", Build = MirrorState.Build, Process = Environment.ProcessId }); }
-        // Loads/events mutate native state only on the Godot thread. A queue
-        // remains ordered while native asynchronous actions are running.
-        if (!_busy && (_state != null || NGame.Instance.MainMenu != null) && SaveManager.Instance.IsProfileInitialized)
+        if (!_hello) { _hello = true; _ = _wire.Send(new MirrorMessage { Kind = "hello", Build = MirrorState.Build, Process = Environment.ProcessId, Window = (long)MirrorWin32.OwnWindow }); }
+        // Window/mode/result traffic and native hover remain live while ordered
+        // replay actions await animations. Only gameplay replay waits on _busy.
+        while (_wire.Incoming.TryDequeue(out var message))
         {
-            while (_wire.Incoming.TryDequeue(out var message))
+            switch (message.Kind)
             {
-                if (message.Kind == "load" && message.Generation > _generation)
-                { _busy = true; TaskHelper.RunSafely(Load(message)); break; }
-                if (message.Generation != _generation) continue;
-                if (message.Kind == "events") { _busy = true; TaskHelper.RunSafely(Apply(message)); break; }
-                if (message.Kind == "pointer") Pointer(message);
-                if (message.Kind == "arrow") Arrow(message);
+                case "attach":
+                    if (_attached || message.Process != _parent) throw new InvalidDataException("Invalid native attachment");
+                    MirrorWin32.AttachOwn((nint)message.Window,_parent); _attached = true; break;
+                case "control":
+                    if (message.Epoch <= _epoch) break;
+                    _control = message.Control; _epoch = message.Epoch; CancelDrag(); break;
+                case "result":
+                    if (message.Generation == _generation && message.Epoch == _epoch && message.Request == _request && !message.Accepted) _waitingForAuthority = false;
+                    break;
+                case "load": case "events":
+                    if (_stateMessages.Count >= 128) throw new InvalidDataException("Mirror state backlog exceeded");
+                    _stateMessages.Enqueue(message); break;
+                default: throw new InvalidDataException("Unsupported renderer message");
             }
         }
-        _statusTimer -= delta; _frameTimer -= delta;
-        if (_statusTimer <= 0)
+        if (!_busy && (_state != null || NGame.Instance.MainMenu != null) && SaveManager.Instance.IsProfileInitialized)
+            while (_stateMessages.TryDequeue(out var stateMessage))
+            {
+                if (stateMessage.Kind == "load" && stateMessage.Generation > _generation)
+                { _busy = true; CancelDrag(); TaskHelper.RunSafely(Load(stateMessage)); break; }
+                if (stateMessage.Generation != _generation) continue;
+                if (stateMessage.Kind == "events") { _busy = true; CancelDrag(); TaskHelper.RunSafely(Apply(stateMessage)); break; }
+            }
+        if (_waitingForAuthority && _events > _submittedEvents) _waitingForAuthority = false;
+        ProcessLocalInput();
+        bool idle = NativeIdle;
+        _statusTimer -= delta;
+        if (_statusTimer <= 0 || idle != _lastIdle)
         {
-            _statusTimer = .25;
-            bool idle = !_busy && _error.Length == 0 && _state != null && !RunManager.Instance.ActionExecutor.IsRunning && !RunManager.Instance.ActionExecutor.IsPaused;
+            _statusTimer = .05; _lastIdle = idle;
             _ = _wire.Send(new MirrorMessage { Kind = "status", Generation = _generation, Events = _events, Idle = idle,
-                Hash = idle && _replay != null ? MirrorState.Hash(_state!) : "", Hits = idle ? CaptureHits() : new(), Room = _error });
+                Hash = idle && _replay != null ? MirrorState.Hash(_state!) : "", Hits = idle ? CaptureHits() : new(), Room = _error,
+                DisplayReady = _state != null && NCombatRoom.Instance != null, Attached = _attached,
+                Fps = Performance.GetMonitor(Performance.Monitor.TimeFps), ProcessMs = Performance.GetMonitor(Performance.Monitor.TimeProcess) * 1000 });
             if (idle && _events > 0 && _uiDiagnostics++ < 8)
                 GD.Print("[RMP:Mirror:UI] hand=" + _state!.Players[0].PlayerCombatState?.Hand.Cards.Count + " holders=" + NPlayerHand.Instance?.ActiveHolders.Count +
                     " visible=" + NPlayerHand.Instance?.IsVisibleInTree() + " hits=" + string.Join(";", CaptureHits().Select(h => h.Kind + ":" + h.Index + ":" + string.Join(",",h.Rect))));
         }
-        if (_frameTimer <= 0 && !_busy && !_drawing && _state != null && _wire.Pending == 0 && DisplayServer.GetName() != "headless")
+        UpdateNotice();
+    }
+    private bool NativeIdle => !_busy && _error.Length == 0 && _state != null && _replay != null && !RunManager.Instance.ActionExecutor.IsRunning && !RunManager.Instance.ActionExecutor.IsPaused;
+    private bool InterceptInput(uint message, nuint key, nint data)
+    {
+        if (message == MirrorWin32.Move || MirrorWin32.Button(message) && message is not 0x20A and not 0x20E)
         {
-            _frameTimer = 1d / 15; _drawing = true; TaskHelper.RunSafely(CaptureFrame());
+            MirrorWin32.GetClientRect(MirrorWin32.OwnWindow,out var size);
+            _pointer = new Vector2((short)((long)data & 0xFFFF) / (float)Math.Max(1,size.Right), (short)(((long)data >> 16) & 0xFFFF) / (float)Math.Max(1,size.Bottom));
+        }
+        if (message is MirrorWin32.LeftDown or MirrorWin32.LeftUp or MirrorWin32.CaptureChanged)
+        {
+            if (_buttons.Count < 32) _buttons.Enqueue((message,_pointer));
+            if (message == MirrorWin32.LeftDown && _control) MirrorWin32.SetCapture(MirrorWin32.OwnWindow);
+            if (message == MirrorWin32.LeftUp && MirrorWin32.GetCapture() == MirrorWin32.OwnWindow) MirrorWin32.ReleaseCapture();
+        }
+        // The original engine receives motion for native hover/tips, but never
+        // buttons/keys that could play a card, change rooms or alter the replica.
+        return MirrorWin32.Button(message) || MirrorWin32.Keyboard(message);
+    }
+    private MirrorHit? Hit(string kind, Vector2 point) => CaptureHits().LastOrDefault(h => h.Kind == kind && h.Rect.Length == 4 && new Rect2(h.Rect[0],h.Rect[1],h.Rect[2],h.Rect[3]).HasPoint(point));
+    private void ProcessLocalInput()
+    {
+        while (_buttons.TryDequeue(out var input))
+        {
+            if (input.Message == MirrorWin32.CaptureChanged) { CancelDrag(); continue; }
+            if (!_control || !NativeIdle || _waitingForAuthority) { CancelDrag(); continue; }
+            if (input.Message == MirrorWin32.LeftDown)
+            {
+                CancelDrag();
+                if (Hit("endTurn",input.Point) != null) { SendIntent("endTurn",-1,-1,MirrorState.Hash(_state!),_events); continue; }
+                var hit = Hit("play",input.Point);
+                var hand = _state!.Players[0].PlayerCombatState?.Hand.Cards;
+                if (hit == null || hand == null || hit.Index < 0 || hit.Index >= hand.Count) continue;
+                _dragCard = hand[hit.Index]; _dragIndex = hit.Index; _dragStart = input.Point;
+                _dragHash = MirrorState.Hash(_state); _dragEvents = _events; _dragGeneration = _generation;
+            }
+            else if (input.Message == MirrorWin32.LeftUp && _dragCard != null)
+            {
+                int index = _dragIndex, events = _dragEvents; string hash = _dragHash;
+                bool targeted = _dragCard.TargetType is TargetType.AnyEnemy or TargetType.AnyAlly;
+                int target = Hit("target",input.Point)?.Index ?? -1;
+                bool valid = _generation == _dragGeneration && _events == events && MirrorState.Hash(_state!) == hash &&
+                    _state!.Players[0].PlayerCombatState?.Hand.Cards.ElementAtOrDefault(index) == _dragCard;
+                CancelDrag();
+                if (valid && (!targeted || target >= 0)) SendIntent("play",index,target,hash,events);
+            }
+        }
+        if (_dragCard != null)
+        {
+            if (!NativeIdle || !_control || _events != _dragEvents) { CancelDrag(); return; }
+            int target = Hit("target",_pointer)?.Index ?? -1;
+            var creature = target >= 0 ? _state!.Players[0].Creature.CombatState?.Creatures.ElementAtOrDefault(target) : null;
+            bool legal = creature != null && _dragCard.CanPlayTargeting(creature);
+            Arrow(new MirrorMessage { X = _pointer.X, Y = _pointer.Y, StartX = _dragStart.X, StartY = _dragStart.Y,
+                Highlight = legal ? creature!.IsEnemy ? 2 : 1 : 0 });
         }
     }
-    private async Task CaptureFrame()
+    private void SendIntent(string kind, int index, int target, string hash, int events)
     {
-        try
+        if (!_control || !NativeIdle || _waitingForAuthority) return;
+        _waitingForAuthority = true; _submittedEvents = events;
+        _ = _wire.Send(new MirrorMessage { Kind = "intent", Generation = _generation, Epoch = _epoch, Request = ++_request,
+            Model = kind, Index = index, TargetIndex = target, Hash = hash, Events = events });
+    }
+    private void CancelDrag()
+    {
+        _dragCard = null; _dragIndex = -1;
+        Arrow(new MirrorMessage { Highlight = -1 });
+    }
+    private void UpdateNotice()
+    {
+        if (DisplayServer.GetName() == "headless") return;
+        if (_notice == null)
         {
-            await NGame.Instance.ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
-            var viewport = NGame.Instance.GetViewport();
-            using var picture = viewport.GetTexture().GetImage();
-            bool idle = !_busy && _error.Length == 0 && _replay != null && !RunManager.Instance.ActionExecutor.IsRunning && !RunManager.Instance.ActionExecutor.IsPaused;
-            if (picture != null && !picture.IsEmpty() && _wire.Connected && _wire.Pending < 2)
-                _ = _wire.Send(new MirrorMessage { Kind = "frame", Generation = _generation, Width = picture.GetWidth(), Height = picture.GetHeight(),
-                    Events = _events, Idle = idle, Hash = idle ? MirrorState.Hash(_state!) : "", Hits = CaptureHits(), Payload = picture.SavePngToBuffer() });
+            _noticeLayer = new CanvasLayer { Layer = 110 }; NGame.Instance.AddChild(_noticeLayer);
+            _notice = new Label { Position = new Vector2(16,16), MouseFilter = Control.MouseFilterEnum.Ignore };
+            _noticeLayer.AddChild(_notice);
         }
-        finally { _drawing = false; }
+        _notice.Text = _error.Length > 0 ? "同步失败，控制已暂停" : !NativeIdle || _waitingForAuthority ? "状态同步中" : "";
     }
     private List<MirrorHit> CaptureHits()
     {
@@ -138,7 +235,7 @@ internal sealed class MirrorRenderer : IDisposable
     {
         try
         {
-            _generation = message.Generation; _wire.Identity.Generation = _generation; _events = 0; _error = "";
+            _generation = message.Generation; _wire.Identity.Generation = _generation; _events = 0; _error = ""; _waitingForAuthority = false;
             RunManager.Instance.CleanUp(); _state = null; _replay = null;
             if (message.Room != "combat") throw new InvalidDataException("This exploration currently supports native combat replay only");
             var replay = MirrorState.Unpack<CombatReplay>(message.Payload);
@@ -211,15 +308,11 @@ internal sealed class MirrorRenderer : IDisposable
             _events++;
         }
     }
-    private static void Pointer(MirrorMessage message)
-    {
-        var viewport = NGame.Instance.GetViewport();
-        var point = new Vector2(message.X, message.Y) * viewport.GetVisibleRect().Size;
-        viewport.PushInput(new InputEventMouseMotion { Position = point, GlobalPosition = point }, true);
-    }
     private static void Arrow(MirrorMessage message)
     {
-        var arrow = LocalSpectatorSource.Descendants<NTargetingArrow>(NCombatRoom.Instance).FirstOrDefault();
+        var room = NCombatRoom.Instance;
+        if (room == null || !GodotObject.IsInstanceValid(room) || !room.IsInsideTree()) return;
+        var arrow = LocalSpectatorSource.Descendants<NTargetingArrow>(room).FirstOrDefault();
         if (arrow == null) return;
         if (message.Highlight < 0) { arrow.Visible = false; arrow.SetHighlightingOff(); return; }
         var size = NGame.Instance.GetViewport().GetVisibleRect().Size;
@@ -232,5 +325,5 @@ internal sealed class MirrorRenderer : IDisposable
         if (message.Highlight > 0) arrow.SetHighlightingOn(message.Highlight == 2); else arrow.SetHighlightingOff();
     }
     private void Quit() { Dispose(); ((SceneTree)Engine.GetMainLoop()).Quit(); }
-    public void Dispose() => _wire.Dispose();
+    public void Dispose() { _input?.Dispose(); _input = null; _wire.Dispose(); }
 }

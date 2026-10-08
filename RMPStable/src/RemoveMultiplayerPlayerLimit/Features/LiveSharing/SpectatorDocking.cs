@@ -80,9 +80,9 @@ internal sealed partial class SpectatorView
 	private void ProcessDocking()
 	{
 		ProcessControl();
-		if (_dockEdge == 0 || _pinned || _panelDragging || _panelResizing || _dragAction != null) return;
+		if (_dockEdge == 0 || _pinned || _panelDragging || _panelResizing) return;
 		var viewport = _panel.GetViewport();
-		var pointer = viewport.GetMousePosition();
+		var pointer = ShellPointer();
 		bool inside = viewport.GetVisibleRect().HasPoint(pointer) && _panel.GetGlobalRect().HasPoint(pointer);
 		if (inside)
 		{

@@ -29,15 +29,10 @@ internal sealed partial class SpectatorView {
         {
             bool inside = _panel.GetGlobalRect().HasPoint(mouse.Position);
             LiveSharingController.RouteMapInput(inside);
-            if (!inside)
-            {
-                _mirror.Presentation(new MirrorMessage { Kind = "pointer", X = -1, Y = -1 });
-                if (input is InputEventMouseButton { ButtonIndex: MouseButton.Left }) CancelDrag();
-            }
         }
         if (input is InputEventKey { Keycode: Key.Escape, Pressed: true, Echo: false } && _controlEnabled && _panel.GetGlobalRect().HasPoint(_panel.GetViewport().GetMousePosition()))
         {
-            if (_dragAction != null) CancelDrag(); else SetPreferredControl(false);
+            SetPreferredControl(false);
             _overlay.GetViewport().SetInputAsHandled();
         }
     }

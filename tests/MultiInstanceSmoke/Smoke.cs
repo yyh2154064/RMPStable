@@ -36,7 +36,7 @@ public static class Smoke
         TaskHelper.RunSafely(Run());
     }
     private static void Check(bool condition, string label) { if (!condition) throw new Exception(label); GD.Print("[MultiInstanceSmoke] PASS " + label); }
-    private static async Task Frames(int n) { for(int i=0;i<n;i++) { Engine.MaxFps=30; await NGame.Instance.ToSignal(NGame.Instance.GetTree(),SceneTree.SignalName.ProcessFrame); } }
+    private static async Task Frames(int n) { for(int i=0;i<n;i++) { Engine.MaxFps=DisplayServer.GetName()=="headless" ? 30 : 120; await NGame.Instance.ToSignal(NGame.Instance.GetTree(),SceneTree.SignalName.ProcessFrame); } }
     private static async Task Until(Func<bool> predicate, string label, int limit=2400)
     {
         for(int i=0;i<limit && !predicate();i++)
@@ -83,9 +83,9 @@ public static class Smoke
             var view=Static("_view")!; var panel=(Control)Field(view,"_panel")!;
             Check(panel.GetNodeOrNull<Control>("SpectatorControlToggle")!=null && panel.GetNodeOrNull<Control>("SpectatorPin")!=null && panel.GetNodeOrNull<Control>("SpectatorClose")!=null,"watch control pin and close shell retained");
             Check(panel.GetNode<Control>("SpectatorContent").ClipContents,"native picture remains clipped inside shell");
-            var viewport=(SubViewport)Field(view,"_viewport")!;
-            Check(viewport.GetChild<TextureRect>(0).Name=="NativeGameFrame" && !viewport.GetChildren().OfType<NCard>().Any(),"parent displays native image rather than reconstructed cards");
-            var source=Static("_source")!; long epoch=(long)Call(source,"SetControlMode",true)!;
+            var content=(Control)Field(view,"_content")!;
+            Check(!content.GetChildren().Any(n=>n is SubViewportContainer or TextureRect or NCard) && Type("MirrorRenderer").GetMethod("CaptureFrame",Any)==null,"parent has no screenshot surface or PNG capture path");
+            var source=Static("_source")!; Call(view,"SetControlEnabled",true); long epoch=(long)Field(view,"_epoch")!;
             var snapshot=Call(source,"CaptureCommands",state)!; var control=snapshot.GetType().GetProperty("Control")!.GetValue(snapshot)!;
             var actions=(System.Collections.IEnumerable)control.GetType().GetProperty("Actions")!.GetValue(control)!;
             var end=actions.Cast<object>().First(a=>(string)a.GetType().GetProperty("Kind")!.GetValue(a)! =="endTurn" && (bool)a.GetType().GetProperty("Enabled")!.GetValue(a)!);
@@ -122,11 +122,35 @@ public static class Smoke
             Check((bool)result.GetType().GetProperty("Accepted")!.GetValue(result)!,"targeted attack resolves source-owned card and enemy identifiers: " + result.GetType().GetProperty("Message")!.GetValue(result));
             await Until(()=>state.Players[0].PlayerCombatState!.Energy<energy && (bool)Call(mirror,"Authorize",state)!,"attack damage energy and hand changes match in replica");
             string before=Type("MirrorState").GetMethod("Hash",Any)!.Invoke(null,new object[]{state})!.ToString()!;
-            var motion=Activator.CreateInstance(Type("MirrorMessage"))!;
-            motion.GetType().GetProperty("Kind")!.SetValue(motion,"pointer"); motion.GetType().GetProperty("X")!.SetValue(motion,.7f); motion.GetType().GetProperty("Y")!.SetValue(motion,.5f);
-            Call(mirror,"Presentation",motion);
+            object Intent(string kind, int index=-1, int target=-1)
+            {
+                var message=Activator.CreateInstance(Type("MirrorMessage"))!;
+                void Set(string name,object value)=>message.GetType().GetProperty(name)!.SetValue(message,value);
+                Set("Kind","intent"); Set("Model",kind); Set("Epoch",epoch); Set("Request",++request); Set("Index",index); Set("TargetIndex",target);
+                Set("Hash",Field(process,"LastHash")!); Set("Events",Field(process,"LastEvents")!);
+                Set("Generation",Field(Field(process,"Wire")!,"Identity")!.GetType().GetField("Generation",Any)!.GetValue(Field(Field(process,"Wire")!,"Identity"))!);
+                return message;
+            }
+            void RejectIntent(object intent,string label)
+            {
+                var rejected=Controller.GetMethod("ResolveIntent",Any)!.Invoke(null,new[]{(object)state,intent})!;
+                Check(!(bool)rejected.GetType().GetProperty("Accepted")!.GetValue(rejected)!,label);
+            }
+            var stale=Intent("endTurn"); stale.GetType().GetProperty("Generation")!.SetValue(stale,-1L); RejectIntent(stale,"old native-window generation rejected");
+            stale=Intent("endTurn"); stale.GetType().GetProperty("Epoch")!.SetValue(stale,-1L); RejectIntent(stale,"old native-window control epoch rejected");
+            stale=Intent("endTurn"); stale.GetType().GetProperty("Hash")!.SetValue(stale,"wrong"); RejectIntent(stale,"native-window intent with stale state rejected");
+            RejectIntent(Intent("play",99999),"invalid native hand index rejected");
+            Call(view,"SetControlEnabled",false); RejectIntent(Intent("endTurn"),"watch mode cannot execute native-window intents");
+            Call(view,"SetControlEnabled",true); epoch=(long)Field(view,"_epoch")!;
             await Frames(15);
-            Check(before==(string)Type("MirrorState").GetMethod("Hash",Any)!.Invoke(null,new object[]{state})!,"presentation traffic cannot mutate source gameplay");
+            Check(before==(string)Type("MirrorState").GetMethod("Hash",Any)!.Invoke(null,new object[]{state})!,"rejected native-window input cannot mutate source gameplay");
+            await Until(()=>(bool)Call(mirror,"Authorize",state)!,"native intent source is idle and consistent");
+            turn=state.Players[0].PlayerCombatState!.TurnNumber;
+            var nativeIntent=Intent("endTurn");
+            var nativeResult=Controller.GetMethod("ResolveIntent",Any)!.Invoke(null,new[]{(object)state,nativeIntent})!;
+            Check((bool)nativeResult.GetType().GetProperty("Accepted")!.GetValue(nativeResult)!,"native indices resolve to authoritative end-turn command");
+            await Until(()=>state.Players[0].PlayerCombatState!.TurnNumber>turn && (bool)Call(mirror,"Authorize",state)!,"native intent result reaches both models");
+            if(DisplayServer.GetName()!="headless") await NativeWindowChecks(state,mirror,process,view);
             Controller.GetMethod("Close",Any)!.Invoke(null,null); await Frames(10);
             bool gone=false; try { using var stopped=System.Diagnostics.Process.GetProcessById(childId); gone=stopped.HasExited; } catch(ArgumentException){gone=true;}
             Check(gone,"closing panel terminates only its owned renderer");
@@ -140,5 +164,55 @@ public static class Smoke
             GD.Print("[MultiInstanceSmoke] ALL PASSED"); ((SceneTree)Engine.GetMainLoop()).Quit();
         }
         catch(Exception e) { GD.PrintErr("[MultiInstanceSmoke] FAIL "+e); Controller?.GetMethod("Close",Any)?.Invoke(null,null); ((SceneTree)Engine.GetMainLoop()).Quit(1); }
+    }
+    [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern nint GetParent(nint window);
+    [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(nint window,out uint process);
+    [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool GetClientRect(nint window,out NativeRect rect);
+    [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern nint SendMessageTimeoutW(nint window,uint message,nuint param,nint data,uint flags,uint timeout,out nuint result);
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)] private struct NativeRect { public int Left,Top,Right,Bottom; }
+    private static async Task NativeWindowChecks(RunState state,object mirror,object process,object view)
+    {
+        await Until(()=>mirror.GetType().GetProperty("Window",Any)!.GetValue(mirror) is { } window && (bool)window.GetType().GetProperty("Attached",Any)!.GetValue(window)! && (bool)Field(process,"NativeAttached")!,"renderer HWND embedded in source clipping container");
+        var host=mirror.GetType().GetProperty("Window",Any)!.GetValue(mirror)!;
+        nint child=(nint)(long)Field(process,"Window")!;
+        nint container=(nint)host.GetType().GetProperty("Container",Any)!.GetValue(host)!;
+        GetWindowThreadProcessId(child,out uint owner);
+        Check(owner==((System.Diagnostics.Process)process.GetType().GetProperty("Child",Any)!.GetValue(process)!).Id && GetParent(child)==container,"only owned renderer HWND is attached");
+        var panel=(Control)Field(view,"_panel")!; var content=(Control)Field(view,"_content")!;
+        var saved=panel.Position; panel.Position+=new Vector2(20,10); await Frames(4);
+        GetClientRect(container,out var size); GetClientRect(child,out var childSize);
+        Check(size.Right==childSize.Right && size.Bottom==childSize.Bottom && size.Right>100,"native window follows content dimensions");
+        panel.Position=saved; await Frames(4);
+        await Until(()=>((System.Collections.IEnumerable)Field(process,"LastHits")!).Cast<object>().Any(h=>(string)h.GetType().GetProperty("Kind")!.GetValue(h)! == "play") && (bool)Call(mirror,"Authorize",state)!,"native hand hitboxes ready after dealing animation");
+        var before=(string)Type("MirrorState").GetMethod("Hash",Any)!.Invoke(null,new object[]{state})!;
+        void Send(uint message,float x,float y)
+        {
+            GetClientRect(child,out var rect);
+            int px=(int)(x*rect.Right),py=(int)(y*rect.Bottom);
+            Check(SendMessageTimeoutW(child,message,message==0x201 ? 1u : 0u,(nint)((py<<16)|(px&0xFFFF)),2,1000,out _)!=0,"owned offscreen native message dispatched");
+        }
+        var hits=((System.Collections.IEnumerable)Field(process,"LastHits")!).Cast<object>().ToArray();
+        var card=hits.Last(h=>(string)h.GetType().GetProperty("Kind")!.GetValue(h)! == "play");
+        int index=(int)card.GetType().GetProperty("Index")!.GetValue(card)!;
+        var bounds=(float[])card.GetType().GetProperty("Rect")!.GetValue(card)!;
+        Send(0x200,bounds[0]+bounds[2]/2,Math.Min(.97f,bounds[1]+bounds[3]/3)); await Frames(30);
+        await Until(()=>((System.Collections.IEnumerable)Field(process,"LastHits")!).Cast<object>().Any(h=>(string)h.GetType().GetProperty("Kind")!.GetValue(h)! == "play" && ((float[])h.GetType().GetProperty("Rect")!.GetValue(h)!)[3]>bounds[3]*1.1f),"native mouse motion raises original card without a pipe pointer message",600);
+        Check(before==(string)Type("MirrorState").GetMethod("Hash",Any)!.Invoke(null,new object[]{state})!,"local native hover does not mutate authoritative combat");
+        Call(view,"SetControlEnabled",false); await Frames(20);
+        Send(0x201,.89f,.82f); Send(0x202,.89f,.82f); await Frames(20);
+        Check(before==(string)Type("MirrorState").GetMethod("Hash",Any)!.Invoke(null,new object[]{state})! && (bool)Call(mirror,"Authorize",state)!,"watch-mode native clicks alter neither source nor replica");
+        Call(view,"SetControlEnabled",true); await Frames(20);
+        var fps=new System.Collections.Generic.List<double>(); var sourceFps=new System.Collections.Generic.List<double>();
+        for(int i=0;i<20;i++) { await Frames(30); fps.Add((double)Field(process,"Fps")!); sourceFps.Add(Performance.GetMonitor(Performance.Monitor.TimeFps)); }
+        fps.Sort(); sourceFps.Sort();
+        GD.Print("[MultiInstanceSmoke] NATIVE FPS source median="+sourceFps[10]+" renderer median="+fps[10]+" renderer process_ms="+Field(process,"ProcessMs"));
+        Check(Engine.MaxFps==120 && fps[10]>0,"120 FPS cadence enabled with live native telemetry");
+        await Until(()=>(bool)Call(mirror,"Authorize",state)!,"native window ready for end-turn input");
+        hits=((System.Collections.IEnumerable)Field(process,"LastHits")!).Cast<object>().ToArray();
+        var end=hits.First(h=>(string)h.GetType().GetProperty("Kind")!.GetValue(h)! == "endTurn");
+        bounds=(float[])end.GetType().GetProperty("Rect")!.GetValue(end)!;
+        int turn=state.Players[0].PlayerCombatState!.TurnNumber;
+        Send(0x201,bounds[0]+bounds[2]/2,bounds[1]+bounds[3]/2); Send(0x202,bounds[0]+bounds[2]/2,bounds[1]+bounds[3]/2);
+        await Until(()=>state.Players[0].PlayerCombatState!.TurnNumber>turn && (bool)Call(mirror,"Authorize",state)!,"native HWND click reaches authority once and replays consistently");
     }
 }

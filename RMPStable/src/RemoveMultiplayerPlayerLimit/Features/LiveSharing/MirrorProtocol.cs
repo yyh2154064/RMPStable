@@ -14,7 +14,7 @@ namespace RemoveMultiplayerPlayerLimit.Features.LiveSharing;
 // Native engine packets remain version-specific; never accept a cross-build peer.
 internal sealed class MirrorMessage
 {
-    public int Protocol { get; set; } = 1;
+    public int Protocol { get; set; } = 2;
     public string Session { get; set; } = "";
     public string Secret { get; set; } = "";
     public ulong Source { get; set; }
@@ -22,6 +22,17 @@ internal sealed class MirrorMessage
     public long Generation { get; set; }
     public string Kind { get; set; } = "";
     public int Process { get; set; }
+    public long Window { get; set; }
+    public long Epoch { get; set; }
+    public long Request { get; set; }
+    public int Index { get; set; } = -1;
+    public int TargetIndex { get; set; } = -1;
+    public bool Control { get; set; }
+    public bool Accepted { get; set; }
+    public bool DisplayReady { get; set; }
+    public bool Attached { get; set; }
+    public double Fps { get; set; }
+    public double ProcessMs { get; set; }
     public string Build { get; set; } = "";
     public string Hash { get; set; } = "";
     public int Events { get; set; }
@@ -57,7 +68,7 @@ internal sealed class MirrorIdentity
     { Session = session; Secret = secret; Source = source; }
     internal void Validate(MirrorMessage message)
     {
-        if (message.Protocol != 1 || message.Session != Session || message.Source != Source ||
+        if (message.Protocol != 2 || message.Session != Session || message.Source != Source ||
             !CryptographicOperations.FixedTimeEquals(System.Text.Encoding.UTF8.GetBytes(message.Secret), System.Text.Encoding.UTF8.GetBytes(Secret)))
             throw new InvalidDataException("Mirror identity mismatch");
         if (message.Sequence != _incoming + 1) throw new InvalidDataException("Mirror sequence mismatch");
