@@ -1,0 +1,12 @@
+{
+  "id": "MultiInstanceSmoke",
+  "name": "RMP isolated multi-instance test harness",
+  "author": "RMP Stable Contributors",
+  "version": "0.1.0",
+  "description": "Developer test only. Requires RMP_MULTI_TEST and --force-steam off.",
+  "has_dll": true,
+  "has_pck": false,
+  "affects_gameplay": true,
+  "min_game_version": "0.107.1",
+  "dependencies": [{ "id": "RMPStable" }]
+}

@@ -58,6 +58,7 @@ public class LobbyManagerModule : IRMPModule
 		{
 			PayloadMessageRegistration.EnsureRegistered();
 			QuickSlController.ProcessFrame();
+			RemoveMultiplayerPlayerLimit.Features.LiveSharing.LiveSharingController.ProcessFrame(delta);
 			HandleStartRunLobby(SceneMonitor.FindActiveStartRunLobby());
 			if (++_frameCounter % 15 == 0)
 			{

@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net7.0</TargetFramework>
+    <LangVersion>11.0</LangVersion>
+    <Nullable>annotations</Nullable>
+    <NoWarn>$(NoWarn);CA1416</NoWarn>
+    <DisableImplicitFrameworkReferences>true</DisableImplicitFrameworkReferences>
+    <NoStdLib>true</NoStdLib>
+    <DefineConstants Condition="'$(GameCompatibility)' == 'beta'">$(DefineConstants);STS2_0111</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="$(GameManagedDir)\*.dll"
+               Exclude="$(GameManagedDir)\cl*.dll;$(GameManagedDir)\coreclr.dll;$(GameManagedDir)\host*.dll;$(GameManagedDir)\Microsoft.DiaSymReader.Native*.dll;$(GameManagedDir)\mscordac*.dll;$(GameManagedDir)\mscordbi.dll;$(GameManagedDir)\mscorrc.dll;$(GameManagedDir)\msquic.dll;$(GameManagedDir)\System.IO.Compression.Native.dll;$(GameManagedDir)\steam_api64.dll">
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+</Project>

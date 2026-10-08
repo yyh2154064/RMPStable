@@ -5,6 +5,7 @@ using MegaCrit.Sts2.Core.Logging;
 using MegaCrit.Sts2.Core.Modding;
 using RemoveMultiplayerPlayerLimit.Features.CampfireLayout;
 using RemoveMultiplayerPlayerLimit.Features.QuickSl;
+using RemoveMultiplayerPlayerLimit.Features.LiveSharing;
 using RemoveMultiplayerPlayerLimit.Features.ShopLayout;
 using RemoveMultiplayerPlayerLimit.Features.TreasureRoom;
 using RemoveMultiplayerPlayerLimit.Features.VictoryFlow;
@@ -26,9 +27,9 @@ public static class ModEntry
 	public static void Initialize()
 	{
 #if STS2_0111
-		Log.Warn("[RMP Stable] Initializing standalone v0.3.9 for STS2 v0.111.0 Public Beta...");
+		Log.Warn("[RMP Stable] Initializing multi-instance exploration v0.3.9-multiInstance.1 for STS2 v0.111.0 Public Beta...");
 #else
-		Log.Warn("[RMP Stable] Initializing standalone v0.3.9 for STS2 v0.107.1...");
+		Log.Warn("[RMP Stable] Initializing multi-instance exploration v0.3.9-multiInstance.1 for STS2 v0.107.1...");
 #endif
 		Modules.Clear();
 		ConfigManager configManager = new ConfigManager();
@@ -39,6 +40,7 @@ public static class ModEntry
 		Modules.Add(new ShopModule());
 		Modules.Add(new TreasureModule());
 		Modules.Add(new QuickSlModule());
+		Modules.Add(new LiveSharingModule());
 		Modules.Add(new VictoryModule());
 		Modules.Add(new HostBootstrapModule());
 		Modules.Add(new ExtendedLobbyModule());
