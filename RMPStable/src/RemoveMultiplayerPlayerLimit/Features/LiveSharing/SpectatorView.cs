@@ -51,8 +51,8 @@ internal sealed partial class SpectatorView : IDisposable
     internal Vector2 ShellPointer()
     {
         if (DisplayServer.GetName() == "headless") return _panel.GetViewport().GetMousePosition();
-        if (!MirrorWin32.GetCursorPos(out var point)) return new Vector2(-1,-1);
-        return _panel.GetViewport().GetScreenTransform().AffineInverse() * new Vector2(point.X,point.Y);
+        if (!MirrorWin32.GetCursorPos(out var point) || !MirrorWin32.ScreenToClient(MirrorWin32.OwnWindow,ref point)) return new Vector2(-1,-1);
+        return _panel.GetViewport().GetFinalTransform().AffineInverse() * new Vector2(point.X,point.Y);
     }
     private void ProcessControl()
     {

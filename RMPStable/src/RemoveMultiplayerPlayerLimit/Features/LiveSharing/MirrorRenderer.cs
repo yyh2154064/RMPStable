@@ -107,7 +107,10 @@ internal sealed class MirrorRenderer : IDisposable
                 case "attach":
                     if (_attached || message.Process != _parent) throw new InvalidDataException("Invalid native attachment");
                     MirrorWin32.AttachOwn((nint)message.Window,_parent); _attached = true;
-                    GD.Print("[RMP:Mirror:Window] attached parent=" + message.Window); break;
+                    GD.Print("[RMP:Mirror:Window] owned popup source=" + message.Window); break;
+                case "clip":
+                    if (!_attached) throw new InvalidDataException("Window ownership required before clipping");
+                    MirrorWin32.ClipOwn(message); break;
                 case "control":
                     if (message.Epoch <= _epoch) break;
                     _control = message.Control; _epoch = message.Epoch; CancelDrag(); break;

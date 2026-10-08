@@ -169,21 +169,28 @@ public static class Smoke
     [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(nint window,out uint process);
     [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool IsWindowVisible(nint window);
     [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool GetClientRect(nint window,out NativeRect rect);
+    [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool GetWindowRect(nint window,out NativeRect rect);
+    [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool ClientToScreen(nint window,ref NativePoint point);
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)] private struct NativePoint { public int X,Y; }
     [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern nint SendMessageTimeoutW(nint window,uint message,nuint param,nint data,uint flags,uint timeout,out nuint result);
     [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)] private struct NativeRect { public int Left,Top,Right,Bottom; }
     private static async Task NativeWindowChecks(RunState state,object mirror,object process,object view)
     {
-        await Until(()=>mirror.GetType().GetProperty("Window",Any)!.GetValue(mirror) is { } window && (bool)window.GetType().GetProperty("Attached",Any)!.GetValue(window)! && (bool)Field(process,"NativeAttached")!,"renderer HWND embedded in source clipping container");
+        await Until(()=>mirror.GetType().GetProperty("Window",Any)!.GetValue(mirror) is { } window && (bool)window.GetType().GetProperty("Attached",Any)!.GetValue(window)! && (bool)Field(process,"NativeAttached")!,"renderer popup HWND is owned by the source window");
         var host=mirror.GetType().GetProperty("Window",Any)!.GetValue(mirror)!;
         nint child=(nint)(long)Field(process,"Window")!;
         await Until(()=>IsWindowVisible(child) && (long)Field(process,"DrawFrames")! > 0,"embedded battle HWND is visible and has a draw callback (visual pixels still require inspection)");
-        nint container=(nint)host.GetType().GetProperty("Container",Any)!.GetValue(host)!;
+        nint ownerWindow=(nint)host.GetType().GetProperty("OwnerWindow",Any)!.GetValue(host)!;
         GetWindowThreadProcessId(child,out uint owner);
-        Check(owner==((System.Diagnostics.Process)process.GetType().GetProperty("Child",Any)!.GetValue(process)!).Id && GetParent(child)==container,"only owned renderer HWND is attached");
+        Check(owner==((System.Diagnostics.Process)process.GetType().GetProperty("Child",Any)!.GetValue(process)!).Id && GetParent(child)==ownerWindow,"only owned renderer HWND is attached");
         var panel=(Control)Field(view,"_panel")!; var content=(Control)Field(view,"_content")!;
         var saved=panel.Position; panel.Position+=new Vector2(20,10); await Frames(4);
-        GetClientRect(container,out var size); GetClientRect(child,out var childSize);
-        Check(size.Right==childSize.Right && size.Bottom==childSize.Bottom && size.Right>100,"native window follows content dimensions");
+        GetClientRect(child,out var childSize); GetWindowRect(child,out var placed);
+        var transform=content.GetViewport().GetFinalTransform()*content.GetGlobalTransformWithCanvas();
+        var expected=transform*Vector2.Zero; var expectedEnd=transform*content.Size;
+        var screenOrigin=new NativePoint { X=(int)Math.Round(expected.X),Y=(int)Math.Round(expected.Y) }; ClientToScreen(ownerWindow,ref screenOrigin);
+        Check(Math.Abs(childSize.Right-(expectedEnd.X-expected.X))<=2 && Math.Abs(childSize.Bottom-(expectedEnd.Y-expected.Y))<=2 && childSize.Right>100,"native popup follows content dimensions");
+        Check(Math.Abs(placed.Left-screenOrigin.X)<=2 && Math.Abs(placed.Top-screenOrigin.Y)<=2,"native popup aligns with the displayed panel in OS screen coordinates");
         panel.Position=saved; await Frames(4);
         await Until(()=>((System.Collections.IEnumerable)Field(process,"LastHits")!).Cast<object>().Any(h=>(string)h.GetType().GetProperty("Kind")!.GetValue(h)! == "play") && (bool)Call(mirror,"Authorize",state)!,"native hand hitboxes ready after dealing animation");
         var before=(string)Type("MirrorState").GetMethod("Hash",Any)!.Invoke(null,new object[]{state})!;

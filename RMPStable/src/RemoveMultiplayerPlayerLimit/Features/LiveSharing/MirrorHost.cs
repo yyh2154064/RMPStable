@@ -114,8 +114,9 @@ internal sealed class MirrorHost : IDisposable
     {
         if (Window != null || DisplayServer.GetName() == "headless" || !Process.Authenticated) return;
         Window = new MirrorWindowHost((nint)Process.Window, Process.Child.Id);
-        GD.Print("[RMP:Mirror:Window] attach requested container=" + (long)Window.Container);
-        _ = Process.Wire.Send(new MirrorMessage { Kind = "attach", Window = (long)Window.Container, Process = System.Environment.ProcessId });
+        Window.SendClip = message => { _ = Process.Wire.Send(message); };
+        GD.Print("[RMP:Mirror:Window] ownership requested source=" + (long)Window.OwnerWindow);
+        _ = Process.Wire.Send(new MirrorMessage { Kind = "attach", Window = (long)Window.OwnerWindow, Process = System.Environment.ProcessId });
     }
     public void Dispose() { Process.Dispose(); Window?.Dispose(); Window = null; }
 }

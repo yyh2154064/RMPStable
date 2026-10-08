@@ -9,7 +9,7 @@ namespace RemoveMultiplayerPlayerLimit.Features.LiveSharing;
 // Subclass only windows owned by this process, never the other game's HWND.
 internal static class MirrorWin32
 {
-    internal const int Style = -16, ExStyle = -20, WndProc = -4;
+    internal const int Style = -16, ExStyle = -20, WndProc = -4, Owner = -8;
     internal const long Child = 0x40000000, Popup = 0x80000000, ClipChildren = 0x02000000, ClipSiblings = 0x04000000;
     internal const long Decorations = 0x00CF0000, AppWindow = 0x00040000;
     internal const uint Move = 0x200, LeftDown = 0x201, LeftUp = 0x202, CaptureChanged = 0x215;
@@ -35,6 +35,9 @@ internal static class MirrorWin32
     [DllImport("user32.dll")] internal static extern bool GetClientRect(nint window, out Rect rect);
     [DllImport("user32.dll")] internal static extern bool GetCursorPos(out Point point);
     [DllImport("user32.dll")] internal static extern bool ScreenToClient(nint window, ref Point point);
+    [DllImport("user32.dll")] internal static extern bool ClientToScreen(nint window, ref Point point);
+    [DllImport("user32.dll")] internal static extern bool GetWindowRect(nint window, out Rect rect);
+    [DllImport("user32.dll")] internal static extern bool ShowWindowAsync(nint window, int command);
     [DllImport("user32.dll")] internal static extern nint SetCapture(nint window);
     [DllImport("user32.dll")] internal static extern bool ReleaseCapture();
     [DllImport("user32.dll")] internal static extern nint GetCapture();
@@ -58,14 +61,23 @@ internal static class MirrorWin32
     {
         var window = OwnWindow; RequireOwned(window, System.Environment.ProcessId); RequireOwned(parent, owner);
         long style = (long)GetLong(window, Style);
-        SetLong(window, Style, (nint)((style & ~(Popup | Decorations)) | Child | ClipSiblings));
-        SetLong(window, ExStyle, (nint)((long)GetLong(window, ExStyle) & ~AppWindow));
+        // Each game's swapchain presents to a separate top-level HWND. Bind
+        // ownership/z-order without turning the renderer into WS_CHILD.
+        SetLong(window, Style, (nint)((style & ~(Child | Decorations)) | Popup));
+        SetLong(window, ExStyle, (nint)(((long)GetLong(window, ExStyle) & ~AppWindow) | 0x00000080 | 0x08000000));
         Marshal.SetLastPInvokeError(0);
-        if (SetParent(window, parent) == 0 && Marshal.GetLastPInvokeError() != 0) throw new Win32Exception(Marshal.GetLastPInvokeError());
-        if (GetParent(window) != parent) throw new InvalidOperationException("Native mirror parent was not applied");
-        GetClientRect(parent, out var size);
-        if (!SetWindowPos(window, 0, 0, 0, Math.Max(1,size.Right), Math.Max(1,size.Bottom), 0x0010 | 0x0020 | 0x0040))
+        if (SetLong(window, Owner, parent) == 0 && Marshal.GetLastPInvokeError() != 0) throw new Win32Exception(Marshal.GetLastPInvokeError());
+        if (GetLong(window, Owner) != parent) throw new InvalidOperationException("Native mirror owner was not applied");
+        if (!SetWindowPos(window, 0, 0, 0, 0, 0, 0x0010 | 0x0020 | 0x0001 | 0x0002 | 0x0004))
             throw new Win32Exception(Marshal.GetLastPInvokeError());
+    }
+    internal static void ClipOwn(MirrorMessage message)
+    {
+        if (message.Clip.Length != 4 || message.Width <= 0 || message.Height <= 0) throw new InvalidOperationException("Invalid native window clip");
+        var region = CreateRectRgn(message.Clip[0],message.Clip[1],message.Clip[2],message.Clip[3]);
+        var corner = CreateRectRgn(Math.Max(0,message.Width-message.CornerWidth),Math.Max(0,message.Height-message.CornerHeight),message.Width,message.Height);
+        CombineRgn(region,region,corner,4); DeleteObject(corner);
+        if (SetWindowRgn(OwnWindow,region,true) == 0) { DeleteObject(region); throw new InvalidOperationException("Native mirror clipping failed"); }
     }
 }
 
@@ -102,29 +114,25 @@ internal sealed class MirrorWindowHook : IDisposable
 
 internal sealed class MirrorWindowHost : IDisposable
 {
-    internal nint Container { get; }
+    internal nint OwnerWindow => _parent;
     private readonly nint _parent, _child;
     private readonly int _childProcess;
     private readonly MirrorWindowHook _keys;
-    private readonly bool _hadClipChildren;
     private (int X, int Y, int Width, int Height) _last;
     private bool _visible, _escape, _disposed;
     private readonly System.Collections.Generic.HashSet<nuint> _forwardKeys = new();
-    internal bool Attached => MirrorWin32.Owned(_child, _childProcess) && MirrorWin32.GetParent(_child) == Container;
-    internal bool Visible => Attached && MirrorWin32.IsWindowVisible(Container) && MirrorWin32.IsWindowVisible(_child);
+    internal Action<MirrorMessage>? SendClip;
+    private (int Left, int Top, int Right, int Bottom, int Width, int Height, int CornerWidth, int CornerHeight) _lastClip;
+    private bool _positioned;
+    internal bool Attached => MirrorWin32.Owned(_child, _childProcess) && MirrorWin32.GetLong(_child, MirrorWin32.Owner) == _parent && ((long)MirrorWin32.GetLong(_child,MirrorWin32.Style) & MirrorWin32.Child) == 0;
+    internal bool Visible => _visible && Attached && MirrorWin32.IsWindowVisible(_child);
     internal MirrorWindowHost(nint child, int childProcess)
     {
         _parent = MirrorWin32.OwnWindow; _child = child; _childProcess = childProcess;
         MirrorWin32.RequireOwned(_parent, System.Environment.ProcessId); MirrorWin32.RequireOwned(child, childProcess);
-        long style = (long)MirrorWin32.GetLong(_parent, MirrorWin32.Style);
-        _hadClipChildren = (style & MirrorWin32.ClipChildren) != 0;
-        MirrorWin32.SetLong(_parent, MirrorWin32.Style, (nint)(style | MirrorWin32.ClipChildren));
-        Container = MirrorWin32.Create(0, "STATIC", "RMP native mirror", (uint)(MirrorWin32.Child | MirrorWin32.ClipChildren | MirrorWin32.ClipSiblings), 0,0,1,1,_parent,0,0,0);
-        if (Container == 0) { int error = Marshal.GetLastPInvokeError(); RestoreStyle(); throw new Win32Exception(error); }
         var keys = new byte[256];
         if (MirrorWin32.GetKeyboardState(keys)) for (uint key = 0; key < keys.Length; key++) if ((keys[key] & 0x80) != 0) _forwardKeys.Add(key);
-        try { _keys = new MirrorWindowHook(_parent, InterceptSourceKey); }
-        catch { MirrorWin32.DestroyWindow(Container); RestoreStyle(); throw; }
+        _keys = new MirrorWindowHook(_parent, InterceptSourceKey);
     }
     internal bool PointerInside
     {
@@ -154,44 +162,37 @@ internal sealed class MirrorWindowHost : IDisposable
     internal bool TakeEscape() { bool value = _escape; _escape = false; return value; }
     internal void Layout(Control content, bool show)
     {
-        if (!MirrorWin32.IsWindow(Container)) throw new InvalidOperationException("Native mirror container disappeared");
-        var rect = content.GetGlobalRect();
-        // Canvas coordinates -> OS screen -> source client, including DPI,
-        // letterboxing, window position and CanvasLayer transforms.
-        var screen = content.GetViewport().GetScreenTransform();
-        var a = screen * rect.Position; var b = screen * rect.End;
+        if (!Attached) return;
+        // Canvas -> client pixels -> actual Win32 screen origin. Do not rely
+        // on Godot's cached desktop position for a reconfigured native window.
+        var transform = content.GetViewport().GetFinalTransform() * content.GetGlobalTransformWithCanvas();
+        var a = transform * Vector2.Zero; var b = transform * content.Size;
         var origin = new MirrorWin32.Point { X = (int)Math.Round(a.X), Y = (int)Math.Round(a.Y) };
-        MirrorWin32.ScreenToClient(_parent, ref origin);
+        if (!MirrorWin32.ClientToScreen(_parent, ref origin) || !MirrorWin32.GetClientRect(_parent,out var client)) throw new InvalidOperationException("Native source geometry unavailable");
         var bounds = (origin.X, origin.Y, Math.Max(1,(int)Math.Round(b.X-a.X)), Math.Max(1,(int)Math.Round(b.Y-a.Y)));
-        if (_last != bounds)
+        int left = Math.Clamp(-(int)Math.Round(a.X),0,bounds.Item3), top = Math.Clamp(-(int)Math.Round(a.Y),0,bounds.Item4);
+        int right = Math.Clamp(client.Right-(int)Math.Round(a.X),0,bounds.Item3), bottom = Math.Clamp(client.Bottom-(int)Math.Round(a.Y),0,bounds.Item4);
+        int cornerWidth = Math.Max(1,(int)Math.Ceiling(16 * bounds.Item3 / content.Size.X));
+        int cornerHeight = Math.Max(1,(int)Math.Ceiling(13 * bounds.Item4 / content.Size.Y));
+        var clip = (left,top,right,bottom,bounds.Item3,bounds.Item4,cornerWidth,cornerHeight);
+        if (!_positioned || clip != _lastClip)
         {
-            _last = bounds;
-            if (!MirrorWin32.SetWindowPos(Container, 0, bounds.Item1,bounds.Item2,bounds.Item3,bounds.Item4, 0x0010)) throw new Win32Exception(Marshal.GetLastPInvokeError());
-            if (Attached) MirrorWin32.SetWindowPos(_child,0,0,0,bounds.Item3,bounds.Item4,0x0010 | 0x0004 | 0x4000);
-            var region = MirrorWin32.CreateRectRgn(0,0,bounds.Item3,bounds.Item4);
-            int cornerWidth = Math.Max(1,(int)Math.Ceiling(16 * bounds.Item3 / content.Size.X));
-            int cornerHeight = Math.Max(1,(int)Math.Ceiling(13 * bounds.Item4 / content.Size.Y));
-            var corner = MirrorWin32.CreateRectRgn(Math.Max(0,bounds.Item3-cornerWidth),Math.Max(0,bounds.Item4-cornerHeight),bounds.Item3,bounds.Item4);
-            MirrorWin32.CombineRgn(region,region,corner,4); MirrorWin32.DeleteObject(corner);
-            if (MirrorWin32.SetWindowRgn(Container,region,true) == 0) { MirrorWin32.DeleteObject(region); throw new InvalidOperationException("Native mirror clipping failed"); }
+            _lastClip = clip;
+            SendClip?.Invoke(new MirrorMessage { Kind = "clip", Width = bounds.Item3, Height = bounds.Item4, Clip = new[] {left,top,right,bottom}, CornerWidth = cornerWidth, CornerHeight = cornerHeight });
         }
-        show &= content.IsVisibleInTree() && !MirrorWin32.IsIconic(_parent);
-        if (_visible != show)
+        show &= content.IsVisibleInTree() && !MirrorWin32.IsIconic(_parent) && right > left && bottom > top;
+        if (!_positioned || _last != bounds || _visible != show)
         {
-            _visible = show; MirrorWin32.ShowWindow(Container,show ? 8 : 0);
-            GD.Print("[RMP:Mirror:Window] container=" + (show ? "visible" : "hidden") + " attached=" + Attached + " bounds=" + _last);
+            if (!MirrorWin32.SetWindowPos(_child,0,bounds.Item1,bounds.Item2,bounds.Item3,bounds.Item4,0x0010 | 0x0004 | 0x4000 | 0x0200 | (show ? 0x0040u : 0x0080u))) throw new Win32Exception(Marshal.GetLastPInvokeError());
+            if (!_positioned || _visible != show) GD.Print("[RMP:Mirror:Window] owned popup=" + (show ? "visible" : "hidden") + " screenBounds=" + bounds + " clientOrigin=" + a + " clientSize=" + client.Right + "x" + client.Bottom);
+            _visible = show; _last = bounds; _positioned = true;
         }
-    }
-    private void RestoreStyle()
-    {
-        if (!_hadClipChildren && MirrorWin32.IsWindow(_parent))
-            MirrorWin32.SetLong(_parent, MirrorWin32.Style, (nint)((long)MirrorWin32.GetLong(_parent, MirrorWin32.Style) & ~MirrorWin32.ClipChildren));
     }
     public void Dispose()
     {
         if (_disposed) return; _disposed = true; _keys.Dispose();
-        // Hide before destroying the clipping host. Only the owning MirrorProcess
-        // may terminate the child; never detach it into a visible desktop window.
-        MirrorWin32.ShowWindow(Container,0); MirrorWin32.DestroyWindow(Container); RestoreStyle();
+        // Never destroy or restyle the source HWND. Only MirrorProcess owns the
+        // renderer process; keep ownership until it exits.
+        if (MirrorWin32.Owned(_child,_childProcess)) MirrorWin32.ShowWindowAsync(_child,0);
     }
 }
