@@ -168,6 +168,7 @@ public static partial class Smoke
 		await ClickAction(targetAction);
 		await Until(() => !potionHolder.HasPotion && potionTarget.Entity.CurrentHp < potionHp, "spectator target uses real fire potion on selected enemy");
 		await CheckCombatAnimations();
+		await CheckBowlbugSkins();
 		await CheckEffects();
 		// Disposable fixtures reduce combat duration; every actual play/reward
 		// decision still goes through a real mouse click in the spectator panel.
@@ -197,7 +198,11 @@ public static partial class Smoke
 			{
 				await CheckRewardRetention((NCardRewardSelectionScreen)NOverlayStack.Instance.Peek()!);
 				int beforeDeck = player.Deck.Cards.Count;
-				await ClickAction(ControlActions.First(a => (string)Prop(a, "Kind") == "select" && (bool)Prop(a, "Enabled")));
+				var cards = (Control)ControlView.GetType().GetField("_cards", Instance)!.GetValue(ControlView)!;
+				Descendants(cards).OfType<Control>().First(c => c.MouseFilter == Control.MouseFilterEnum.Stop).EmitSignal(Control.SignalName.MouseEntered);
+				var preview = (Control)ControlView.GetType().GetField("_preview", Instance)!.GetValue(ControlView)!;
+				Descendants(preview).OfType<Control>().First(c => c.Name == "SpectatorEnlargedCardHitbox").EmitSignal(Control.SignalName.GuiInput, new InputEventMouseButton { ButtonIndex = MouseButton.Left, Pressed = true });
+				Check((bool)Prop(ControlView.GetType().GetField("_lastControlResult", Instance)!.GetValue(ControlView)!, "Accepted"), "enlarged battle reward hitbox submits the native card decision");
 				await Until(() => player.Deck.Cards.Count == beforeDeck + 1 && NOverlayStack.Instance.Peek() == loot, "battle reward card returns to original reward list");
 			}
 		}

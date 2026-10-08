@@ -146,11 +146,15 @@ internal sealed partial class LocalSpectatorSource
 		bool changed = state != _observedState || _eventDirty; _eventDirty = false; _observedState = state; return changed;
 	}
 
-	internal List<DrawingSnapshot>? CaptureMapDrawings()
+	internal MapMotionFrame? CaptureMapDrawings()
 	{
 		if (_previous?.Page != "map" || NMapScreen.Instance?.IsOpen != true) return null;
 		_drawingSamples.Clear(); _drawingCapture = true;
-		try { return CaptureDrawings(NMapScreen.Instance.Drawings); }
+		try
+        {
+            var map = NMapScreen.Instance.GetNode<Control>("TheMap");
+            return new MapMotionFrame { Session = _previous.Session, SourceId = _previous.SourceId, Key = map.GetInstanceId().ToString(), Transform = Transform(map.GetGlobalTransform()), Drawings = CaptureDrawings(NMapScreen.Instance.Drawings) };
+        }
 		finally { _drawingCapture = false; }
 	}
 }

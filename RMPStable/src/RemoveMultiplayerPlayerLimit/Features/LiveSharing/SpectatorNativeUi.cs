@@ -108,7 +108,7 @@ internal sealed partial class LocalSpectatorSource
 				bool Enabled() => Active(button) && SelectorActive(ui, button) && button.IsEnabled && Clickable(button) && (popup == null || Ready(popup)) &&
 					(button is not MegaCrit.Sts2.Core.Nodes.Events.NEventOptionButton option || !option.Option.IsLocked) &&
 					(button is not NMapPoint point || MapTravelable?.GetValue(point) is true && NMapScreen.Instance.Drawings.GetLocalDrawingMode() == DrawingMode.None && !NMapScreen.Instance.Drawings.IsLocalDrawing());
-				add(new() { Id = "native:" + button.GetInstanceId(), Kind = "native", Label = T("执行游戏内操作", "Activate game control"), Rect = Rect(ClickRect(button)) }, Enabled,
+				add(new() { Id = "native:" + button.GetInstanceId(), Kind = "native", Label = T("执行游戏内操作", "Activate game control"), MapAttached = button is NMapPoint, Rect = Rect(ClickRect(button)) }, Enabled,
 					_ => { button.ForceClick(); RouteNativeMapInput(_mapInputInPanel); return true; });
 			}
 			// Different scenes connect different handlers to holder.Pressed. Keep

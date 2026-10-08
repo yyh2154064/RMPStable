@@ -9,6 +9,10 @@ for i in range(1, len(parts), 2):
     props = re.findall(r'public ([\w<>\[\]?]+) (\w+) \{ get; set; \}', body)
     conditions = []
     for typ, prop in props:
+        # Particle state is applied every effect sample; it intentionally does
+        # not participate in the full-page revision comparison.
+        if typ == 'ParticleSnapshot?':
+            continue
         x, y = f'a.{prop}', f'b.{prop}'
         if '[]' in typ: expr = f'Array({x}, {y})'
         elif typ.startswith('List<'): expr = f'List({x}, {y}, Equal)'

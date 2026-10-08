@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
@@ -22,6 +22,7 @@ using MegaCrit.Sts2.Core.Commands;
 using MegaCrit.Sts2.Core.Nodes.Rooms;
 using MegaCrit.Sts2.Core.Nodes.Screens.CardSelection;
 using MegaCrit.Sts2.Core.Nodes.Screens;
+using MegaCrit.Sts2.Core.Nodes.Rewards;
 using MegaCrit.Sts2.Core.Nodes.Screens.Capstones;
 using MegaCrit.Sts2.Core.Nodes.Screens.Map;
 using MegaCrit.Sts2.Core.Nodes.Screens.Overlays;
@@ -183,6 +184,7 @@ internal sealed partial class LocalSpectatorSource : IDisposable
 					Name = creature.Name, Player = creature.IsPlayer || creature.IsPet,
 					Hp = creature.CurrentHp, MaxHp = creature.MaxHp, Block = creature.Block,
 					VisualScene = node.Visuals?.SceneFilePath ?? "",
+					Skin = CaptureSkin(node.Visuals), BodyMaterial = CaptureBodyMaterial(node.Visuals),
 					// An idle visual is sufficient for the prototype; no combat animator is created.
 					Animation = "idle_loop",
 					Transform = Transform(node.Visuals?.GetGlobalTransform() ?? node.GetGlobalTransform()),
@@ -306,6 +308,14 @@ internal sealed partial class LocalSpectatorSource : IDisposable
 		}
 		if (page == "event" && eventRoom?.IsVisibleInTree() == true) foreach (var option in Descendants<NEventOptionButton>(eventRoom).Where(n => n.IsVisibleInTree()))
 			snap.Hovers.Add(new HoverSnapshot { Rect = GlobalRect(option), Tips = CaptureTips(option.Option.HoverTips) });
+		if (page == "loot" && overlay is NRewardsScreen)
+			foreach (var button in Descendants<NRewardButton>(overlay).Where(Ready))
+			{
+				if (button.Reward == null) continue;
+				var tips = CaptureTips(button.Reward.HoverTips);
+				if (tips.Count > 0) snap.Hovers.Add(new HoverSnapshot { Rect = GlobalRect(button), Tips = tips });
+				yield return 0;
+			}
 		// Native relic inspection also lives outside NRun/overlay/capstone stacks.
 		if (NGame.Instance?.InspectCardScreen is Control cardInspect && cardInspect.IsVisibleInTree())
 		{
@@ -399,7 +409,8 @@ internal sealed partial class LocalSpectatorSource : IDisposable
 			if (viewport == null) continue;
 			var lines = new List<ArtSnapshot>();
 			foreach (Node child in viewport.GetChildren()) lines.AddRange(CaptureBackground(child));
-			result.Add(new DrawingSnapshot { Transform = Transform(surface.GetGlobalTransform()), Size = new[] { surface.Size.X, surface.Size.Y }, ViewportSize = new[] { viewport.Size.X, viewport.Size.Y }, Lines = lines });
+			result.Add(new DrawingSnapshot { Transform = Transform(_capturedTransforms.TryGetValue(drawings.GetParent().GetInstanceId().ToString(), out var capturedMap) && !_drawingCapture
+                    ? capturedMap * ((CanvasItem)drawings.GetParent()).GetGlobalTransform().AffineInverse() * surface.GetGlobalTransform() : surface.GetGlobalTransform()), Size = new[] { surface.Size.X, surface.Size.Y }, ViewportSize = new[] { viewport.Size.X, viewport.Size.Y }, Lines = lines });
 		}
 		return result;
 	}
@@ -489,8 +500,9 @@ internal sealed partial class LocalSpectatorSource : IDisposable
 					else if (art.Solid) color *= item.Get("color").AsColor();
 					else if (item is Line2D line) color *= line.DefaultColor;
 					else if (item is Polygon2D polygon) color *= polygon.Color;
-					art.Texture = Path(texture); art.Material = Path(item.Material);
-					if (item.Material is ShaderMaterial shader) { art.Shader = Path(shader.Shader); art.ShaderValues = CaptureShaderValues(shader); }
+					var material = item.GetClass() == "SpineSprite" ? new MegaSprite(item).GetNormalMaterial() : item.Material;
+					art.Texture = Path(texture); art.Material = Path(material);
+					if (material is ShaderMaterial shader) { art.Shader = Path(shader.Shader); art.ShaderValues = CaptureShaderValues(shader); }
 					art.Group = art.Texture.Length == 0 && art.Skeleton.Length == 0 && !art.Solid && art.Points == null;
 					art.Rect = Rect(rect);
 					art.Transform = new[] { transform.X.X, transform.X.Y, transform.Y.X, transform.Y.Y, transform.Origin.X, transform.Origin.Y };

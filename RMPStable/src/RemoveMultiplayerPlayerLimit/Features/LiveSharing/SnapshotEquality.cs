@@ -24,6 +24,7 @@ internal static class SnapshotEquality
 	internal static bool Equal(string a, string b) => a == b;
 	internal static bool Equal(SpectatorSnapshot? a, SpectatorSnapshot? b) => ReferenceEquals(a, b) ||
 		(a != null && b != null &&
+			a.MapDrawingMode == b.MapDrawingMode &&
 			a.Schema == b.Schema &&
 			Equal(a.Revisions, b.Revisions) &&
 			a.Session == b.Session &&
@@ -39,6 +40,9 @@ internal static class SnapshotEquality
 			a.Width == b.Width &&
 			a.Height == b.Height &&
 			List(a.Background, b.Background, Equal) &&
+			List(a.BackgroundLabels, b.BackgroundLabels, Equal) &&
+			List(a.ForegroundArt, b.ForegroundArt, Equal) &&
+			List(a.ForegroundLabels, b.ForegroundLabels, Equal) &&
 			List(a.Creatures, b.Creatures, Equal) &&
 			List(a.Cards, b.Cards, Equal) &&
 			List(a.Deck, b.Deck, Equal) &&
@@ -52,6 +56,7 @@ internal static class SnapshotEquality
 			List(a.Piles, b.Piles, Equal) &&
 			List(a.ModalArt, b.ModalArt, Equal) &&
 			List(a.ModalLabels, b.ModalLabels, Equal) &&
+			List(a.ModalCards, b.ModalCards, Equal) &&
 			Array(a.DeckButtonRect, b.DeckButtonRect) &&
 			List(a.UnderlayCards, b.UnderlayCards, Equal) &&
 			List(a.UnderlayItems, b.UnderlayItems, Equal) &&
@@ -173,6 +178,7 @@ internal static class SnapshotEquality
 			List(a.Targets, b.Targets, Equal));
 	internal static bool Equal(ControlActionSnapshot? a, ControlActionSnapshot? b) => ReferenceEquals(a, b) ||
 		(a != null && b != null &&
+			a.MapAttached == b.MapAttached &&
 			a.Id == b.Id &&
 			a.Kind == b.Kind &&
 			a.CardId == b.CardId &&
@@ -183,6 +189,7 @@ internal static class SnapshotEquality
 			List(a.TargetIds, b.TargetIds, Equal));
 	internal static bool Equal(ControlTargetSnapshot? a, ControlTargetSnapshot? b) => ReferenceEquals(a, b) ||
 		(a != null && b != null &&
+			a.Enemy == b.Enemy &&
 			a.Id == b.Id &&
 			Array(a.Rect, b.Rect));
 	internal static bool Equal(ItemSnapshot? a, ItemSnapshot? b) => ReferenceEquals(a, b) ||
@@ -205,6 +212,8 @@ internal static class SnapshotEquality
 			Array(a.IntentRect, b.IntentRect) &&
 			a.Name == b.Name &&
 			a.VisualScene == b.VisualScene &&
+			a.Skin == b.Skin &&
+			Equal(a.BodyMaterial, b.BodyMaterial) &&
 			a.Animation == b.Animation &&
 			a.Player == b.Player &&
 			a.Hp == b.Hp &&
@@ -246,9 +255,11 @@ internal static class SnapshotEquality
 			a.Antialiased == b.Antialiased &&
 			a.Solid == b.Solid &&
 			a.Skeleton == b.Skeleton &&
-			a.AttachmentClass == b.AttachmentClass && a.AttachmentName == b.AttachmentName &&
+			a.AttachmentClass == b.AttachmentClass &&
+			a.AttachmentName == b.AttachmentName &&
 			a.Animation == b.Animation &&
-			a.AnimationLoop == b.AnimationLoop && a.AnimationTime == b.AnimationTime &&
+			a.AnimationLoop == b.AnimationLoop &&
+			a.AnimationTime == b.AnimationTime &&
 			a.Texture == b.Texture &&
 			a.Material == b.Material &&
 			a.Shader == b.Shader &&

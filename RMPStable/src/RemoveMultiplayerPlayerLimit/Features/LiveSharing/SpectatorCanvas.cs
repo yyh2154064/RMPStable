@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using Godot;
@@ -21,6 +21,13 @@ internal sealed partial class SpectatorView
 		nodes.Clear();
 	}
 
+	private static Material? DrawingMaterial(CanvasItem drawing) => drawing.GetClass() == "SpineSprite"
+        ? new MegaCrit.Sts2.Core.Bindings.MegaSpine.MegaSprite(drawing).GetNormalMaterial() : drawing.Material;
+    private static void SetDrawingMaterial(CanvasItem drawing, Material? material)
+    {
+        if (drawing.GetClass() == "SpineSprite") new MegaCrit.Sts2.Core.Bindings.MegaSpine.MegaSprite(drawing).SetNormalMaterial(material);
+        else drawing.Material = material;
+    }
 	private Material? SnapshotMaterial(ArtSnapshot art)
 	{
 		if (Asset<Shader>(art.Shader) is not { } shader) return Asset<Material>(art.Material);
@@ -104,7 +111,7 @@ internal sealed partial class SpectatorView
 			else if (node.Drawing is NinePatchRect patch) patch.Texture = texture;
 			else if (node.Drawing is Polygon2D imagePolygon) imagePolygon.Texture = texture;
 		}
-		if (p.Material != a.Material || p.Shader != a.Shader) node.Drawing.Material = SnapshotMaterial(a);
+		if (p.Material != a.Material || p.Shader != a.Shader) SetDrawingMaterial(node.Drawing, SnapshotMaterial(a));
 		if (node.Holder.Transform != local) node.Holder.Transform = local;
 		if (!SnapshotEquality.Array(p.Tint, a.Tint)) node.Holder.Modulate = ColorOf(a.Tint);
 		if (p.Z != a.Z) node.Holder.ZIndex = a.Z;
@@ -117,7 +124,7 @@ internal sealed partial class SpectatorView
 			if (!SnapshotEquality.Array(p.Rect, a.Rect)) { control.Position = new Vector2(a.Rect[0], a.Rect[1]); control.Size = new Vector2(a.Rect[2], a.Rect[3]); }
 			if (p.ClipContents != a.ClipContents) control.ClipContents = a.ClipContents;
 		}
-		if (node.Drawing.Material is ShaderMaterial shader && !SnapshotEquality.List(p.ShaderValues, a.ShaderValues, SnapshotEquality.Equal)) ApplyUniforms(shader, a.ShaderValues);
+		if (DrawingMaterial(node.Drawing) is ShaderMaterial shader && !SnapshotEquality.List(p.ShaderValues, a.ShaderValues, SnapshotEquality.Equal)) ApplyUniforms(shader, a.ShaderValues);
 		if (node.Drawing is Line2D line)
 		{
 			if (a.Points != null && !SnapshotEquality.Array(p.Points, a.Points)) line.Points = Points(a.Points);
@@ -151,15 +158,45 @@ internal sealed partial class SpectatorView
 			_drawingSurfaces[i] = (retained.Holder, retained.Viewport, retained.Surface, drawing.Lines);
 		}
 	}
-	internal void UpdateMapDrawings(List<DrawingSnapshot> drawings)
-	{ if (_snapshot?.Page == "map") UpdateDrawings(drawings); }
-	private void DrawHovers(List<HoverSnapshot> hovers)
+	private MapMotionFrame? _latestMapMotion;
+    internal void UpdateMapDrawings(MapMotionFrame frame)
+    {
+        if (_snapshot?.Page != "map" || _snapshot.Session != frame.Session || _snapshot.SourceId != frame.SourceId) return;
+        _latestMapMotion = frame; ApplyMapMotion();
+    }
+    private void ApplyMapMotion()
+    {
+        var frame = _latestMapMotion;
+        if (frame == null || _snapshot?.Page != "map" || _snapshot.Session != frame.Session || _snapshot.SourceId != frame.SourceId ||
+            !_retainedArt.TryGetValue(_screenArt.GetInstanceId(), out var layer) || !layer.Index.TryGetValue(frame.Key, out var node)) return;
+        var parent = layer.Index.TryGetValue(node.Snapshot.Parent, out var ancestor) ? Matrix(ancestor.Snapshot.Transform) * new Transform2D(0, new Vector2(ancestor.Snapshot.Rect[0], ancestor.Snapshot.Rect[1])) : Transform2D.Identity;
+        node.Holder.Transform = parent.AffineInverse() * Matrix(frame.Transform);
+        UpdateDrawings(frame.Drawings);
+        var old = Matrix(node.Snapshot.Transform);
+        var delta = Matrix(frame.Transform) * old.AffineInverse();
+        foreach (var action in _snapshot.Control.Actions.Where(a => a.MapAttached))
+            if (_actionButtons.TryGetValue(action.Id, out var button)) button.Position = (delta * Rectangle(action.Rect).Position) * _page.Scale;
+    }
+	private HoverSnapshot? _activeScreenHover;
+	private void ProcessScreenHover(Vector2 point)
 	{
-		foreach (var hover in hovers.Where(h => h.Tips.Count > 0))
-		{
-			var hitbox = Area(_screenHovers, Rectangle(hover.Rect).Position, Rectangle(hover.Rect).Size); hitbox.MouseFilter = Control.MouseFilterEnum.Pass;
-			hitbox.MouseEntered += () => { if (_inspectIndex >= 0) return; Clear(_preview); var rect = hitbox.GetGlobalRect(); DrawTips(_preview, hover.Tips, new Vector2(Math.Max(20, rect.Position.X - 380), Math.Clamp(rect.Position.Y, 80, 600))); };
-			hitbox.MouseExited += () => { if (_inspectIndex < 0) Clear(_preview); };
-		}
+		// Hit-test snapshot bounds directly: command buttons sit above the page
+		// in control mode, so their GUI signals cannot be the sole hover source.
+		var hover = _snapshot != null && !_showDeck && BrowsePile.Length == 0 &&
+			_inspectIndex < 0 && _relicIndex < 0 && _dragCard == null && !HasCardPreview && _snapshot.ModalArt.Count == 0
+			? _snapshot.Hovers.LastOrDefault(h => h.Tips.Count > 0 && Rectangle(h.Rect).HasPoint(point / _page.Scale)) : null;
+		if (SnapshotEquality.Equal(hover, _activeScreenHover) && (hover == null || _preview.GetChildCount() > 0))
+		{ _activeScreenHover = hover; return; }
+		bool hadHover = _activeScreenHover != null; _activeScreenHover = hover;
+		if (hover == null) { if (hadHover && !HasCardPreview) Clear(_preview); return; }
+		Clear(_preview);
+		var rect = Rectangle(hover.Rect); rect.Position *= _page.Scale; rect.Size *= _page.Scale;
+		float y = Math.Clamp(rect.Position.Y, 80, 600);
+		// Native left-aligned reward tips put text on the left and card previews
+		// on the right; both can occur in the same linked reward.
+		var text = hover.Tips.Where(t => t.Card == null).ToList();
+		var cards = hover.Tips.Where(t => t.Card != null).ToList();
+		if (text.Count > 0) DrawTips(_preview, text, new Vector2(Math.Clamp(rect.Position.X - 380, 20, 1540), y));
+		if (cards.Count > 0) DrawTips(_preview, cards, new Vector2(Math.Clamp(rect.End.X, 20, 1600), y));
 	}
 }

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Diagnostics;
 using System.Reflection;
 using System.Runtime.CompilerServices;
@@ -10,7 +10,7 @@ using RemoveMultiplayerPlayerLimit.Infrastructure;
 [assembly: AssemblyCompany("RMP Stable Contributors")]
 [assembly: AssemblyConfiguration("Release")]
 [assembly: AssemblyFileVersion("0.3.9.0")]
-[assembly: AssemblyInformationalVersion("0.3.9-liveSharing.11")]
+[assembly: AssemblyInformationalVersion("0.3.9-liveSharing.13")]
 [assembly: AssemblyProduct("RMP Stable")]
 [assembly: AssemblyTitle("RMP Stable")]
 [assembly: AssemblyHasScripts(new Type[] { typeof(SceneRegistry) })]

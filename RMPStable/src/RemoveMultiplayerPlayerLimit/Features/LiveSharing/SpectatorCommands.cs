@@ -107,6 +107,12 @@ internal sealed partial class LocalSpectatorSource
 		var bindings = new Dictionary<string, CommandBinding>();
 		void Add(ControlActionSnapshot action, Func<bool> available, Func<string, bool> execute)
 		{
+			if (action.MapAttached && NMapScreen.Instance?.GetNodeOrNull<Control>("TheMap") is { } map &&
+				_capturedTransforms.TryGetValue(map.GetInstanceId().ToString(), out var capturedMap))
+			{
+				var r = action.Rect;
+				action.Rect = Rect((capturedMap * map.GetGlobalTransform().AffineInverse()) * new Rect2(r[0], r[1], r[2], r[3]));
+			}
 			action.Enabled = available(); control.Actions.Add(action); bindings[action.Id] = new(available, execute);
 		}
 		if (snapshot.Page == "combat" && NCombatRoom.Instance is { } combat && player.PlayerCombatState is { } state)
@@ -125,7 +131,7 @@ internal sealed partial class LocalSpectatorSource
 			else
 			{
 			var creatures = combat.CreatureNodes.Where(n => Ready(n) && n.Entity.IsAlive).ToArray();
-			foreach (var node in creatures) control.Targets.Add(new() { Id = "creature:" + node.GetInstanceId(), Rect = GlobalRect(node.Hitbox) });
+			foreach (var node in creatures) control.Targets.Add(new() { Id = "creature:" + node.GetInstanceId(), Enemy = node.Entity.IsEnemy, Rect = GlobalRect(node.Hitbox) });
 			foreach (var card in state.Hand.Cards.ToArray())
 			{
 				bool targeted = card.TargetType is TargetType.AnyEnemy or TargetType.AnyAlly;

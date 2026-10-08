@@ -30,6 +30,11 @@ public static partial class Smoke
 		var cardsRoot = (Control)ControlView.GetType().GetField("_cards", Instance)!.GetValue(ControlView)!;
 		var hitbox = Descendants(cardsRoot).OfType<Control>().First(c => c.MouseFilter == Control.MouseFilterEnum.Stop);
 		hitbox.EmitSignal(Control.SignalName.MouseEntered);
+		var enlargedRect = (Rect2)ControlView.GetType().GetField("_hoverCardRect", Instance)!.GetValue(ControlView)!;
+		var extended = enlargedRect.Position + new Vector2(8, 8);
+		Check(!hitbox.GetGlobalRect().HasPoint(extended), "reward fixture enters enlarged-only hover area");
+		await Pointer(SpectatorPoint(extended));
+		GD.Print("[LiveSharingSmoke] enlarged hover expected=" + extended + " actual=" + ((SubViewport)ControlView.GetType().GetField("_viewport", Instance)!.GetValue(ControlView)!).GetMousePosition() + " slot=" + hitbox.IsInsideTree() + " page=" + Prop(CurrentSnapshot, "Page"));
 		var preview = (Control)ControlView.GetType().GetField("_preview", Instance)!.GetValue(ControlView)!;
 		var previewCard = Descendants(preview).OfType<NCard>().First();
 		ulong[] ids = Descendants(cardsRoot).OfType<NCard>().Select(c => c.GetInstanceId()).ToArray();
@@ -41,6 +46,19 @@ public static partial class Smoke
 			Check(GodotObject.IsInstanceValid(previewCard) && previewCard.IsInsideTree() && !previewCard.IsQueuedForDeletion(), "hover preview survives reward snapshot refresh");
 		}
 		hitbox.EmitSignal(Control.SignalName.MouseExited);
+		ControlView.GetType().GetMethod("ProcessCardHover", Instance)!.Invoke(ControlView, new object[] { extended });
+		Check(GodotObject.IsInstanceValid(previewCard) && !previewCard.IsQueuedForDeletion(), "leaving original reward hitbox inside enlarged card retains preview");
+		await Pointer(SpectatorPoint(Vector2.One * 20));
+		Check(preview.GetChildCount() == 0, "leaving both reward hover regions dismisses preview");
+		var hud = (Control)ControlView.GetType().GetField("_hudHovers", Instance)!.GetValue(ControlView)!;
+		var tip = Descendants(hud).OfType<Control>().First(c => c.MouseFilter == Control.MouseFilterEnum.Stop);
+		tip.EmitSignal(Control.SignalName.MouseEntered); await Frames(2);
+		Check(preview.GetChildCount() > 0, "HUD tooltip survives transfer of preview ownership from a card");
+		hitbox.EmitSignal(Control.SignalName.MouseEntered);
+		var newCard = Descendants(preview).OfType<NCard>().First();
+		tip.EmitSignal(Control.SignalName.MouseExited);
+		Check(GodotObject.IsInstanceValid(newCard) && !newCard.IsQueuedForDeletion(), "previous HUD tip exit cannot delete newly opened card preview");
+		ControlView.GetType().GetMethod("ProcessCardHover", Instance)!.Invoke(ControlView, new object[] { Vector2.One * 20 });
 	}
 	private static async Task CheckCombatAnimations()
 	{
@@ -54,6 +72,7 @@ public static partial class Smoke
 		ControlView.GetType().GetMethod("HandleControlCard", Instance)!.Invoke(ControlView, new object[] { slot, SnapshotCard((string)Prop(play, "CardId")), new InputEventMouseButton { ButtonIndex = MouseButton.Left, Pressed = true } });
 		var layer = (Control)ControlView.GetType().GetField("_controlLayer", Instance)!.GetValue(ControlView)!;
 		Check(ControlView.GetType().GetField("_dragCard", Instance)!.GetValue(ControlView) != null && !layer.GetChildren().OfType<Panel>().Any(), "targeted card drag creates no visible target collision panels");
+		CheckNativeDragArrow();
 		ControlView.GetType().GetMethod("CancelControlDrag", Instance)!.Invoke(ControlView, null);
 		foreach (string trigger in new[] { "Attack", "Hit", "PowerUp", "Cast" })
 		{
@@ -107,6 +126,7 @@ public static partial class Smoke
 		await RefreshControl();
 		Check((bool)ControlView.GetType().GetField("_controlEnabled", Instance)!.GetValue(ControlView)! && recoveryEpoch != (long)ControlView.GetType().GetField("_controlEpoch", Instance)!.GetValue(ControlView)!, "valid snapshot restores remembered mode with a fresh epoch after transient failure");
 		var map = NMapScreen.Instance!;
+		await CheckMapMotionAndBoss(map);
 		_controller.GetMethod("RouteMapInput", Static)!.Invoke(null, new object[] { true });
 		var before = map.Get("_targetDragPos").AsVector2();
 		string scroll = (string)Prop(ControlActions.First(a => ((string)Prop(a, "Id")).StartsWith("scroll-map:")), "Id");

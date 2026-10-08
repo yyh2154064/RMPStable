@@ -1,7 +1,7 @@
-{
+﻿{
   "id": "RMPStable",
   "name": "RMP Stable - Local Spectator Control Test",
-  "version": "0.3.9-liveSharing.11",
+  "version": "0.3.9-liveSharing.13",
   "author": "灰灰神教！",
   "description": "Experimental singleplayer spectator and native local control (F8), with 16-player multiplayer and Quick SL for STS2 v0.107.1 and v0.111.0. Development branch: codex/live-sharing-control; friend transport is not implemented.",
   "dependencies": [],

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using Godot;
@@ -42,7 +42,7 @@ internal sealed partial class SpectatorView : IDisposable
 	private readonly Control _combatHudText;
 	private readonly Control _screenArt;
 	private readonly Control _screenText;
-	private readonly Control _screenHovers;
+
 	private readonly Control _screenDrawings;
 	private readonly ColorRect _header;
 	private readonly Label _title;
@@ -86,7 +86,6 @@ internal sealed partial class SpectatorView : IDisposable
 		_screenArt = Area(_screen, Vector2.Zero, _page.Size);
 		_screenDrawings = Area(_screen, Vector2.Zero, _page.Size);
 		_screenText = Area(_screen, Vector2.Zero, _page.Size);
-		_screenHovers = Area(_screen, Vector2.Zero, _page.Size);
 		_cards = Area(_page, Vector2.Zero, _page.Size);
 		_hud = Area(_page, Vector2.Zero, _page.Size);
 		_foreground = Area(_page, Vector2.Zero, _page.Size); _foreground.ZIndex = 100;
@@ -122,9 +121,9 @@ internal sealed partial class SpectatorView : IDisposable
 		bool changedSession = _revisionSession != revisionSession;
 		bool recovering = _captureError.Length > 0;
 		if (changedSession)
-		{ _revisionSession = revisionSession; SetControlEnabled(false); CloseInspect(); _showDeck = false; BrowsePile = ""; _browseKey = ""; _hudKey = _roomKey = _actorKey = _itemKey = _offerKey = _cardKey = _screenKey = ""; }
+		{ _latestMapMotion = null; _revisionSession = revisionSession; SetControlEnabled(false); CloseInspect(); _showDeck = false; BrowsePile = ""; _browseKey = ""; _hudKey = _roomKey = _actorKey = _itemKey = _offerKey = _cardKey = _screenKey = ""; }
 		UpdateSources(snapshot.Sources, snapshot.SourceId);
-		if (_sourcePage != snapshot.Page) { CloseInspect(); _showDeck = false; BrowsePile = ""; _browseKey = ""; _cardKey = ""; _sourcePage = snapshot.Page; }
+		if (_sourcePage != snapshot.Page) { CloseInspect(); _showDeck = false; BrowsePile = ""; _browseKey = ""; _cardKey = ""; _sourcePage = snapshot.Page; _latestMapMotion = null; }
 		_snapshot = snapshot;
 		if ((changedSession || recovering) && SpectatorPreferences.Current.ControlMode) SetControlEnabled(true);
 		UpdatePointer(snapshot.Pointer);
@@ -181,9 +180,10 @@ internal sealed partial class SpectatorView : IDisposable
 		bool screenRebuilt = RetainArt(_screenArt, snapshot.PageArt);
 		RetainArt(_combatHud, snapshot.CombatHudArt);
 		UpdateDrawings(snapshot.Drawings);
+		ApplyMapMotion();
 		string screenKey = snapshot.Revisions.Screen.ToString();
 		if (_screenKey != screenKey || screenRebuilt)
-		{ _screenKey = screenKey; RetainLabels(_screenText, snapshot.PageLabels, nativeOrder: true); RetainLabels(_combatHudText, snapshot.CombatHudLabels); Clear(_screenHovers); DrawHovers(snapshot.Hovers); }
+		{ _screenKey = screenKey; RetainLabels(_screenText, snapshot.PageLabels, nativeOrder: true); RetainLabels(_combatHudText, snapshot.CombatHudLabels); }
 		string itemKey = snapshot.Revisions.Inventory.ToString();
 		if (_itemKey != itemKey)
 		{
@@ -222,7 +222,7 @@ internal sealed partial class SpectatorView : IDisposable
 		_snapshot = null; _deck.Disabled = true;
 		ClearMounted(_mountedCards); ClearMounted(_mountedLabels);
 		Clear(_preview); Clear(_cards); Clear(_actorSprites); Clear(_actorState); Clear(_offers); Clear(_inventory); Clear(_background); Clear(_hud); Clear(_underlay); Clear(_hudHovers); Clear(_pileTargets); Clear(_browse); Clear(_modal); BrowsePile = ""; _browseKey = "";
-		foreach (var pane in new[] { _screenArt, _screenDrawings, _screenText, _screenHovers, _combatHud, _combatHudText }) Clear(pane);
+		foreach (var pane in new[] { _screenArt, _screenDrawings, _screenText, _combatHud, _combatHudText }) Clear(pane);
 		_retainedArt.Clear(); _retainedLabels.Clear(); _creatureSprites.Clear(); _creatureStates.Clear(); _drawingSurfaces.Clear(); CloseInspect();
 		_interactionHovers = null; _interactionRelics = null; _interactionPiles = null;
 		_handNodes.Clear(); _underlayHandNodes.Clear();
@@ -279,19 +279,39 @@ internal sealed partial class SpectatorView : IDisposable
 			else if (card.Price.HasValue) Text(holder, card.Sold ? T("已售出", "Sold out") : $"{card.Price} G", new Rect2(-150, 225, 300, 55), 44, HorizontalAlignment.Center);
 		}
 	}
+	private Control? _hoverCardSlot;
+    private Rect2 _hoverCardRect;
+    private bool HasCardPreview => _hoverCardSlot != null && _preview.GetChildCount() > 0;
+    private void ProcessCardHover(Vector2 point)
+    {
+        if (_hoverCardSlot == null) return;
+        if (!GodotObject.IsInstanceValid(_hoverCardSlot) || !_hoverCardSlot.IsInsideTree() || _preview.GetChildCount() == 0 ||
+            !_hoverCardRect.HasPoint(point) && !_hoverCardSlot.GetGlobalRect().HasPoint(point))
+        { _hoverCardSlot = null; if (_inspectIndex < 0) Clear(_preview); }
+    }
 	private void Hover(Control slot, CardSnapshot card, List<CardSnapshot> cards, int? index = null, bool upgraded = false)
 	{
 		slot.MouseEntered += () =>
 		{
-			if (_inspectIndex >= 0 || _relicIndex >= 0) return;
-			Clear(_preview);
+			if (_inspectIndex >= 0 || _relicIndex >= 0 || _dragCard != null) return;
+            if (_hoverCardSlot != null && _hoverCardSlot != slot && _preview.GetChildCount() > 0 && _hoverCardRect.HasPoint(_viewerPointer ?? _viewport.GetMousePosition())) return;
+			_activeScreenHover = null; Clear(_preview);
 			var center = slot.GetGlobalRect().GetCenter();
 			bool hand = !_showDeck && BrowsePile.Length == 0 && _snapshot?.Page == "combat";
 			var origin = new Vector2(Math.Clamp(center.X - 180, 24, 1536), hand ? 1080 - 422 * 1.2f : Math.Clamp(center.Y - 254, 150, 520));
 			DrawCard(_preview, card, origin, 1.2f);
+            _hoverCardSlot = slot; _hoverCardRect = new Rect2(origin, new Vector2(300, 422) * 1.2f);
+            var enlarged = Area(_preview, origin, _hoverCardRect.Size); enlarged.Name = "SpectatorEnlargedCardHitbox";
+            enlarged.MouseFilter = Control.MouseFilterEnum.Stop;
+            enlarged.GuiInput += input =>
+            {
+                if (HandleControlCard(enlarged, card, input)) return;
+                if (input is InputEventMouseButton { Pressed: true } click && (click.ButtonIndex == MouseButton.Left || _controlEnabled && click.ButtonIndex == MouseButton.Right))
+                { OpenInspect(cards, index ?? cards.IndexOf(card), upgraded); enlarged.AcceptEvent(); }
+            };
 			DrawTips(_preview, card.Tips, new Vector2(origin.X > 1160 ? origin.X - 380 : origin.X + 370, origin.Y));
 		};
-		slot.MouseExited += () => { if (_inspectIndex < 0) Clear(_preview); };
+		// Exit is resolved once per frame against both the small and enlarged regions.
 		slot.GuiInput += input =>
 		{
 			if (HandleControlCard(slot, card, input)) return;
@@ -383,7 +403,8 @@ internal sealed partial class SpectatorView : IDisposable
 				StretchMode = (TextureRect.StretchModeEnum)art.Stretch,
 				FlipH = art.FlipH, FlipV = art.FlipV,
 			};
-			drawing.SelfModulate = ColorOf(art.SelfTint); drawing.Material = SnapshotMaterial(art);
+			drawing.SelfModulate = ColorOf(art.SelfTint);
+			SetDrawingMaterial(drawing, SnapshotMaterial(art));
 			drawing.ClipChildren = (CanvasItem.ClipChildrenMode)art.ClipChildren;
 			if (drawing is Control control) { control.Position = new Vector2(r[0], r[1]); control.ClipContents = art.ClipContents; control.MouseFilter = Control.MouseFilterEnum.Ignore; }
 			if (!ReferenceEquals(holder, drawing)) holder.AddChild(drawing);
@@ -412,7 +433,11 @@ internal sealed partial class SpectatorView : IDisposable
 					holder.AddChild(visuals);
 					visuals.Position = Vector2.Zero;
 					visuals.Scale = Vector2.One;
-					if (visuals.HasSpineAnimation) visuals.SpineAnimation.SetAnimation(c.Animation);
+					if (visuals.HasSpineAnimation)
+                    {
+                        ApplyCreatureAppearance(visuals, c);
+                        if (visuals.SpineBody!.HasAnimation(c.Animation)) visuals.SpineAnimation.SetAnimation(c.Animation);
+                    }
 					DisableInput(visuals);
 				}
 				catch (Exception ex) { visuals?.QueueFree(); Report(c.VisualScene, ex.Message); }

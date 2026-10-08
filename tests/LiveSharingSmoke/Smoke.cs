@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Linq;
 using System.Reflection;
@@ -391,6 +391,10 @@ public static partial class Smoke
 			Check(DisplayServer.WindowIsFocused() != initialFocus || Engine.MaxFps == foregroundFps, "opening embedded panel preserves FPS limit when window focus is unchanged");
 			if (Environment.GetEnvironmentVariable("RMP_SMOKE_CONTROL") == "1")
 			{
+				if (Environment.GetEnvironmentVariable("RMP_SMOKE_REWARD_HOVERS_ONLY") == "1")
+				{ await CheckRewardHovers(state); GD.Print("[LiveSharingSmoke] REWARD HOVERS ALL PASSED"); Game.GetTree().Quit(); return; }
+				if (Environment.GetEnvironmentVariable("RMP_SMOKE_FEEDBACK_ONLY") == "1")
+				{ await CheckHoverFixture(state); GD.Print("[LiveSharingSmoke] FEEDBACK ALL PASSED"); Game.GetTree().Quit(); return; }
 				Check(!NMerchantRoom.Instance!.Inventory.IsOpen, "first shop entry is tested before ever clicking merchant");
 				await CheckMerchantPortraits(); await ToggleControl(true);
 				await ClickNative(NMerchantRoom.Instance.MerchantButton); await Seconds(0.8); await ToggleControl(false);
@@ -401,7 +405,7 @@ public static partial class Smoke
 				await CheckShopControls(state);
 				if (DisplayServer.GetName() != "headless") await CheckLocalControls(state);
 				else GD.Print("[LiveSharingSmoke] Headless mode validates commands and native state; visual pointer regressions require a later graphical run.");
-				await CheckWorkflowControls(state); GD.Print("[LiveSharingSmoke] CONTROL ALL PASSED"); Game.GetTree().Quit(); return;
+				await CheckWorkflowControls(state); await CheckRewardHovers(state); GD.Print("[LiveSharingSmoke] CONTROL ALL PASSED"); Game.GetTree().Quit(); return;
 			}
 			await CheckSourceSelector(state);
 			await CheckPanelInput(state.Players[0]);

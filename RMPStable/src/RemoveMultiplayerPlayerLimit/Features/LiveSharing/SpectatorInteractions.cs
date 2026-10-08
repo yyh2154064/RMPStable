@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
@@ -190,7 +190,7 @@ internal sealed partial class SpectatorView
 		flow.AddThemeConstantOverride("separation", 5); parent.AddChild(flow);
 		foreach (var tip in tips)
 		{
-			if (tip.Card != null) { var slot = new Control { CustomMinimumSize = new Vector2(300, 422) }; flow.AddChild(slot); DrawCard(slot, tip.Card, Vector2.Zero, 1); continue; }
+			if (tip.Card != null) { var slot = new Control { CustomMinimumSize = new Vector2(300, 422), MouseFilter = Control.MouseFilterEnum.Ignore }; flow.AddChild(slot); DrawCard(slot, tip.Card, Vector2.Zero, 1); continue; }
 			var panel = DecorativeScene("res://scenes/ui/hover_tip.tscn", flow, new Vector2(360, 0));
 			if (panel == null) continue;
 			SetLabel(panel, "%Title", tip.Title); SetLabel(panel, "%Description", tip.Description);
@@ -204,7 +204,7 @@ internal sealed partial class SpectatorView
 	private void OpenInspect(List<CardSnapshot> cards, int index, bool upgraded = false)
 	{ if (index < 0 || index >= cards.Count) return; _detailCards = cards.ToList(); _inspectIndex = index; _inspectAllUpgraded = upgraded; _inspectUpgraded = upgraded || cards[index].Upgraded; DrawInspect(); }
 	private bool _inspectAllUpgraded;
-	private void CloseInspect() { _inspectIndex = _relicIndex = -1; _detailCards.Clear(); Clear(_inspect); Clear(_preview); }
+	private void CloseInspect() { _activeScreenHover = null; _hoverCardSlot = null; _inspectIndex = _relicIndex = -1; _detailCards.Clear(); Clear(_inspect); Clear(_preview); }
 	private void NavigateInspect(int direction)
 	{ int next = _inspectIndex + direction; if (next < 0 || next >= _detailCards.Count) return; _inspectIndex = next; _inspectUpgraded = _inspectAllUpgraded || _detailCards[next].Upgraded; DrawInspect(); }
 	private void DrawInspect()

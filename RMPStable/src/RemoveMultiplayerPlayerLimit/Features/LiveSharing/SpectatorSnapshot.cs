@@ -145,6 +145,7 @@ internal sealed class ControlSnapshot
 
 internal sealed class ControlActionSnapshot
 {
+	public bool MapAttached { get; set; }
 	public string Id { get; set; } = "";
 	public string Kind { get; set; } = "";
 	public string CardId { get; set; } = "";
@@ -157,6 +158,7 @@ internal sealed class ControlActionSnapshot
 
 internal sealed class ControlTargetSnapshot
 {
+	public bool Enemy { get; set; }
 	public string Id { get; set; } = "";
 	public float[] Rect { get; set; } = { 0, 0, 0, 0 };
 }
@@ -183,6 +185,8 @@ internal sealed class CreatureSnapshot
 	public float[] IntentRect { get; set; } = { 0, 0, 200, 60 };
 	public string Name { get; set; } = "";
 	public string VisualScene { get; set; } = "";
+	public string Skin { get; set; } = "";
+	public ArtSnapshot BodyMaterial { get; set; } = new();
 	public string Animation { get; set; } = "";
 	public bool Player { get; set; }
 	public int Hp { get; set; }

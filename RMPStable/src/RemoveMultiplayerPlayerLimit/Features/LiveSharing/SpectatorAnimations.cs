@@ -38,6 +38,20 @@ internal sealed partial class LocalSpectatorSource
 	private readonly Dictionary<ulong, (MegaSprite Sprite, Callable Started)> _animationSubscriptions = new();
 	private readonly Dictionary<string, long> _animationGenerations = new();
 	private long _animationGeneration;
+	private static string CaptureSkin(NCreatureVisuals? visuals)
+    {
+        var skeleton = visuals?.SpineBody?.GetSkeleton()?.BoundObject;
+        if (skeleton?.HasMethod("get_skin") != true) return "";
+        var skin = skeleton.Call("get_skin").AsGodotObject();
+        return skin?.HasMethod("get_name") == true ? skin.Call("get_name").AsString() : "";
+    }
+    private ArtSnapshot CaptureBodyMaterial(NCreatureVisuals? visuals)
+    {
+        var material = visuals?.SpineBody?.GetNormalMaterial();
+        var result = new ArtSnapshot { Material = Path(material) };
+        if (material is ShaderMaterial shader) { result.Shader = Path(shader.Shader); result.ShaderValues = CaptureShaderValues(shader); }
+        return result;
+    }
 	private void UnbindAnimations()
 	{
 		foreach (var entry in _animationSubscriptions.Values)
@@ -90,6 +104,14 @@ internal sealed partial class LocalSpectatorSource
 }
 internal sealed partial class SpectatorView
 {
+	private void ApplyCreatureAppearance(NCreatureVisuals visuals, CreatureSnapshot snapshot)
+    {
+        var spine = visuals.SpineBody!;
+        var skeleton = spine.GetSkeleton();
+        if (snapshot.Skin.Length > 0 && skeleton?.GetData().FindSkin(snapshot.Skin) is { } skin)
+        { skeleton.SetSkin(skin); skeleton.SetSlotsToSetupPose(); }
+        spine.SetNormalMaterial(SnapshotMaterial(snapshot.BodyMaterial));
+    }
 	private readonly Dictionary<string, string> _motionTrackKeys = new();
 	private AnimationFrame? _latestMotion;
 	internal void UpdateAnimations(AnimationFrame frame)

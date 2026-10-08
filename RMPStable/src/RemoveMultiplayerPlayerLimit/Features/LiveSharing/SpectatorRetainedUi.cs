@@ -70,7 +70,9 @@ internal sealed partial class SpectatorView
 			var c = creatures[i]; string key = CreatureKey(c, i); live.Add(key);
 			if (_creatureSprites.TryGetValue(key, out var old) && old.Snapshot.VisualScene == c.VisualScene)
 			{
-				if (_latestMotion?.Creatures.Any(m => m.EntityKey == key) != true && !SnapshotEquality.Array(old.Snapshot.Transform, c.Transform)) old.Holder.Transform = Matrix(c.Transform);
+				if (old.Holder.GetChildOrNull<Node2D>(0)?.GetChildOrNull<MegaCrit.Sts2.Core.Nodes.Combat.NCreatureVisuals>(0) is { HasSpineAnimation: true } visuals &&
+                    (old.Snapshot.Skin != c.Skin || !SnapshotEquality.Equal(old.Snapshot.BodyMaterial, c.BodyMaterial))) ApplyCreatureAppearance(visuals, c);
+                if (_latestMotion?.Creatures.Any(m => m.EntityKey == key) != true && !SnapshotEquality.Array(old.Snapshot.Transform, c.Transform)) old.Holder.Transform = Matrix(c.Transform);
 				_creatureSprites[key] = (old.Holder, c); continue;
 			}
 			if (old.Holder != null) { _actorSprites.RemoveChild(old.Holder); old.Holder.QueueFree(); }

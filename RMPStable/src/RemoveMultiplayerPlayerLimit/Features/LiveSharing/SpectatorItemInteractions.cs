@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using Godot;
 
@@ -24,10 +24,10 @@ internal sealed partial class SpectatorView
 		hitbox.MouseEntered += () =>
 		{
 			if (_inspectIndex >= 0 || _relicIndex >= 0) return;
-			Clear(_preview); var target = hitbox.GetGlobalRect();
+			_activeScreenHover = null; _hoverCardSlot = null; Clear(_preview); var target = hitbox.GetGlobalRect();
 			DrawTips(_preview, tips, new Vector2(Math.Clamp(target.Position.X, 20, 1540), Math.Clamp(target.End.Y + 20, 80, 600)));
 		};
-		hitbox.MouseExited += () => { if (_inspectIndex < 0 && _relicIndex < 0) Clear(_preview); };
+		hitbox.MouseExited += () => { if (_inspectIndex < 0 && _relicIndex < 0 && !HasCardPreview) Clear(_preview); };
 		if (click != null) hitbox.GuiInput += input => { if (input is InputEventMouseButton { ButtonIndex: MouseButton.Left, Pressed: true }) { click(); hitbox.AcceptEvent(); } };
 	}
 	private void DrawHudInteractions(SpectatorSnapshot snapshot)
