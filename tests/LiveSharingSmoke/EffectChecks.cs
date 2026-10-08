@@ -53,22 +53,30 @@ public static partial class Smoke
 		var timing = Stopwatch.StartNew();
 		for (int i = 0; i < 12; i++) EffectRoundTrip();
 		timing.Stop(); GD.Print("[LiveSharingSmoke] VFX serialized capture/apply mean ms=" + (timing.Elapsed.TotalMilliseconds / 12).ToString("F3"));
-		Check(renderedGpu.GetInstanceId() == retainedId && renderedGpu.IsInsideTree(), "60 Hz effect refresh retains particle simulation rather than restarting every sample");
+		Check(renderedGpu.GetInstanceId() == retainedId && renderedGpu.IsInsideTree(), "120 Hz effect refresh retains particle simulation rather than restarting every sample");
 		cpu.Emitting = false; cpu.SpeedScale = 0.5f; cpu.Position = new Vector2(840, 520); EffectRoundTrip();
 		var page = (Control)ControlView.GetType().GetField("_page", Instance)!.GetValue(ControlView)!;
 		Check(!renderedCpu.Emitting && renderedCpu.SpeedScale == cpu.SpeedScale && (page.GetGlobalTransform().AffineInverse() * renderedCpu.GlobalPosition).DistanceTo(cpu.GlobalPosition) < 0.01, "emission stop, speed and moving emitter use original viewport coordinates after panel scaling");
-		Check((double)_controller.GetField("MotionInterval", Static)!.GetRawConstantValue()! == 1d / 60, "motion channel targets 60 updates per second");
+		Check((double)_controller.GetField("MotionInterval", Static)!.GetRawConstantValue()! == 1d / 120, "motion channel targets 120 updates per second");
 		if (DisplayServer.GetName() == "headless")
 		{
 			int previous = Engine.MaxFps;
 			try
 			{
-				Engine.MaxFps = 60; long samples = (long)Field("_motionSamples")!; var clock = Stopwatch.StartNew();
+				Engine.MaxFps = 120;
+				// Allow the limiter and delta smoothing to settle after 30 FPS.
+				for (int i = 0; i < 30; i++) await Game.ToSignal(Game.GetTree(), SceneTree.SignalName.ProcessFrame);
+				long samples = (long)Field("_motionSamples")!; ulong frames = Engine.GetProcessFrames(); var clock = Stopwatch.StartNew();
 				double capture = 0, apply = 0;
-				for (int i = 0; i < 120; i++) { await Game.ToSignal(Game.GetTree(), SceneTree.SignalName.ProcessFrame); capture += (double)Field("_lastEffectCpuMs")!; apply += (double)Field("_lastEffectRenderMs")!; }
+				for (int i = 0; i < 240; i++) { await Game.ToSignal(Game.GetTree(), SceneTree.SignalName.ProcessFrame); capture += (double)Field("_lastEffectCpuMs")!; apply += (double)Field("_lastEffectRenderMs")!; }
 				clock.Stop(); double rate = ((long)Field("_motionSamples")! - samples) / clock.Elapsed.TotalSeconds;
-				GD.Print("[LiveSharingSmoke] 60 FPS headless motion samples/s=" + rate.ToString("F1") + " mean capture ms=" + (capture / 120).ToString("F3") + " mean apply ms=" + (apply / 120).ToString("F3"));
-				Check(rate >= 50 && rate <= 65, "isolated 60 FPS engine advances motion channel at about 60 Hz");
+				double engineRate = (Engine.GetProcessFrames() - frames) / clock.Elapsed.TotalSeconds;
+				GD.Print("[LiveSharingSmoke] 120 FPS target: engine frames/s=" + engineRate.ToString("F1") + " motion samples/s=" + rate.ToString("F1") + " mean capture ms=" + (capture / 240).ToString("F3") + " mean apply ms=" + (apply / 240).ToString("F3"));
+				// A busy low-priority host cannot guarantee 120 real frames. Assert
+				// sampling keeps pace with min(target, actual render-loop rate), and
+				// report wall-clock throughput separately rather than claiming 120.
+				double expected = Math.Min(120, engineRate);
+				Check(rate >= expected * 0.95 && rate <= expected * 1.05, "120 Hz motion sampling keeps pace with the actual engine frame rate");
 			}
 			finally { Engine.MaxFps = previous; }
 		}

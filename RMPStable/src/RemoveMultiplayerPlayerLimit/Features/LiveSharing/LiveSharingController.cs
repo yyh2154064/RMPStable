@@ -55,7 +55,9 @@ internal static class LiveSharingController
 	private static bool _wasDown;
 	private static double _settingsTimer, _captureTimer, _drawingTimer, _sinceCapture;
 	private static double _pointerTimer;
-	internal const double MotionInterval = 1d / 60;
+	// The embedded viewport shares the game's render loop; this target never
+	// overrides the player's foreground/background FPS or display settings.
+	internal const double MotionInterval = 1d / 120;
 	private static long _motionSamples;
 	private static double _lastEffectCpuMs, _lastEffectRenderMs;
 	private static bool _dirty;
@@ -142,7 +144,7 @@ internal static class LiveSharingController
 		if (_captureWork != null && pageToken != _capturePage) { CancelCapture(); _captureTimer = 0; _dirty = true; }
 		if (_drawingTimer <= 0)
 		{
-			_drawingTimer = MotionInterval;
+			_drawingTimer = Math.Max(0, _drawingTimer + MotionInterval);
 			try { if (_source.CaptureMapDrawings() is { } drawings) _view.UpdateMapDrawings(drawings); }
 			catch (Exception ex) { if (_lastError != ex.Message) Log.Warn("[RMP:LiveSharing] Drawing update: " + ex.Message); _lastError = ex.Message; }
 		}
