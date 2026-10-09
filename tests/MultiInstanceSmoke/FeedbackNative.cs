@@ -16,6 +16,7 @@ using MegaCrit.Sts2.Core.Nodes.Cards.Holders;
 using MegaCrit.Sts2.Core.Nodes.Cards;
 using MegaCrit.Sts2.Core.Nodes.CommonUi;
 using MegaCrit.Sts2.Core.Nodes.Combat;
+using MegaCrit.Sts2.Core.Nodes.Rooms;
 using MegaCrit.Sts2.Core.Nodes.GodotExtensions;
 using MegaCrit.Sts2.Core.Nodes.Screens;
 using MegaCrit.Sts2.Core.Nodes.Screens.CardSelection;
@@ -47,6 +48,10 @@ public static partial class Smoke
                         .Select(h => new { Key = h.CardModel!.GetHashCode(), Id = h.CardModel.Id.ToString(), Rect = Normalized(h.Hitbox) }).ToArray(),
                     NoticeY = notice?.Position.Y ?? 0, NoticeHeight = notice?.Size.Y ?? 0,
                     ViewHeight = NGame.Instance.GetViewport().GetVisibleRect().Size.Y,
+                    TransitionClear = !NGame.Instance.Transition.InTransition &&
+                        NGame.Instance.Transition.GetNode<Control>("SimpleTransition").Modulate.A < .01f &&
+                        NGame.Instance.Transition.GetNode<Control>("GradientTransition").Modulate.A < .01f &&
+                        (NGame.Instance.Transition.Material is not ShaderMaterial transition || transition.GetShaderParameter("threshold").AsSingle() < .01f),
                     MapY = NMapScreen.Instance == null ? 0 : ((Vector2)Field(NMapScreen.Instance,"_targetDragPos")!).Y,
                     MapCanScroll = NMapScreen.Instance != null && (bool)Call(NMapScreen.Instance,"CanScroll")! }));
             if (!mapCircleSaved && NMapScreen.Instance?.IsOpen==true && Descendants<MegaCrit.Sts2.Core.Nodes.Vfx.NMapCircleVfx>(NRun.Instance)
@@ -98,6 +103,11 @@ public static partial class Smoke
             var view=Static("_view")!; Call(view,"SetControlEnabled",true);
             nint window=(nint)(long)Field(process,"Window")!;
             string profile=(string)Field(process,"DirectoryPath")!;
+            System.Text.Json.JsonElement ChildStatus()
+            {
+                using var json=System.Text.Json.JsonDocument.Parse(File.ReadAllText(Path.Combine(profile,"feedback-state.json"))); return json.RootElement.Clone();
+            }
+            await Until(()=>File.Exists(Path.Combine(profile,"feedback-state.json")) && ChildStatus().GetProperty("TransitionClear").GetBoolean(),"initial replica has every native transition cleared before first source choice");
             System.Collections.IEnumerable Hits() => (System.Collections.IEnumerable)Field(process,"LastHits")!;
             void Send(uint message,float x,float y)
             {
@@ -120,10 +130,6 @@ public static partial class Smoke
             await Until(()=>NOverlayStack.Instance?.Peek()==null && player.PlayerCombatState?.Hand.Cards.Count>0 && Verified,"Toolbox native selection resolves and boss combat continues");
             await Frames(90);
             await Click("ui.deck"); await Frames(100);
-            System.Text.Json.JsonElement ChildStatus()
-            {
-                using var json=System.Text.Json.JsonDocument.Parse(File.ReadAllText(Path.Combine(profile,"feedback-state.json"))); return json.RootElement.Clone();
-            }
             await Until(()=>File.Exists(Path.Combine(profile,"feedback-state.json")) && ChildStatus().GetProperty("Screen").GetString()=="NDeckViewScreen","replica deck opens locally");
             var status=ChildStatus(); float before=status.GetProperty("Offset").GetSingle();
             var sr=status.GetProperty("ScrollRect").EnumerateArray().Select(v=>v.GetSingle()).ToArray();
@@ -134,6 +140,21 @@ public static partial class Smoke
             Call(view,"SetControlEnabled",true); await Frames(20);
             await Click("ui.return");
             await Until(()=>ChildStatus().GetProperty("Screen").GetString()=="" && Verified,"deck return preserves native combat state");
+            var journal=Type("MirrorJournal");
+            var operations=(System.Collections.IList)journal.GetField("Operations",Any)!.GetValue(null)!;
+            int browsingBefore=operations.Count;
+            Descendants<NDrawPileButton>(NCombatRoom.Instance).Single().ForceClick();
+            await Until(()=>NCapstoneContainer.Instance?.CurrentCapstoneScreen is NCardPileScreen,"source draw pile opens without replica presentation");
+            await Frames(40);
+            var sourcePile=(Node)NCapstoneContainer.Instance.CurrentCapstoneScreen!;
+            var sourceGrid=Descendants<NCardGrid>(sourcePile).First();
+            Type("LocalSpectatorSource").GetMethod("ScrollNative",Any)!.Invoke(null,new object[]{sourceGrid,"down:3"});
+            Descendants<NBackButton>(sourcePile).Single().ForceClick();
+            await Until(()=>NCapstoneContainer.Instance.CurrentCapstoneScreen==null && Verified,"source draw pile back cannot stall an absent replica screen");
+            NRun.Instance.GlobalUi.TopBar.Deck.ForceClick(); await Frames(45);
+            var sourceDeck=(Node)NCapstoneContainer.Instance.CurrentCapstoneScreen!;
+            Descendants<NBackButton>(sourceDeck).Single().ForceClick(); await Frames(40);
+            Check(operations.Count==browsingBefore,"source pile scrolling/back and deck browsing add no gameplay operations");
             await Frames(50);
             Check(player.PlayerCombatState!.Hand.Cards.Count(c=>c is DefendIronclad)>=3,"isolated fixture has three distinct defend cards for rapid input");
             int handBefore=player.PlayerCombatState.Hand.Cards.Count;
@@ -168,6 +189,26 @@ public static partial class Smoke
                 view=Static("_view")!; Call(view,"SetControlEnabled",true); await Frames(90); await Click("select");
                 await Until(()=>NOverlayStack.Instance?.Peek()==null && Verified,"post-SL Toolbox choice remains interactive");
             }
+            await Frames(45);
+            mirror=Static("_mirror")!; process=Field(mirror,"Process")!; view=Static("_view")!;
+            var checkpoint=journal.GetProperty("Checkpoint",Any)!.GetValue(null);
+            int recoveryEvents=operations.Count;
+            var recoveryState=RunManager.Instance.DebugOnlyGetState()!;
+            var sourceHash=(string)Type("MirrorState").GetMethod("Hash",Any)!.Invoke(null,new object[]{recoveryState})!;
+            var child=(System.Diagnostics.Process)process.GetType().GetProperty("Child",Any)!.GetValue(process)!;
+            int failedPid=child.Id; child.Kill();
+            for(int frame=0;frame<180 && (string)mirror.GetType().GetProperty("Error",Any)!.GetValue(mirror)! == "";frame++) await Frames(1);
+            Check((string)mirror.GetType().GetProperty("Error",Any)!.GetValue(mirror)! != "","owned replica exit suspends control with a reported error");
+            await Frames(12);
+            var retry=(Button)Field(view,"_retry")!;
+            Check(retry.Visible,"sync failure exposes resync button");
+            retry.EmitSignal(Button.SignalName.Pressed);
+            await Until(()=>Verified,"resync button reconstructs failed replica from unchanged source checkpoint");
+            process=Field(Static("_mirror")!,"Process")!;
+            child=(System.Diagnostics.Process)process.GetType().GetProperty("Child",Any)!.GetValue(process)!;
+            Check(child.Id!=failedPid,"resync replaces only the failed owned child process");
+            Check(ReferenceEquals(checkpoint,journal.GetProperty("Checkpoint",Any)!.GetValue(null)) && recoveryEvents==operations.Count &&
+                sourceHash==(string)Type("MirrorState").GetMethod("Hash",Any)!.Invoke(null,new object[]{recoveryState})!,"resync preserves source state, RNG, checkpoint and operation journal");
             Controller.GetMethod("Suspend",Any)!.Invoke(null,null);
             GD.Print("[MultiInstanceSmoke] FEEDBACK PASSED"); ((SceneTree)Engine.GetMainLoop()).Quit();
         }

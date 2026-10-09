@@ -12,6 +12,8 @@ using MegaCrit.Sts2.Core.Nodes.Screens.Capstones;
 using MegaCrit.Sts2.Core.Nodes.Screens.Overlays;
 using MegaCrit.Sts2.Core.Nodes.Screens.Shops;
 using MegaCrit.Sts2.Core.Nodes.Screens.Map;
+using MegaCrit.Sts2.Core.Nodes.Screens;
+using MegaCrit.Sts2.Core.Nodes.Screens.PauseMenu;
 
 namespace RemoveMultiplayerPlayerLimit.Features.LiveSharing;
 
@@ -81,6 +83,14 @@ internal static class MirrorNativeUi
         return null;
     }
     internal static bool IsHandPlay(NCardHolder holder) => Parent<NPlayerHand>(holder) != null && NPlayerHand.Instance?.CurrentMode == NPlayerHand.Mode.Play;
+    // Browsing does not make a game decision. Opening these screens is local
+    // presentation, so their back buttons/cards/scrolls cannot enter the journal.
+    internal static bool IsLocalPresentation(Node node) => Parent<NCardPileScreen>(node) != null || Parent<NDeckViewScreen>(node) != null ||
+        Parent<NPauseMenu>(node) != null || Under(node, NGame.Instance?.InspectCardScreen) || Under(node, NGame.Instance?.InspectRelicScreen) ||
+        Under(node, RemoveMultiplayerPlayerLimit.Infrastructure.SceneMonitor.FindSettingsScreen()) ||
+        node == NRun.Instance?.GlobalUi.TopBar.Deck || node == NRun.Instance?.GlobalUi.TopBar.Pause ||
+        node.GetType().Name is "NDrawPileButton" or "NDiscardPileButton" or "NExhaustPileButton";
+    private static bool Under(Node node, Node? root) => root != null && GodotObject.IsInstanceValid(root) && (node == root || root.IsAncestorOf(node));
     internal static bool IgnoreButton(NClickableControl button) => QuickSl.QuickSlController.ConfirmationOpen || Parent<NCardHolder>(button) != null ||
         Parent<NMerchantSlot>(button) != null || button == NCombatRoom.Instance?.Ui?.EndTurnButton;
 }

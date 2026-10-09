@@ -603,6 +603,10 @@ internal sealed partial class MirrorRenderer : IDisposable
             MirrorFastRestore.Replica = false;
             CheckGeneration(message.Generation);
             Stage("等待原版界面初始化");
+            // Startup and room transitions are independent from model equality.
+            // Finish native fade-in even when a real choice is still pending.
+            await NGame.Instance.Transition.FadeIn(.03f);
+            CheckGeneration(message.Generation);
             // Native room entry may remain paused while a real selection is awaited.
             Stage("同步主进程操作");
             await ReplayOperations(message.Operations);
@@ -676,9 +680,9 @@ internal sealed partial class MirrorRenderer : IDisposable
             {
                 var deadline = Stopwatch.StartNew();
                 Node? node;
-                while ((node = MirrorNativeUi.Resolve(operation.NodeKey)) == null || node is CanvasItem canvas && !canvas.IsVisibleInTree() || node is NClickableControl button && !button.IsEnabled)
+                while ((node = MirrorNativeUi.Resolve(operation.NodeKey)) == null || node is CanvasItem canvas && !canvas.IsVisibleInTree() || !LocalSpectatorSource.NativeReplayReady(node))
                 {
-                    if (deadline.Elapsed.TotalSeconds > 20) throw new InvalidDataException("Native UI unavailable: " + operation.Kind + ":" + operation.NodeKey);
+                    if (deadline.Elapsed.TotalSeconds > 20) throw new InvalidDataException("Native UI unavailable: " + operation.Kind + ":" + operation.NodeKey + " generation=" + generation + " operation=" + _events + "/" + operations.Count);
                     await Frame(generation);
                 }
                 // Map travel is rebased from the authoritative next-room

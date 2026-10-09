@@ -8,6 +8,7 @@ internal sealed partial class SpectatorView : IDisposable
     private readonly CanvasLayer _overlay;
     private readonly Control _panel, _content;
     private readonly Label _status;
+    private readonly Button _retry;
     private readonly MirrorHost _mirror;
     private readonly Func<bool, long> _setControl;
     private SpectatorSnapshot? _snapshot;
@@ -33,6 +34,9 @@ internal sealed partial class SpectatorView : IDisposable
         _status.AddThemeColorOverride("font_color", Colors.White);
         _status.AddThemeColorOverride("font_outline_color", Colors.Black);
         _status.AddThemeConstantOverride("outline_size", 5);
+        _retry = new Button { Name = "RetrySynchronization", Text = T("重新同步", "Resync"), Visible = false,
+            TooltipText = T("仅重建独立窗口，保留本体当前对局", "Rebuild the independent window while preserving the source run") };
+        _content.AddChild(_retry); _retry.Pressed += LiveSharingController.RecoverMirror;
         _previousFps = Engine.MaxFps; _previousVsync = DisplayServer.WindowGetVsyncMode();
         if (DisplayServer.GetName() != "headless") { Engine.MaxFps = 120; DisplayServer.WindowSetVsyncMode(DisplayServer.VSyncMode.Disabled); }
         SetControlEnabled(SpectatorPreferences.Current.ControlMode);
@@ -71,8 +75,11 @@ internal sealed partial class SpectatorView : IDisposable
         // so SL cannot briefly display the previous run as ready for input.
         host?.Layout(_content,combat && _mirror.Process.DisplayReady && host.Attached && SceneMonitor.FindSettingsScreen()?.IsVisibleInTree() != true && !QuickSl.QuickSlController.ConfirmationOpen && !LiveSharingController.SourceMenuOpen);
         _status.Visible = host?.Visible != true;
+        _retry.Visible = _mirror.Error.Length > 0;
+        _retry.Position = new Vector2(_content.Size.X * .4f, _content.Size.Y * .91f);
+        _retry.Size = new Vector2(_content.Size.X * .2f, Math.Max(24, _content.Size.Y * .07f));
         if (host?.TakeEscape() == true) SetPreferredControl(false);
-        _status.Position = new Vector2(_content.Size.X * .08f, _content.Size.Y * .78f);
+        _status.Position = new Vector2(_content.Size.X * .08f, _content.Size.Y * (_retry.Visible ? .68f : .78f));
         _status.Size = new Vector2(_content.Size.X * .84f, Math.Max(50,_content.Size.Y * .14f));
         LiveSharingController.RouteMapInput(!sourceDialog && _panel.GetGlobalRect().HasPoint(ShellPointer()));
     }

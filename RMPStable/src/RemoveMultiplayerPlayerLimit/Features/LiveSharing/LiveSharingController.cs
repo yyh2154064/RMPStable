@@ -96,12 +96,23 @@ internal static partial class LiveSharingController
     internal static void Open(RunState state)
     {
         if (_view != null) return;
+        if (_mirror?.Error.Length > 0) { _mirror.Dispose(); _mirror = null; _openFailed = false; }
         EnsureMirror(state);
         _session = NRun.Instance.GetInstanceId(); _source ??= new LocalSpectatorSource();
         var relicRow = LocalSpectatorSource.Descendants<MegaCrit.Sts2.Core.Nodes.Relics.NRelicInventoryHolder>(NRun.Instance.GlobalUi.RelicInventory).Where(n => n.IsVisibleInTree()).Select(n => n.GetGlobalRect()).OrderBy(r => r.Position.Y).FirstOrDefault();
         SpectatorPreferences.DefaultTop = relicRow.Size.Y > 0 ? relicRow.Position.Y + relicRow.Size.Y * 3 / 5 : 116;
         _view = new SpectatorView(Close, _mirror, enabled => _source?.SetControlMode(enabled) ?? 0);
         _captureTimer = 0; SpectatorPreferences.Current.Open = true; SpectatorPreferences.Save();
+    }
+    internal static void RecoverMirror()
+    {
+        var state = GameStateAccessor.GetRunState();
+        if (MirrorRenderer.IsRenderer || _restoring || state?.Players.Count != 1 || RunManager.Instance.NetService?.Type != NetGameType.Singleplayer) return;
+        // Reconstruct only our authenticated replica from the original journal.
+        // The source run, save, RNG and combat checkpoint are never reloaded.
+        HideView(); _mirror?.Dispose(); _mirror = null; _openFailed = false;
+        GD.Print("[RMP:Mirror:Recovery] rebuilding replica from checkpoint and " + MirrorJournal.Operations.Count + " operations");
+        Open(state);
     }
     private static void EnsureMirror(RunState state)
         => EnsureMirror(state.Players[0].NetId);

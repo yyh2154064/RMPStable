@@ -59,6 +59,8 @@ public static partial class Smoke
         {
             await ((SceneTree)Engine.GetMainLoop()).ToSignal(Engine.GetMainLoop(),SceneTree.SignalName.ProcessFrame);
             if(NGame.Instance==null || NRun.Instance?.IsNodeReady()!=true || NCombatRoom.Instance?.IsNodeReady()!=true) continue;
+            var renderer=Type("MirrorRenderer").GetField("Active",Any)!.GetValue(null);
+            if(renderer==null || !(bool)Field(renderer,"_sceneReady")!) continue;
             var arrow=NRun.Instance.GlobalUi.TargetManager.GetNodeOrNull<MegaCrit.Sts2.Core.Nodes.Combat.NTargetingArrow>("TargetingArrow");
             string label=arrow?.IsVisibleInTree()==true ? "arrow" : ReplicaSettingsVisible() ? "settings" : "combat";
             if(saved.Contains(label)) continue;

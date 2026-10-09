@@ -141,7 +141,7 @@ internal static class MirrorJournal
     private static void BeginUi(Node node, string kind, out bool entered)
     {
         entered = false;
-        if (!Recording || _uiDepth != 0 || MirrorNativeUi.Key(node) is not { Length: > 0 } key) return;
+        if (!Recording || _uiDepth != 0 || MirrorNativeUi.IsLocalPresentation(node) || MirrorNativeUi.Key(node) is not { Length: > 0 } key) return;
         Operations.Add(new MirrorOperation { Kind = kind, NodeKey = key });
         _uiDepth++; entered = true;
     }
@@ -174,7 +174,7 @@ internal static class MirrorJournal
     }
     private static void ScrollInput(Control __instance, InputEvent inputEvent)
     {
-        if (!Recording || _uiDepth != 0) return;
+        if (!Recording || _uiDepth != 0 || MirrorNativeUi.IsLocalPresentation(__instance)) return;
         float amount = inputEvent is InputEventPanGesture pan ? pan.Delta.Y / .8f : inputEvent is InputEventMouseButton { Pressed: true } wheel ? wheel.ButtonIndex == MouseButton.WheelUp ? -1 : wheel.ButtonIndex == MouseButton.WheelDown ? 1 : 0 : 0;
         string key = MirrorNativeUi.Key(__instance);
         if (amount != 0 && key.Length > 0) Operations.Add(new MirrorOperation { Kind = "scroll", NodeKey = key,

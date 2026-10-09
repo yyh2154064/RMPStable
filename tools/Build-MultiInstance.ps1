@@ -1,7 +1,7 @@
 param(
     [Parameter(Mandatory=$true)][string]$GameReferences,
     [Parameter(Mandatory=$true)][string]$ModPck,
-    [string]$OutputRoot = "$PSScriptRoot/../.tools/multi-instance"
+    [string]$OutputRoot = 'F:/projectFile/RMPStable-development/build'
 )
 $ErrorActionPreference = 'Stop'
 $repo = (Resolve-Path "$PSScriptRoot/..").Path
@@ -16,7 +16,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Bootstrap build failed' }
 & dotnet build "$repo/tests/MultiInstanceSmoke/MultiInstanceSmoke.csproj" -c Release --configfile "$repo/RMPStable/src/NuGet.Config" "-p:GameManagedDir=$GameReferences/v0.111.0" -p:GameCompatibility=beta "-p:BaseIntermediateOutputPath=$root/obj-test/" -p:RestoreFallbackFolders= --output "$root/test"
 if ($LASTEXITCODE -ne 0) { throw 'Smoke harness build failed' }
 # This script only builds. It never starts a game or deploys to its directory.
-$package = "$root/package-v7/RMPStable"
+$package = "$root/package/RMPStable"
 New-Item -ItemType Directory -Force $package | Out-Null
 Copy-Item -LiteralPath "$root/bootstrap/RMPStable.dll", "$repo/RMPStable/RMPStable.json", $ModPck -Destination $package -Force
 Copy-Item -LiteralPath "$repo/docs/README-multiInstance.md" -Destination $package -Force

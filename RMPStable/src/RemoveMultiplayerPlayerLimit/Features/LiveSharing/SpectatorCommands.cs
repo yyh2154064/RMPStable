@@ -75,8 +75,19 @@ internal sealed partial class LocalSpectatorSource
 	private static bool SelectorActive(Node selection, Node node)
 	{
 		if (!Ready(selection) || !Ready(node) || !RewardAwaited(selection)) return false;
+		if (selection is NChooseACardSelectionScreen && !SelectionCooldownComplete(selection)) return false;
 		var preview = ActiveSelectionPreview(selection);
 		return preview?.IsVisibleInTree() != true || preview.IsAncestorOf(node);
+	}
+	private static readonly FieldInfo? ChooseOpenedTicks = typeof(NChooseACardSelectionScreen).GetField("_openedTicks", BindingFlags.Instance | BindingFlags.NonPublic);
+	private static readonly ulong ChooseCooldown = (ulong)(typeof(NChooseACardSelectionScreen).GetField("_noSelectionTimeMsec", BindingFlags.Static | BindingFlags.NonPublic)?.GetRawConstantValue() ?? 350UL);
+	private static bool SelectionCooldownComplete(Node selection) => ChooseOpenedTicks?.GetValue(selection) is ulong opened && Time.GetTicksMsec() - opened > ChooseCooldown;
+	internal static bool NativeReplayReady(Node node)
+	{
+		if (!node.IsNodeReady() || node.IsQueuedForDeletion()) return false;
+		if (NOverlayStack.Instance?.Peek() is Node overlay && (node == overlay || overlay.IsAncestorOf(node)) && !SelectorActive(overlay, node)) return false;
+		if (node is NCardHolder holder) return holder.Hitbox.IsEnabled && CardClickable?.GetValue(holder) is true;
+		return node is not NClickableControl button || button.IsEnabled;
 	}
 	private static Control? ActiveSelectionPreview(Node selection)
 	{
