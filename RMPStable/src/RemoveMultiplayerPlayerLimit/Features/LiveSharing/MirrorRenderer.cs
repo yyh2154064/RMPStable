@@ -140,6 +140,10 @@ internal sealed partial class MirrorRenderer : IDisposable
                     GD.Print("[RMP:Mirror:Window] owned popup source=" + message.Window); break;
                 case "clip":
                     if (!_attached) throw new InvalidDataException("Window ownership required before clipping");
+                    // Let Godot resize its viewport/swapchain as well as user32.
+                    // Async owner positioning alone is not a display-ready test.
+                    var requestedSize = new Vector2I(message.Width, message.Height);
+                    if (requestedSize.X > 0 && requestedSize.Y > 0 && DisplayServer.WindowGetSize() != requestedSize) DisplayServer.WindowSetSize(requestedSize);
                     MirrorWin32.ClipOwn(message);
                     _presentationWheelScale = float.IsFinite(message.WheelScale) ? Math.Clamp(message.WheelScale, 1, 8) : 1; break;
                 case "control":
@@ -185,7 +189,16 @@ internal sealed partial class MirrorRenderer : IDisposable
         ProcessBufferedCards();
         bool idle = NativeIdle;
         bool windowVisible = DisplayServer.GetName() != "headless" && MirrorWin32.IsWindowVisible(MirrorWin32.OwnWindow);
-        if (windowVisible != _lastWindowVisible) { _lastWindowVisible = windowVisible; _statusTimer = 0; }
+        if (windowVisible != _lastWindowVisible)
+        {
+            _lastWindowVisible = windowVisible; _statusTimer = 0;
+            if (windowVisible) { _presentFrames = 3; LogPresentation("shown"); }
+        }
+        if (windowVisible && _presentFrames > 0)
+        {
+            _presentFrames--;
+            Callable.From(() => { if (_attached && MirrorWin32.IsWindowVisible(MirrorWin32.OwnWindow)) RenderingServer.ForceDraw(true); }).CallDeferred();
+        }
         _statusTimer -= delta;
         if (_statusTimer <= 0 || idle != _lastIdle)
         {
@@ -208,9 +221,22 @@ internal sealed partial class MirrorRenderer : IDisposable
         if (_diagnosticTimer <= 0)
         {
             _diagnosticTimer = 5;
-            if (Diagnostic || !_sceneReady) GD.Print("[RMP:Mirror:Progress] phase=" + _phase + " attached=" + _attached + " busy=" + _busy + " events=" + _events + " drawFrames=" + _drawFrames);
+            if (Diagnostic || !_sceneReady || _waitingForAuthority || _control && !idle || _control && !_authorityReady)
+                GD.Print("[RMP:Mirror:Progress] phase=" + _phase + " attached=" + _attached + " busy=" + _busy + " waiting=" + _waitingForAuthority + " ready=" + _authorityReady +
+                    " events=" + _events + "/" + _authorityEvents + " selector=" + MegaCrit.Sts2.Core.Nodes.Screens.Overlays.NOverlayStack.Instance?.Peek()?.GetType().Name + " drawFrames=" + _drawFrames);
         }
+        _inputWaitSeconds = _control && _sceneReady && (_waitingForAuthority || !idle || !_authorityReady) ? _inputWaitSeconds + delta : 0;
         UpdateNotice();
+    }
+    private int _presentFrames;
+    private double _inputWaitSeconds;
+    private void LogPresentation(string reason)
+    {
+        var transition = NGame.Instance.Transition;
+        GD.Print("[RMP:Mirror:Display] " + reason + " utc=" + DateTime.UtcNow.ToString("O") + " size=" + DisplayServer.WindowGetSize() +
+            " viewport=" + NGame.Instance.GetViewport().GetVisibleRect().Size + " transition=" + transition.InTransition +
+            " simple=" + transition.GetNode<Control>("SimpleTransition").Modulate.A + " gradient=" + transition.GetNode<Control>("GradientTransition").Modulate.A +
+            " threshold=" + (transition.Material is ShaderMaterial material ? material.GetShaderParameter("threshold").AsSingle() : -1));
     }
     private float _presentationWheelScale = 1;
     private bool NativeIdle => !_busy && _generation == _desiredGeneration && _error.Length == 0 && _state != null && _replay != null && MirrorHost.SourceIdle;
@@ -340,7 +366,7 @@ internal sealed partial class MirrorRenderer : IDisposable
             }
             if (input.Message == 0x20A)
             {
-                if (PresentationScrollRoot is { } local)
+                if ((PresentationScrollRoot ?? NOverlayStack.Instance?.Peek() as MegaCrit.Sts2.Core.Nodes.Screens.CardSelection.NCardGridSelectionScreen) is { } local)
                 {
                     var container = LocalSpectatorSource.Descendants<Control>(local).LastOrDefault(n => n is NCardGrid or NScrollableContainer && Contains(n, input.Point));
                     if (container != null && input.Wheel != 0) LocalSpectatorSource.ScrollNative(container, WheelValue(input.Wheel * _presentationWheelScale));
@@ -357,7 +383,9 @@ internal sealed partial class MirrorRenderer : IDisposable
             if (input.Message == MirrorWin32.LeftUp && _pressedAction != null)
             {
                 var selected = _pressedAction; _pressedAction = null;
-                if (MirrorNativeUi.Resolve(selected.NativePath) is Control selectedNode && Contains(InteractiveArea(selectedNode), input.Point))
+                var selectedNode = MirrorNativeUi.Resolve(selected.NativePath) as Control;
+                if (Diagnostic) GD.Print("[RMP:Mirror:Input] native release " + selected.NativePath + " point=" + input.Point + " rect=" + (selectedNode == null ? "missing" : InteractiveArea(selectedNode).GetGlobalRect().ToString()));
+                if (selectedNode != null && Contains(InteractiveArea(selectedNode), input.Point))
                     SendIntent(selected.Kind, -1, -1, MirrorState.Hash(_state!), _events, selected.NativePath);
                 continue;
             }
@@ -508,7 +536,7 @@ internal sealed partial class MirrorRenderer : IDisposable
         var size = NGame.Instance.GetViewport().GetVisibleRect().Size;
         _notice.Position = new Vector2(size.X * .08f, size.Y * .78f);
         _notice.Size = new Vector2(size.X * .84f, size.Y * .14f);
-        _notice.Text = _error.Length > 0 ? "同步失败，控制已暂停：" + _error.Split('\n')[0] : !_sceneReady ? _phase : "";
+        _notice.Text = _error.Length > 0 ? "同步失败，控制已暂停：" + _error.Split('\n')[0] : !_sceneReady ? _phase : _inputWaitSeconds > 1.5 ? "等待主机状态校验或原版结算…" : "";
     }
     private List<MirrorHit> CaptureHits()
     {
@@ -690,7 +718,7 @@ internal sealed partial class MirrorRenderer : IDisposable
             {
                 var deadline = Stopwatch.StartNew();
                 Node? node;
-                while ((node = MirrorNativeUi.Resolve(operation.NodeKey)) == null || node is CanvasItem canvas && !canvas.IsVisibleInTree() || !LocalSpectatorSource.NativeReplayReady(node, operation.Value))
+                while ((node = MirrorNativeUi.Resolve(operation.NodeKey, operation.Kind == "card")) == null || node is CanvasItem canvas && !canvas.IsVisibleInTree() || !LocalSpectatorSource.NativeReplayReady(node, operation.Value))
                 {
                     if (deadline.Elapsed.TotalSeconds > 20) throw new InvalidDataException("Native UI unavailable: " + operation.Kind + ":" + operation.NodeKey + " selection=" + operation.Value + " hand=" + NPlayerHand.Instance?.CurrentMode + " generation=" + generation + " operation=" + _events + "/" + operations.Count + " previous=" + string.Join(";", operations.Take(_events).TakeLast(4).Select(o => o.Kind + ":" + o.NodeKey + ":" + o.Value)));
                     await Frame(generation);

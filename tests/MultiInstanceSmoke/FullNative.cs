@@ -55,7 +55,7 @@ public static partial class Smoke
                 var control=snapshot.GetType().GetProperty("Control")!.GetValue(snapshot)!;
                 return ((System.Collections.IEnumerable)control.GetType().GetProperty("Actions")!.GetValue(control)!).Cast<object>().ToArray();
             }
-            object? Node(object a) => Type("MirrorNativeUi").GetMethod("Resolve",Any)!.Invoke(null,new[]{a.GetType().GetProperty("NativePath")!.GetValue(a)});
+            object? Node(object a) => Type("MirrorNativeUi").GetMethod("Resolve",Any)!.Invoke(null,new object?[]{a.GetType().GetProperty("NativePath")!.GetValue(a),false});
             bool Enabled(object a) => (bool)a.GetType().GetProperty("Enabled")!.GetValue(a)!;
             string Kind(object a) => (string)a.GetType().GetProperty("Kind")!.GetValue(a)!;
             string Key(object a) => (string)a.GetType().GetProperty("NativePath")!.GetValue(a)!;

@@ -39,7 +39,7 @@ public static partial class Smoke
         var args = OS.GetCmdlineArgs(); int force = Array.IndexOf(args, "--force-steam");
         if (Environment.GetEnvironmentVariable("RMP_MULTI_TEST") != "1" || Environment.GetEnvironmentVariable("RMP_MULTI_ROLE") == "renderer" || force < 0 || args[force+1] != "off") return;
         if (DisplayServer.GetName() != "headless") DisplayServer.WindowSetFlag(DisplayServer.WindowFlags.NoFocus, true);
-        TaskHelper.RunSafely(Environment.GetEnvironmentVariable("RMP_MULTI_FEEDBACK_TEST") == "1" ? RunFeedback() : Environment.GetEnvironmentVariable("RMP_MULTI_FULL_TEST") == "1" ? RunFullNative() : Run());
+        TaskHelper.RunSafely(Environment.GetEnvironmentVariable("RMP_MULTI_REPLAY_TEST") == "1" ? RunRepeatedChoice() : Environment.GetEnvironmentVariable("RMP_MULTI_FEEDBACK_TEST") == "1" ? RunFeedback() : Environment.GetEnvironmentVariable("RMP_MULTI_FULL_TEST") == "1" ? RunFullNative() : Run());
     }
     private static string _diagnosticHash="";
     private static void SaveDiagnostic(string __result)

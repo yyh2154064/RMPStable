@@ -37,14 +37,18 @@ public static partial class Smoke
         {
             await ((SceneTree)Engine.GetMainLoop()).ToSignal(Engine.GetMainLoop(), SceneTree.SignalName.ProcessFrame);
             if (NGame.Instance == null || NRun.Instance == null) continue;
-            var root = NCapstoneContainer.Instance?.CurrentCapstoneScreen as Node;
+            var root = NCapstoneContainer.Instance?.CurrentCapstoneScreen as Node ?? NOverlayStack.Instance?.Peek() as Node;
             var scroll = root == null ? null : Descendants<Control>(root).FirstOrDefault(n => n is NCardGrid or NScrollableContainer);
             float offset = scroll == null ? 0 : (float)Field(scroll, scroll is NCardGrid ? "_targetDrag" : "_targetDragPosY")!;
             var renderer = Type("MirrorRenderer").GetField("Active", Any)!.GetValue(null);
             var notice = renderer == null ? null : Field(renderer, "_notice") as Label;
             var feedbackPath=Path.Combine(Environment.GetEnvironmentVariable("RMP_MULTI_PROFILE_ROOT")!, "feedback-state.json");
             File.WriteAllText(feedbackPath+".tmp",
-                System.Text.Json.JsonSerializer.Serialize(new { Screen = root?.GetType().Name ?? "", Offset = offset,
+                System.Text.Json.JsonSerializer.Serialize(new { Screen = root?.GetType().Name ?? "", Instance = root?.GetInstanceId() ?? 0, Offset = offset,
+                    Waiting = renderer != null && (bool)Field(renderer,"_waitingForAuthority")!, Busy = renderer != null && (bool)Field(renderer,"_busy")!,
+                    AuthorityReady = renderer != null && (bool)Field(renderer,"_authorityReady")!, Events = renderer == null ? 0 : (int)Field(renderer,"_events")!,
+                    PresentFrames = renderer == null ? -1 : (int)Field(renderer,"_presentFrames")!,
+                    DisplayWidth = DisplayServer.WindowGetSize().X, DisplayHeight = DisplayServer.WindowGetSize().Y,
                     ScrollRect = scroll == null ? new float[4] : Normalized(scroll),
                     Hand = NPlayerHand.Instance?.ActiveHolders.Where(h => h.CardModel != null && h.IsVisibleInTree() && renderer != null && !(bool)Call(renderer,"IsCardReserved",h.CardModel)!).OrderBy(h => h.ZIndex)
                         .Select(h => new { Key = h.CardModel!.GetHashCode(), Id = h.CardModel.Id.ToString(), Exhaust = h.CardModel.GetKeywordsWithSources(KeywordSources.Local).Contains(CardKeyword.Exhaust), Rect = Normalized(h.Hitbox) }).ToArray(),
@@ -56,7 +60,13 @@ public static partial class Smoke
                         (NGame.Instance.Transition.Material is not ShaderMaterial transition || transition.GetShaderParameter("threshold").AsSingle() < .01f),
                     MapY = NMapScreen.Instance == null ? 0 : ((Vector2)Field(NMapScreen.Instance,"_targetDragPos")!).Y,
                     MapCanScroll = NMapScreen.Instance != null && (bool)Call(NMapScreen.Instance,"CanScroll")! }));
-            File.Move(feedbackPath+".tmp",feedbackPath,true);
+            // Windows can transiently deny replacing a delete-pending file
+            // even when readers share deletion. Keep the observer alive.
+            for(int attempt=0;;attempt++)
+            {
+                try { File.Move(feedbackPath+".tmp",feedbackPath,true); break; }
+                catch(Exception e) when ((e is IOException || e is UnauthorizedAccessException) && attempt<30) { await Frames(1); }
+            }
             if (!mapCircleSaved && NMapScreen.Instance?.IsOpen==true && Descendants<MegaCrit.Sts2.Core.Nodes.Vfx.NMapCircleVfx>(NRun.Instance)
                 .Any(v=>v.IsVisibleInTree() && v.GetParent() is NMapPoint { State: MapPointState.Travelable }))
             {

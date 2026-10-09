@@ -27,7 +27,7 @@ internal sealed partial class LocalSpectatorSource
 	private static readonly PropertyInfo? MapTravelable = typeof(NMapPoint).GetProperty("IsTravelable", BindingFlags.NonPublic | BindingFlags.Instance);
 	private static readonly FieldInfo? NativeTargetType = typeof(NTargetManager).GetField("_validTargetsType", BindingFlags.NonPublic | BindingFlags.Instance);
 	private readonly HashSet<Node> _pausedNativeInput = new();
-	private NPotionPopup? NativePopup => _top == null ? null : Descendants<NPotionPopup>(_top).FirstOrDefault(p => Ready(p) && !p.IsMarkedForRemoval);
+	private NPotionPopup? NativePopup => _top == null || !GodotObject.IsInstanceValid(_top) || !_top.IsInsideTree() ? null : Descendants<NPotionPopup>(_top).FirstOrDefault(p => Ready(p) && !p.IsMarkedForRemoval);
 	private void PauseNativeInput(Node? node)
 	{
 		// These native _Input callbacks otherwise consume the viewer's window

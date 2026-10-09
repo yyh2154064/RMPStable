@@ -29,4 +29,4 @@ C 盘可用空间从初查的 34,430,046,208 字节增加到清理完成时的 3
 
 旧桌面上下文里 `native-feedback/.tools/feedback`、桌面开发归档和旧 package-v7 路径已失效。不要重新创建那些 C 盘目录或执行旧清理脚本。源文件和历史提交由现有三个 Git 分支/GitHub 恢复；引用已迁移到 F 盘，不重复下载/解压。
 
-`tools/Build-MultiInstance.ps1` 默认将输出写到上述 F 盘 build。传入既有 references 和桌面 `RMPStable.pck`，不会启动游戏或部署正式安装。`tools/Test-MultiInstance.ps1 -Mode feedback` / `-Mode full` 复用 F 盘 runtime，独立 profile、静音、屏幕外运行、禁止 Steam，日志放 evidence。运行目录只能串行使用；脚本拒绝覆盖已有测试档案。测试完成后保留日志及必要截图，清理测试 profile，不持续积累档案。
+`tools/Build-MultiInstance.ps1` 默认将输出写到上述 F 盘 build。传入既有 references 和桌面 `RMPStable.pck`，不会启动游戏或部署正式安装。`tools/Test-MultiInstance.ps1 -Mode feedback` / `-Mode full` / `-Mode replay` 复用 F 盘 runtime，独立 profile、静音、屏幕外运行、禁止 Steam，日志放 evidence。运行目录只能串行使用；脚本拒绝覆盖已有测试档案。测试完成后保留日志及必要截图，清理测试 profile，不持续积累档案。

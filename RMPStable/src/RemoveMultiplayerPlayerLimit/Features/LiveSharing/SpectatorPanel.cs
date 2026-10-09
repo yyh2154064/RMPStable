@@ -41,6 +41,10 @@ internal sealed partial class SpectatorView
 			_pinned = SpectatorPreferences.Current.Pinned;
 			_pin = CreatePinButton(); panel.AddChild(_pin);
 			_controlToggle = CreateControlToggle(); panel.AddChild(_controlToggle);
+			_refresh = new Button { Name = "RebuildMirror", Text = "↻", Flat = true, FocusMode = Control.FocusModeEnum.None,
+				Size = new Vector2(36,36), TooltipText = T("重新同步：重建窗口，保留本体当前对局", "Resync: rebuild the window while preserving the source run") };
+			_refresh.AddThemeFontSizeOverride("font_size", 28);
+			panel.AddChild(_refresh); _refresh.Pressed += LiveSharingController.RecoverMirror;
 			// Clip at the displayed content rectangle, not at the unscaled 1920x1080
 			// surface. A single layout calculation owns the frame and picture edges.
 			var content = new Control { Name = "SpectatorContent", Position = new Vector2(inset, titleHeight), ClipContents = true, MouseFilter = Control.MouseFilterEnum.Stop };
@@ -66,8 +70,9 @@ internal sealed partial class SpectatorView
 				content.Position = new Vector2(inset, navigationHeight);
 				panel.Size = new Vector2(width, navigationHeight + content.Size.Y + inset);
 				titleFill.Size = new Vector2(content.Size.X, navigationHeight - inset);
-				titlebar.Scale = dismiss.Scale = _pin.Scale = _controlToggle.Scale = Vector2.One * navigationScale;
-				titlebar.Size = new Vector2(width / navigationScale - 222, titleHeight); LayoutSources(width / navigationScale - 254);
+				titlebar.Scale = dismiss.Scale = _pin.Scale = _controlToggle.Scale = _refresh.Scale = Vector2.One * navigationScale;
+				titlebar.Size = new Vector2(width / navigationScale - 260, titleHeight); LayoutSources(width / navigationScale - 292);
+				_refresh.Position = new Vector2(width - 254 * navigationScale, 3 * navigationScale);
 				_controlToggle.Position = new Vector2(width - 216 * navigationScale, 3 * navigationScale);
 				_pin.Position = new Vector2(width - 94 * navigationScale, 3 * navigationScale);
 				dismiss.Position = new Vector2(width - 56 * navigationScale, 3 * navigationScale); resize.Position = panel.Size - resize.Size;

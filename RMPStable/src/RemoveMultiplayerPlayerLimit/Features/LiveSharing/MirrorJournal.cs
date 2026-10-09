@@ -177,7 +177,7 @@ internal static class MirrorJournal
     }
     private static void ScrollInput(Control __instance, InputEvent inputEvent)
     {
-        if (!Recording || _uiDepth != 0 || MirrorNativeUi.IsLocalPresentation(__instance)) return;
+        if (!Recording || _uiDepth != 0 || MirrorNativeUi.IsLocalScroll(__instance)) return;
         float amount = inputEvent is InputEventPanGesture pan ? pan.Delta.Y / .8f : inputEvent is InputEventMouseButton { Pressed: true } wheel ? wheel.ButtonIndex == MouseButton.WheelUp ? -1 : wheel.ButtonIndex == MouseButton.WheelDown ? 1 : 0 : 0;
         string key = MirrorNativeUi.Key(__instance);
         if (amount != 0 && key.Length > 0) Operations.Add(new MirrorOperation { Kind = "scroll", NodeKey = key,

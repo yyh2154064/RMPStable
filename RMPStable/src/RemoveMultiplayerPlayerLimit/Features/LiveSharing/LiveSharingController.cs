@@ -173,12 +173,13 @@ internal static partial class LiveSharingController
             }
             return new() { RequestId = message.Request, Accepted = true, Message = "已提交" };
         }
+        if (message.Model == "select" && message.NodeKey.Contains(":grid:", StringComparison.Ordinal)) MirrorNativeUi.Resolve(message.NodeKey, true);
         var snapshot = _source.CaptureCommands(state);
         var action = snapshot.Control.Actions.FirstOrDefault(a => a.Enabled && a.Kind == message.Model &&
             (message.NodeKey.Length > 0 ? a.NativePath == message.NodeKey :
             a.Kind == "endTurn" && message.Index == -1 || a.Kind == "play" && a.NativeIndex == message.Index));
         if (action == null) return Reject("当前无法执行此操作");
-        if (MirrorNativeUi.Resolve(action.NativePath) is Node presentation && MirrorNativeUi.IsLocalPresentation(presentation))
+        if (MirrorNativeUi.Resolve(action.NativePath) is Node presentation && (MirrorNativeUi.IsLocalPresentation(presentation) || message.Model == "scroll" && MirrorNativeUi.IsLocalScroll(presentation)))
             return Reject("浏览操作应在窗口内完成");
         var target = snapshot.Control.Targets.FirstOrDefault(t => t.NativeIndex == message.TargetIndex && action.TargetIds.Contains(t.Id));
         if (action.RequiresTarget && target == null) return Reject("目标已失效");

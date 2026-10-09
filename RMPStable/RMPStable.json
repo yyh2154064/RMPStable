@@ -1,7 +1,7 @@
 {
   "id": "RMPStable",
   "name": "RMP Stable - Native Multi-instance Exploration",
-  "version": "0.3.9-multiInstance.9",
+  "version": "0.3.9-multiInstance.10",
   "author": "灰灰神教！",
   "description": "Local singleplayer native game window in an isolated process. Original combat targeting, pending selections, map, rewards, events, rest sites, merchant and treasure UI; source-authoritative decisions and warm checkpoint recovery without pixel transport. Remote multiplayer transport remains pending.",
   "dependencies": [],

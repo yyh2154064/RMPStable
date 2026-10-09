@@ -13,6 +13,7 @@ internal sealed partial class SpectatorView : IDisposable
     private readonly Func<bool, long> _setControl;
     private SpectatorSnapshot? _snapshot;
     private Button _controlToggle = null!;
+    private Button _refresh = null!;
     private Panel _modeThumb = null!;
     private Tween? _modeTween;
     private bool _controlEnabled;

@@ -1,4 +1,39 @@
-# Native multi-instance (.9)：2026-10-09 战斗牌堆与本体鼠标选牌
+# Native multi-instance (.10)：2026-10-09 连续洁净选牌与首次显示
+
+当前分支 `multiInstanceTest`，版本 `0.3.9-multiInstance.10`，从 .9 `808e363` 接续。复用 F 盘资源；本机/GitHub 仅保留既有三个分支，正式 `main` 和 `liveSharingTest` 不变。
+
+## .10 日志与定位
+
+用户描述第二次洁净消耗抽牌堆卡牌时，副本停留在选牌页，滚轮不响应；本体选牌后恢复。副本会话 `a83dd23c7dea47f28892c265f3a2a01d` 的两次重复洁净均最终记录两个 WITHER 选择，之后其他出牌继续同步，没有对应的 `Native UI unavailable`。原日志复制到 F 盘 `evidence/user-v9-source.log` 和 `user-v9-renderer.log`。日志只能证明后来恢复，无法还原卡住当时的输入等待状态，也不能证明首次黑屏的具体根因。
+
+选牌网格滚轮原先要通过权威校验、主机执行、journal 回放；即使只是浏览，也会受输入等待和结算状态影响。.10 将 `NCardGridSelectionScreen` 的滚轮改为副本本地原版滚动，排除主机浏览的滚轮记录；卡牌决策继续通过主机、权限/事件计数/状态 hash 校验和原版选牌回调。
+
+专项测试另复现了滚动后同名卡牌点击不能提交：`NGridCardHolder.OnFocus` 会将控件置顶，`NCardGrid` 滚动还会复用控件。按同类兄弟节点顺序产生的旧 key 因此变化；按下记录的 WITHER 控件在松开时已解析到另一位置。现在网格卡牌 key 使用原版 `_cards` 列表的完整位置、模型 ID 和升级等级。源端或重放需要尚未分配的卡牌控件时，先用原版网格滚动/分配方法定位；不选择替代卡牌，不预测效果。该复现确认了旧身份方式的问题，但不是用户原存档/输入时序的逐帧复现。
+
+首次显示同时让 Godot 的窗口尺寸跟随已认证的自有 HWND，并在显示后主动绘制三帧，保留原版淡入。新增尺寸、遮罩和等待状态日志；等待超过 1.5 秒显示“等待主机状态校验或原版结算”。回调/透明遮罩不能单独证明桌面实际已经显示，因此首次黑屏仍需用户原对局确认。
+
+标题栏增加始终可用的 `↻` 重新同步入口；无需先触发错误提示，也无需本体出牌。仅重建当前副本，从权威检查点和 journal 重放，不回滚主机、不调用 F5、不改真实存档。原报错页按钮保留。另对已经离开场景的本体顶栏查询加有效性检查，防止返回主菜单后的旧节点访问。
+
+## .10 验收记录
+
+四个构建目标零警告零错误。v0.111.0 使用 F 盘独立运行目录/档案、屏幕外静音 D3D12/Forward+、禁用 Steam；v0.107.1 仅编译。生产仍只传状态和操作，没有操作当前游戏、真实存档或系统鼠标。
+
+| F 盘 evidence 中的最终记录 | 结果 |
+| --- | --- |
+| `build-v10.log` | 双版本 payload、bootstrap、harness 成功 |
+| `test-v10-replay.log` / manifest | 37 项 PASS，REPLAY PASSED，退出码 0 |
+| `test-v10-full.log` / manifest | 223 项 PASS，FULL PASSED，退出码 0 |
+| `test-v10-feedback.log` / manifest | 164 项 PASS，FEEDBACK PASSED，退出码 0 |
+
+三轮使用相同发布 DLL，SHA-256 `116BDBA89F42BAAB3F47740C0E4657F6D3E02BD262652C82AC7A061206843B26`。专项 harness 为 `03D51039416CA3FA5378DB0A6FD884DB5993DA25CD89FAC584AAC2E79462BC29`；完整流程修正测试辅助反射参数后为 `41B78CD53DB0020E13214512F2DB9DC0AF6F21890C56081659FCA3B4CB9F7AE6`；交互回归对 Windows 诊断文件替换增加有界重试后为 `727658612AB2EFB00424E34E24596713D69643070357B0E227C3C0AF9668685C`。这些测试工具变动没有改变生产 DLL。424 个断言包含 Win32 消息分发，不代表 424 个不同场景。
+
+专项使用亡灵契约师、原版转化增加洁净重复次数、90 张 WITHER 的长牌堆。首次主机输入前验证透明转场、Godot/自有 HWND 尺寸一致和三帧主动绘制完成；随后两次选牌页分别滚动六格、二十格，第二次观战模式滚动后切回控制。滚轮期间主机位置/journal 不变，滚动后选牌由主机判定，最终多消耗两张牌并恢复战斗。无报错时点击标题栏重新同步，再重放两次选择，验证主机状态/RNG/journal 不变。完整流程覆盖雕琢打击、转化、升级与删牌等；交互回归保留 .9 的牌堆浏览、主窗口滚轮转发、连续出牌、工具箱、两次 F5 和错误按钮恢复。
+
+未通过的迭代证据保留为 `moving-hit`、`settled-hit`、`holder-identity`（旧网格身份问题）、`virtual-grid-padding`（新增定位代码误把原版 float 间距当作 Vector2，已修正）、`reflection-argument`（测试反射遗漏新参数）、`state-publication`（Windows 暂时拒绝替换测试 JSON，已加入最多 30 帧重试）。它们不是最终通过记录。最终桌面四文件以 `delivery-v10.json` 核对哈希；清除隔离档案前保留 renderer 日志和截图至 F 盘 evidence。
+
+退出仍有已有的 Godot RID/资源释放和网络消息注册诊断，未宣称日志零错误。首次黑屏的用户现场、物理滚轮体感、全屏/高 DPI、其他 gameplay mod 和未枚举卡牌/遗物组合仍需实际验证。用户无错误文字的原卡住时序没有逐帧复现；修复针对已确认的浏览耦合与网格身份问题，并提供不依赖本体操作的恢复入口。
+
+## .9 历史记录：战斗牌堆与本体鼠标选牌
 
 当前分支为 `multiInstanceTest`，版本 `0.3.9-multiInstance.9`，从 .8 `379983d` 接续。仍只保留 `main`、`liveSharingTest`、`multiInstanceTest`，不合并正式分支或另一方案。资源继续复用 `F:/projectFile/RMPStable-development`，没有新建 C 盘工作树、游戏副本或构建/测试档案。
 
