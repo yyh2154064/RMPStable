@@ -27,6 +27,12 @@ internal sealed partial class SpectatorView : IDisposable
         var input = new ControlInput { Name = "SpectatorLocalInput", Receive = ReceiveLocal };
         _overlay.AddChild(input); input.SetProcessInput(true);
         _status = Text(_content, T("正在启动独立游戏…", "Starting independent game…"), new Rect2(14,14,480,80), 20);
+        _status.HorizontalAlignment = HorizontalAlignment.Center;
+        _status.VerticalAlignment = VerticalAlignment.Center;
+        _status.AutowrapMode = TextServer.AutowrapMode.WordSmart;
+        _status.AddThemeColorOverride("font_color", Colors.White);
+        _status.AddThemeColorOverride("font_outline_color", Colors.Black);
+        _status.AddThemeConstantOverride("outline_size", 5);
         _previousFps = Engine.MaxFps; _previousVsync = DisplayServer.WindowGetVsyncMode();
         if (DisplayServer.GetName() != "headless") { Engine.MaxFps = 120; DisplayServer.WindowSetVsyncMode(DisplayServer.VSyncMode.Disabled); }
         SetControlEnabled(SpectatorPreferences.Current.ControlMode);
@@ -66,7 +72,8 @@ internal sealed partial class SpectatorView : IDisposable
         host?.Layout(_content,combat && _mirror.Process.DisplayReady && host.Attached && SceneMonitor.FindSettingsScreen()?.IsVisibleInTree() != true && !QuickSl.QuickSlController.ConfirmationOpen && !LiveSharingController.SourceMenuOpen);
         _status.Visible = host?.Visible != true;
         if (host?.TakeEscape() == true) SetPreferredControl(false);
-        _status.Size = new Vector2(Math.Max(1,_content.Size.X-28),Math.Max(1,_content.Size.Y-28));
+        _status.Position = new Vector2(_content.Size.X * .08f, _content.Size.Y * .78f);
+        _status.Size = new Vector2(_content.Size.X * .84f, Math.Max(50,_content.Size.Y * .14f));
         LiveSharingController.RouteMapInput(!sourceDialog && _panel.GetGlobalRect().HasPoint(ShellPointer()));
     }
     private TResource? Asset<TResource>(string path) where TResource : Resource => ResourceLoader.Exists(path) ? ResourceLoader.Load<TResource>(path) : null;

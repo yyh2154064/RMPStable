@@ -26,6 +26,9 @@ internal sealed class MirrorHost : IDisposable
     internal MirrorWindowHost? Window { get; private set; }
     internal MirrorHost(ulong source) => Process = new MirrorProcess(source);
     private bool _resetDirty;
+    private bool _publishedReady;
+    private string _publishedHash = "";
+    private int _publishedEvents = -1;
     internal void Tick(RunState? state, double delta)
     {
         Verified = false;
@@ -112,6 +115,11 @@ internal sealed class MirrorHost : IDisposable
             SourceHash = SourceIdle ? MirrorState.Hash(state) : "";
         }
         Verified = SourceIdle && SourceHash.Length > 0 && Process.LastIdle && Process.LastEvents == MirrorJournal.Operations.Count && Process.LastHash == SourceHash;
+        if (_publishedReady != Verified || Verified && (_publishedHash != SourceHash || _publishedEvents != Process.LastEvents))
+        {
+            _publishedReady = Verified; _publishedHash = Verified ? SourceHash : ""; _publishedEvents = Process.LastEvents;
+            _ = Process.Wire.Send(new MirrorMessage { Kind = "ready", Generation = _generation, Idle = Verified, Hash = _publishedHash, Events = _publishedEvents });
+        }
     }
     internal void PublishCheckpoint(CombatReplay replay, bool fastRestore = false)
     {
@@ -122,6 +130,7 @@ internal sealed class MirrorHost : IDisposable
             _ = Process.Wire.Send(new MirrorMessage { Kind = "reset", Generation = _generation, Epoch = _controlEpoch });
         }
         _checkpoint = replay; _generation++; Process.Wire.Identity.Generation = _generation;
+        _publishedReady = false; _publishedHash = ""; _publishedEvents = -1;
         Process.LastIdle = false; Process.LastHash = ""; Process.DisplayReady = false; Verified = false; _timer = 0;
         _sentEvents = MirrorJournal.Operations.Count;
         _ = Process.Wire.Send(new MirrorMessage { Kind = "load", Generation = _generation, FastRestore = fastRestore, Events = _sentEvents, Payload = MirrorState.Pack(replay), Operations = new(MirrorJournal.Operations) });

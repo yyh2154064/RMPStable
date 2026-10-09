@@ -21,7 +21,6 @@ internal static class MirrorFastRestore
         var harmony = new Harmony("RMPStable.NativeCheckpointWarmRestore");
         foreach (var method in typeof(Cmd).GetMethods().Where(m => m.Name is "Wait" or "CustomScaledWait"))
             harmony.Patch(method, prefix: new HarmonyMethod(typeof(MirrorFastRestore).GetMethod(nameof(Wait), Any)));
-        harmony.Patch(typeof(NTransition).GetMethod("RoomFadeIn")!, prefix: new HarmonyMethod(typeof(MirrorFastRestore).GetMethod(nameof(RoomFadeIn), Any)));
         foreach (var name in new[] { "TweenProperty", "TweenMethod" })
             harmony.Patch(typeof(Tween).GetMethod(name)!, prefix: new HarmonyMethod(typeof(MirrorFastRestore).GetMethod(nameof(TweenDuration), Any)));
         harmony.Patch(typeof(Tween).GetMethod("TweenInterval")!, prefix: new HarmonyMethod(typeof(MirrorFastRestore).GetMethod(nameof(Interval), Any)));
@@ -34,11 +33,6 @@ internal static class MirrorFastRestore
         foreach (var argument in __args)
             if (argument is CancellationToken token && token.IsCancellationRequested) { __result = Task.FromCanceled(token); return false; }
         __result = Task.CompletedTask; return false;
-    }
-    private static bool RoomFadeIn(NTransition __instance, ref Task __result)
-    {
-        if (!Active) return true;
-        __result = __instance.FadeIn(.01f); return false;
     }
     private static void TweenDuration(ref double __3) { if (Active) __3 = System.Math.Min(__3, .005); }
     private static void Interval(ref double __0) { if (Active) __0 = System.Math.Min(__0, .005); }

@@ -393,7 +393,7 @@ internal static class QuickSlController
 			}
 			else await NGame.Instance.LoadRun(runState, save.PreFinishedRoom);
 			if (MegaCrit.Sts2.Core.Nodes.Rooms.NCombatRoom.Instance != null)
-				while (MegaCrit.Sts2.Core.Combat.CombatManager.Instance.IsStarting || MegaCrit.Sts2.Core.Combat.CombatManager.Instance.IsInProgress && runState.Players[0].PlayerCombatState?.Phase != MegaCrit.Sts2.Core.Combat.PlayerTurnPhase.Play && !LiveSharing.LocalSpectatorSource.PendingNativeChoice)
+				while (!LiveSharing.LocalSpectatorSource.PendingNativeChoice && (MegaCrit.Sts2.Core.Combat.CombatManager.Instance.IsStarting || MegaCrit.Sts2.Core.Combat.CombatManager.Instance.IsInProgress && runState.Players[0].PlayerCombatState?.Phase != MegaCrit.Sts2.Core.Combat.PlayerTurnPhase.Play))
 					await NGame.Instance.ToSignal(NGame.Instance.GetTree(), SceneTree.SignalName.ProcessFrame);
 			LiveSharing.MirrorFastRestore.Source = false;
 			RestoreStage("native player phase");

@@ -43,8 +43,22 @@ internal sealed partial class LocalSpectatorSource
 		_pausedNativeInput.Clear();
 	}
 	private static Control? NativeRoom => new Control?[] { NRun.Instance?.EventRoom, NRun.Instance?.MerchantRoom, NRun.Instance?.RestSiteRoom, NRun.Instance?.TreasureRoom, NRun.Instance?.MapRoom, NRun.Instance?.CombatRoom }.FirstOrDefault(n => n != null && Ready(n));
-	internal static bool PendingNativeChoice => NTargetManager.Instance?.IsInSelection == true || NOverlayStack.Instance?.Peek() is MegaCrit.Sts2.Core.Nodes.Screens.CardSelection.NCardGridSelectionScreen ||
+	internal static bool PendingNativeChoice => NTargetManager.Instance?.IsInSelection == true || PendingOverlayChoice ||
 		NModalContainer.Instance?.OpenModal != null || NPlayerHand.Instance?.CurrentMode is NPlayerHand.Mode.SimpleSelect or NPlayerHand.Mode.UpgradeSelect;
+	private static bool PendingOverlayChoice
+	{
+		get
+		{
+			var overlay = NOverlayStack.Instance?.Peek() as Control;
+			if (overlay == null || !Ready(overlay)) return false;
+			if (overlay is not MegaCrit.Sts2.Core.Nodes.Screens.CardSelection.ICardSelector &&
+				overlay is not MegaCrit.Sts2.Core.Nodes.Screens.CardSelection.NChooseABundleSelectionScreen) return false;
+			for (var type = overlay.GetType(); type != null; type = type.BaseType)
+				if (type.GetField("_completionSource", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.DeclaredOnly)?.GetValue(overlay) is { } completion)
+					return completion.GetType().GetProperty("Task")?.GetValue(completion) is Task { IsCompleted: false };
+			return false;
+		}
+	}
 	internal static Control? ActiveNativeUi => NModalContainer.Instance?.OpenModal as Control
 		?? (NGame.Instance?.InspectCardScreen?.IsVisibleInTree() == true ? NGame.Instance.InspectCardScreen : null)
 		?? (NGame.Instance?.InspectRelicScreen?.IsVisibleInTree() == true ? NGame.Instance.InspectRelicScreen : null)
@@ -124,7 +138,7 @@ internal sealed partial class LocalSpectatorSource
 					() => Active(holder) && SelectorActive(ui, holder) && Clickable(holder.Hitbox) && holder.Hitbox.IsEnabled && CardClickable?.GetValue(holder) is true,
 					_ => ChooseNativeCard(ui, holder));
 			}
-			foreach (var scroll in Descendants<NScrollableContainer>(ui).Where(Ready))
+			foreach (var scroll in Descendants<Control>(ui).Where(n => n is MegaCrit.Sts2.Core.Nodes.Cards.NCardGrid or NScrollableContainer && Ready(n)))
 				add(new() { Id = "scroll:" + scroll.GetInstanceId(), Kind = "scroll", Rect = GlobalRect(scroll) }, () => Active(scroll), direction => ScrollNative(scroll, direction));
 		}
 		if (root is NMapScreen map)

@@ -10,13 +10,21 @@ namespace RemoveMultiplayerPlayerLimit.Features.LiveSharing;
 internal sealed partial class LocalSpectatorSource
 {
 	private bool _mapInputInPanel;
+	internal bool MapInputInPanel => _mapInputInPanel;
 	private static readonly FieldInfo? MapDrawingInput = typeof(NMapScreen).GetField("_drawingInput", BindingFlags.Instance | BindingFlags.NonPublic);
 	private static NMapDrawingInput? CurrentMapInput => NMapScreen.Instance is { } map ? MapDrawingInput?.GetValue(map) as NMapDrawingInput : null;
 	private NMapDrawings? _remoteMapStroke;
 	internal void RouteNativeMapInput(bool insidePanel)
 	{
+		bool wasInside = _mapInputInPanel;
 		_mapInputInPanel = insidePanel;
-		if (!insidePanel) RestoreNativeInput();
+		if (!insidePanel)
+		{
+			// A held-button helper paused over the popup cannot receive its release.
+			// Retire it before returning native input to the source window.
+			if (wasInside && CurrentMapInput is NMouseHeldMapDrawingInput held && Ready(held)) held.StopDrawing();
+			RestoreNativeInput();
+		}
 		else { if (MegaCrit.Sts2.Core.Nodes.Combat.NTargetManager.Instance?.IsInSelection == true) PauseNativeInput(MegaCrit.Sts2.Core.Nodes.Combat.NTargetManager.Instance); PauseNativeInput(NativePopup); }
 		// Native _Input runs outside GUI hit testing. Give the native pen back
 		// immediately outside the panel; inside, only translated commands draw.
@@ -30,6 +38,7 @@ internal sealed partial class LocalSpectatorSource
 	{
 		if (_remoteMapStroke != null && GodotObject.IsInstanceValid(_remoteMapStroke) && _remoteMapStroke.IsInsideTree() && _remoteMapStroke.IsLocalDrawing()) _remoteMapStroke.StopLineLocal();
 		_remoteMapStroke = null;
+		if (CurrentMapInput is NMouseHeldMapDrawingInput held && Ready(held)) held.StopDrawing();
 	}
 	private bool ExecuteMapInput(NMapScreen map, string payload)
 	{

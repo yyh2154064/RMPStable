@@ -35,11 +35,11 @@ public static partial class Smoke
             new HarmonyLib.Harmony("MultiInstanceSmoke.StateDiagnostics").Patch(Type("MirrorState").GetMethod("Hash",Any)!,
                 postfix:new HarmonyLib.HarmonyMethod(typeof(Smoke).GetMethod(nameof(SaveDiagnostic),Any)!));
         if(Environment.GetEnvironmentVariable("RMP_MULTI_ROLE")=="renderer" && Environment.GetEnvironmentVariable("RMP_MULTI_RENDERER_TEST")=="1")
-        { TaskHelper.RunSafely(RendererVisuals()); return; }
+        { TaskHelper.RunSafely(RendererVisuals()); TaskHelper.RunSafely(RendererFeedback()); return; }
         var args = OS.GetCmdlineArgs(); int force = Array.IndexOf(args, "--force-steam");
         if (Environment.GetEnvironmentVariable("RMP_MULTI_TEST") != "1" || Environment.GetEnvironmentVariable("RMP_MULTI_ROLE") == "renderer" || force < 0 || args[force+1] != "off") return;
         if (DisplayServer.GetName() != "headless") DisplayServer.WindowSetFlag(DisplayServer.WindowFlags.NoFocus, true);
-        TaskHelper.RunSafely(Environment.GetEnvironmentVariable("RMP_MULTI_FULL_TEST") == "1" ? RunFullNative() : Run());
+        TaskHelper.RunSafely(Environment.GetEnvironmentVariable("RMP_MULTI_FEEDBACK_TEST") == "1" ? RunFeedback() : Environment.GetEnvironmentVariable("RMP_MULTI_FULL_TEST") == "1" ? RunFullNative() : Run());
     }
     private static string _diagnosticHash="";
     private static void SaveDiagnostic(string __result)

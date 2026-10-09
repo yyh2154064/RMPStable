@@ -34,6 +34,7 @@ internal static partial class LiveSharingController
     internal static uint NativeHotkey { get; private set; } = 0x77;
     internal static void Initialize() { Suspend(); MirrorJournal.Initialize(); }
     internal static void RouteMapInput(bool insidePanel) => _source?.RouteNativeMapInput(insidePanel);
+    internal static bool MapInputInPanel => _source?.MapInputInPanel == true || _mirror?.Window?.PointerInside == true;
     internal static void ProcessFrame(double delta)
     {
         try { Process(delta); }

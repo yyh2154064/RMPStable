@@ -12,6 +12,10 @@ internal sealed partial class MirrorRenderer
     private readonly Queue<(long Generation, long Epoch, string Key, string Kind, string Value)> _mapInputs = new();
     private string _mapGestureKey = "", _mapGestureMode = "";
     private Vector2 _mapGesturePoint;
+    private void QueueScroll(string key, string value)
+    {
+        if (_mapInputs.Count < 2046) _mapInputs.Enqueue((_desiredGeneration, _epoch, key, "scroll", value));
+    }
     private static string Coordinates(Vector2 point) => point.X.ToString(CultureInfo.InvariantCulture) + "," + point.Y.ToString(CultureInfo.InvariantCulture);
     private void QueueMapInput(string kind, string value)
     {
@@ -55,11 +59,13 @@ internal sealed partial class MirrorRenderer
     }
     private void ProcessMapGesture()
     {
-        if (!_control || _generation != _desiredGeneration || NMapScreen.Instance?.IsOpen != true)
+        if (!_control || _generation != _desiredGeneration || _state == null)
         { _mapGestureKey = ""; _mapGestureMode = ""; _mapInputs.Clear(); return; }
+        if (NMapScreen.Instance?.IsOpen != true) { _mapGestureKey = ""; _mapGestureMode = ""; }
         UpdateMapGesture(_pointer);
         while (_mapInputs.TryPeek(out var pending) && (pending.Generation != _desiredGeneration || pending.Epoch != _epoch)) _mapInputs.Dequeue();
-        if (NativeIdle && !_waitingForAuthority && _mapInputs.TryDequeue(out var input))
+        if (NativeIdle && !_waitingForAuthority && _authorityReady && _authorityEvents == _events &&
+            _authorityHash == MirrorState.Hash(_state) && _mapInputs.TryDequeue(out var input))
         {
             string value = input.Value;
             if (input.Kind == "mapInput" && value.StartsWith("move,", StringComparison.Ordinal))
@@ -83,8 +89,17 @@ internal sealed partial class MirrorRenderer
                 }
                 value = parts[0] + ":" + steps.ToString(CultureInfo.InvariantCulture);
             }
-            SendIntent(input.Kind, -1, -1, MirrorState.Hash(_state!), _events, input.Key, value);
+            if (MirrorNativeUi.Resolve(input.Key) is Control node && node.IsVisibleInTree())
+                SendIntent(input.Kind, -1, -1, MirrorState.Hash(_state!), _events, input.Key, value);
         }
+    }
+    private static void ShowMapSelection(NMapPoint point)
+    {
+        // Native presentation only. The next room still comes from the host checkpoint.
+        if (point is NNormalMapPoint normal)
+            typeof(NNormalMapPoint).GetMethod("ShowCircleVfx", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.Invoke(normal, new object[] { true });
+        var vfx = MegaCrit.Sts2.Core.Nodes.Vfx.NMapNodeSelectVfx.Create(point is NBossMapPoint ? 2f : point is NAncientMapPoint ? 1.5f : 1f);
+        point.AddChild(vfx); vfx.Position += point.PivotOffset;
     }
     private static void ReplayDrawing(NMapDrawings drawings, MirrorOperation operation)
     {

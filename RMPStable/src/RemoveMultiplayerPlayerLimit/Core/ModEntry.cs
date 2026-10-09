@@ -27,9 +27,9 @@ public static class ModEntry
 	public static void Initialize()
 	{
 #if STS2_0111
-		Log.Warn("[RMP Stable] Initializing multi-instance exploration v0.3.9-multiInstance.6 for STS2 v0.111.0 Public Beta...");
+		Log.Warn("[RMP Stable] Initializing multi-instance exploration v0.3.9-multiInstance.7 for STS2 v0.111.0 Public Beta...");
 #else
-		Log.Warn("[RMP Stable] Initializing multi-instance exploration v0.3.9-multiInstance.6 for STS2 v0.107.1...");
+		Log.Warn("[RMP Stable] Initializing multi-instance exploration v0.3.9-multiInstance.7 for STS2 v0.107.1...");
 #endif
 		Modules.Clear();
 		ConfigManager configManager = new ConfigManager();

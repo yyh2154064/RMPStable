@@ -84,6 +84,7 @@ internal static class MirrorJournal
         Patch(typeof(NPotionPopup).GetMethod("Remove", Any)!, prefix: nameof(PopupRemoved), finalizer: nameof(EndUi));
         Patch(typeof(NMapScreen).GetMethod("ProcessScrollEvent", Any)!, prefix: nameof(ScrollInput));
         Patch(typeof(NScrollableContainer).GetMethod("ProcessScrollEvent", Any)!, prefix: nameof(ScrollInput));
+        Patch(typeof(MegaCrit.Sts2.Core.Nodes.Cards.NCardGrid).GetMethod("ProcessScrollEvent", Any)!, prefix: nameof(ScrollInput));
         Patch(typeof(NMapDrawings).GetMethod("BeginLineLocal", Any)!, prefix: nameof(DrawingStarted));
         Patch(typeof(NMapDrawings).GetMethod("UpdateCurrentLinePositionLocal", Any)!, prefix: nameof(DrawingMoved));
         Patch(typeof(NMapDrawings).GetMethod("StopLineLocal", Any)!, prefix: nameof(DrawingStopped));
@@ -91,6 +92,7 @@ internal static class MirrorJournal
         Patch(typeof(NMouseModeMapDrawingInput).GetMethod("_Input", Any)!, prefix: nameof(ReplicaDrawingInput));
         Patch(typeof(NMouseHeldMapDrawingInput).GetMethod("_Input", Any)!, prefix: nameof(ReplicaDrawingInput));
         Patch(typeof(NMapScreen).GetMethod("_GuiInput", Any)!, prefix: nameof(ReplicaDrawingInput));
+        Patch(typeof(NMapScreen).GetMethod("ProcessMouseDrawingEvent", Any)!, prefix: nameof(ReplicaDrawingInput));
         Patch(typeof(CardReward).GetMethod("Populate", Any)!, prefix: nameof(RewardPopulating), postfix: nameof(RewardPopulated));
         _installed = true;
     }
@@ -191,7 +193,7 @@ internal static class MirrorJournal
     private static void DrawingMoved(NMapDrawings __instance, Vector2 position) => DrawingEvent(__instance, "drawMove", Point(position));
     private static void DrawingStopped(NMapDrawings __instance) => DrawingEvent(__instance, "drawEnd", "");
     private static void DrawingModeChanged(NMapDrawings __instance, DrawingMode drawingMode) => DrawingEvent(__instance, "drawMode", ((int)drawingMode).ToString());
-    private static bool ReplicaDrawingInput() => !MirrorRenderer.IsRenderer;
+    private static bool ReplicaDrawingInput() => !MirrorRenderer.IsRenderer && !LiveSharingController.MapInputInPanel;
     private static void RewardPopulating(CardReward __instance, out bool __state) => __state = !__instance.IsPopulated;
     private static void RewardPopulated(CardReward __instance, bool __state)
     {

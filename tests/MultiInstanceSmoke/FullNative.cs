@@ -115,6 +115,28 @@ public static partial class Smoke
             Send(0x204,.55f,.55f); await Frames(10); Send(0x205,-.02f,1.02f);
             await Until(()=>Verified && (int)Field(process,"LastEvents")!>drawingEvents &&
                 (string)Field(process,"LastDrawingHash")! == (string)Type("MirrorState").GetMethod("DrawingHash",Any)!.Invoke(null,null)!,"native map stroke released outside window terminates consistently");
+            Check(!NMapScreen.Instance!.Drawings.IsLocalDrawing() && NMapScreen.Instance.Drawings.GetLocalDrawingMode()==DrawingMode.None,"right-button release leaves no source drawing or override mode");
+            var map=NMapScreen.Instance!;
+            Call(source,"RouteNativeMapInput",true);
+            map._GuiInput(new InputEventMouseButton{ButtonIndex=MouseButton.Right,Pressed=true,Position=new Vector2(640,360)});
+            Check(Field(map,"_drawingInput")==null,"source GUI cannot start another held pen while pointer is over replica");
+            Call(source,"RouteNativeMapInput",false);
+            var held=NMapDrawingInput.Create(map.Drawings,DrawingMode.Drawing,true);
+            held.Connect(NMapDrawingInput.SignalName.Finished,Callable.From(()=>map.GetType().GetField("_drawingInput",Any)!.SetValue(map,null)));
+            map.GetType().GetField("_drawingInput",Any)!.SetValue(map,held); map.AddChild(held);
+            Call(source,"RouteNativeMapInput",true); Call(source,"RouteNativeMapInput",false);
+            Check(held.IsQueuedForDeletion() && !map.Drawings.IsLocalDrawing() && map.Drawings.GetLocalDrawingMode()==DrawingMode.None,"return to source retires held pen whose button release occurred over popup");
+            await Until(()=>Verified && (string)Field(process,"LastDrawingHash")! == (string)Type("MirrorState").GetMethod("DrawingHash",Any)!.Invoke(null,null)!,"drawing cleanup remains synchronized with replica");
+            float mapBefore=((Vector2)Field(map,"_targetDragPos")!).Y;
+            GD.Print("[MultiInstanceSmoke] MAP WHEEL before="+mapBefore+" canScroll="+Call(map,"CanScroll")+" sourceEvents="+Field(process,"LastEvents"));
+            var wheelPoint=new NativePoint{X=170,Y=110}; ClientToScreen(Window(),ref wheelPoint);
+            for(int wheel=0;wheel<6;wheel++)
+                Check(SendMessageTimeoutW(Window(),0x20A,(nuint)((120&65535)<<16),(nint)((wheelPoint.Y<<16)|(wheelPoint.X&65535)),2,1000,out _)!=0,"queued map wheel dispatched");
+            await Frames(120);
+            GD.Print("[MultiInstanceSmoke] MAP WHEEL after="+((Vector2)Field(map,"_targetDragPos")!).Y+" canScroll="+Call(map,"CanScroll")+" sourceEvents="+Field(process,"LastEvents"));
+            await Until(()=>Verified && ((Vector2)Field(map,"_targetDragPos")!).Y>mapBefore+500,"six rapid map wheel ticks move at least 500 native pixels without losses");
+            Type("LocalSpectatorSource").GetMethod("ScrollNative",Any)!.Invoke(null,new object[]{map,"down:24"}); await Frames(90);
+            await Until(()=>Verified,"map returns to initial scroll range before travel regression");
             if(Environment.GetEnvironmentVariable("RMP_MULTI_ROOMS_TEST") != "1")
             {
             if(NMapScreen.Instance?.IsOpen!=true) await Click(a=>Node(a)?.GetType().Name=="NOpenMapButton","open original map");

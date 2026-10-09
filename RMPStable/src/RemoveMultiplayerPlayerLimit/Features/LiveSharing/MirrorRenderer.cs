@@ -20,6 +20,7 @@ using MegaCrit.Sts2.Core.Multiplayer.Replay;
 using MegaCrit.Sts2.Core.Nodes;
 using MegaCrit.Sts2.Core.Nodes.Combat;
 using MegaCrit.Sts2.Core.Nodes.Cards.Holders;
+using MegaCrit.Sts2.Core.Nodes.Cards;
 using MegaCrit.Sts2.Core.Nodes.Screens.Shops;
 using MegaCrit.Sts2.Core.Nodes.Rooms;
 using MegaCrit.Sts2.Core.Rooms;
@@ -32,6 +33,7 @@ using MegaCrit.Sts2.Core.Nodes.Screens.Capstones;
 using MegaCrit.Sts2.Core.Nodes.Screens.Map;
 using MegaCrit.Sts2.Core.Nodes.Screens.Overlays;
 using MegaCrit.Sts2.Core.Nodes.Screens.Settings;
+using MegaCrit.Sts2.Core.Nodes.Screens;
 using RemoveMultiplayerPlayerLimit.Infrastructure;
 
 namespace RemoveMultiplayerPlayerLimit.Features.LiveSharing;
@@ -59,8 +61,8 @@ internal sealed partial class MirrorRenderer : IDisposable
     private MirrorWindowHook? _input;
     private bool _control, _attached, _lastIdle, _waitingForAuthority;
     private long _epoch, _request, _dragGeneration;
-    private int _dragIndex = -1, _dragEvents, _submittedEvents;
-    private string _dragHash = "";
+    private int _submittedEvents;
+    private int _dragTurn;
     private CardModel? _dragCard;
     private NCardPlay? _nativePlay;
     private bool _dragReleased;
@@ -141,15 +143,22 @@ internal sealed partial class MirrorRenderer : IDisposable
                     MirrorWin32.ClipOwn(message); break;
                 case "control":
                     if (message.Epoch <= _epoch) break;
-                    _control = message.Control; _epoch = message.Epoch; _statusTimer = 0; CancelDrag(); _pressedUi = null; break;
+                    _control = message.Control; _epoch = message.Epoch; _statusTimer = 0; CancelDrag(); _pressedUi = null;
+                    _pendingCards.Clear(); _submittedCard = null; _waitingForAuthority = false; break;
+                case "ready":
+                    if (message.Generation == _desiredGeneration)
+                    { _authorityReady = message.Idle; _authorityEvents = message.Events; _authorityHash = message.Hash; }
+                    break;
                 case "result":
                     if (Diagnostic) GD.Print("[RMP:Mirror:Input] result accepted=" + message.Accepted + " reason=" + message.Room);
                     if (message.Generation == _generation && message.Epoch == _epoch && message.Request == _request && (!message.Accepted || message.Model == "menu")) _waitingForAuthority = false;
+                    if (message.Generation == _generation && message.Epoch == _epoch && message.Request == _request && !message.Accepted) _submittedCard = null;
                     break;
                 case "reset":
                     if (message.Generation <= _desiredGeneration) break;
                     _desiredGeneration = message.Generation; _sceneReady = false; _control = false; CancelDrag(); _pressedUi = null;
                     _waitingForAuthority = false; _stateMessages.Clear(); Stage("等待读档后的权威检查点");
+                    _authorityReady = false; _pendingCards.Clear();
                     break;
                 case "load":
                     if (message.Generation <= _desiredGeneration) break;
@@ -168,10 +177,11 @@ internal sealed partial class MirrorRenderer : IDisposable
                 if (stateMessage.Kind == "load" && stateMessage.Generation > _generation)
                 { _busy = true; CancelDrag(); TaskHelper.RunSafely(Load(stateMessage)); break; }
                 if (stateMessage.Generation != _generation) continue;
-                if (stateMessage.Kind == "events") { _busy = true; CancelDrag(); TaskHelper.RunSafely(Apply(stateMessage)); break; }
+                if (stateMessage.Kind == "events") { _busy = true; TaskHelper.RunSafely(Apply(stateMessage)); break; }
             }
         if (_waitingForAuthority && _events > _submittedEvents) _waitingForAuthority = false;
         ProcessLocalInput();
+        ProcessBufferedCards();
         bool idle = NativeIdle;
         bool windowVisible = DisplayServer.GetName() != "headless" && MirrorWin32.IsWindowVisible(MirrorWin32.OwnWindow);
         if (windowVisible != _lastWindowVisible) { _lastWindowVisible = windowVisible; _statusTimer = 0; }
@@ -221,7 +231,13 @@ internal sealed partial class MirrorRenderer : IDisposable
         // Only the explicitly allowed presentation UI receives engine buttons.
         // Gameplay buttons never reach the replica's original game handlers.
         if (message == MirrorWin32.LeftUp) _uiButton = false;
-        if (message == 0x20A && _buttons.Count < 32) _buttons.Enqueue((message,_pointer,_desiredGeneration,_epoch,(short)((ulong)key >> 16) / 120f));
+        if (message == 0x20A && _buttons.Count < 128)
+        {
+            var point = new MirrorWin32.Point { X = (short)((long)data & 0xFFFF), Y = (short)(((long)data >> 16) & 0xFFFF) };
+            if (MirrorWin32.ScreenToClient(MirrorWin32.OwnWindow, ref point) && MirrorWin32.GetClientRect(MirrorWin32.OwnWindow, out var size))
+                _pointer = new Vector2(point.X / (float)Math.Max(1, size.Right), point.Y / (float)Math.Max(1, size.Bottom));
+            _buttons.Enqueue((message,_pointer,_desiredGeneration,_epoch,(short)((ulong)key >> 16) / 120f));
+        }
         if ((message is 0x204 or 0x205 or 0x207 or 0x208 || message == MirrorWin32.KeyDown && key == 27) && _buttons.Count < 32)
         {
             _buttons.Enqueue((message,_pointer,_desiredGeneration,_epoch,0));
@@ -245,7 +261,7 @@ internal sealed partial class MirrorRenderer : IDisposable
         if (kind == "play" && NPlayerHand.Instance is { } hand)
         {
             var cards = _state?.Players[0].PlayerCombatState?.Hand.Cards.ToList();
-            var holder = hand.ActiveHolders.OrderBy(h => h.ZIndex).LastOrDefault(h => Contains(h.Hitbox, point));
+            var holder = hand.ActiveHolders.OrderBy(h => h.ZIndex).LastOrDefault(h => !IsCardReserved(h.CardModel) && Contains(h.Hitbox, point));
             int index = holder == null ? -1 : cards?.IndexOf(holder.CardModel!) ?? -1;
             return index < 0 ? null : new MirrorHit { Kind = kind, Index = index };
         }
@@ -320,16 +336,22 @@ internal sealed partial class MirrorRenderer : IDisposable
                     holder.EmitSignal(NCardHolder.SignalName.Pressed, holder);
                 continue;
             }
-            if (UiOnlyOpen || NCapstoneContainer.Instance?.CurrentCapstoneScreen is NPauseMenu) { CancelDrag(); continue; }
-            if (!_control || !NativeIdle || _waitingForAuthority) { CancelDrag(); continue; }
             if (input.Message == 0x20A)
             {
+                if (PresentationScrollRoot is { } local)
+                {
+                    var container = LocalSpectatorSource.Descendants<Control>(local).LastOrDefault(n => n is NCardGrid or NScrollableContainer && Contains(n, input.Point));
+                    if (container != null && input.Wheel != 0) LocalSpectatorSource.ScrollNative(container, WheelValue(input.Wheel));
+                    continue;
+                }
+                if (!_control || _state == null || !_sceneReady) continue;
                 var scroll = _commands.CaptureCommands(_state!).Control.Actions.LastOrDefault(a => a.Enabled && a.Kind == "scroll" &&
                     MirrorNativeUi.Resolve(a.NativePath) is Control node && Contains(node, input.Point));
-                if (scroll != null && input.Wheel != 0) SendIntent("scroll", -1, -1, MirrorState.Hash(_state!), _events, scroll.NativePath,
-                    (input.Wheel > 0 ? "up:" : "down:") + Math.Min(64, Math.Abs(input.Wheel)).ToString(System.Globalization.CultureInfo.InvariantCulture));
+                if (scroll != null && input.Wheel != 0) QueueScroll(scroll.NativePath, WheelValue(input.Wheel * (NMapScreen.Instance?.IsOpen == true ? 4 : 1)));
                 continue;
             }
+            if (UiOnlyOpen || NCapstoneContainer.Instance?.CurrentCapstoneScreen is NPauseMenu) { CancelDrag(); continue; }
+            if (!_control || (!NativeIdle || _waitingForAuthority) && !(CanBufferCard && input.Message is MirrorWin32.LeftDown or MirrorWin32.LeftUp)) { CancelDrag(); continue; }
             if (input.Message == MirrorWin32.LeftUp && _pressedAction != null)
             {
                 var selected = _pressedAction; _pressedAction = null;
@@ -340,19 +362,20 @@ internal sealed partial class MirrorRenderer : IDisposable
             if (input.Message == MirrorWin32.LeftDown)
             {
                 CancelDrag();
-                var available = _commands.CaptureCommands(_state!).Control.Actions;
+                var available = NativeIdle && !_waitingForAuthority ? _commands.CaptureCommands(_state!).Control.Actions : new List<ControlActionSnapshot>();
                 var selected = available.LastOrDefault(a => a.Enabled && a.Kind is not "play" and not "endTurn" and not "scroll" and not "mapInput" &&
                     a.NativePath.Length > 0 && MirrorNativeUi.Resolve(a.NativePath) is Control n && Contains(InteractiveArea(n), input.Point));
                 if (selected != null) { _pressedAction = selected; if (Diagnostic) GD.Print("[RMP:Mirror:Input] native press " + selected.Kind + ":" + selected.NativePath); continue; }
                 if (NMapScreen.Instance?.IsOpen == true)
                 { StartMapGesture(input.Point, NMapScreen.Instance.Drawings.GetLocalDrawingMode(false) == DrawingMode.None ? "pan" : "pen"); continue; }
+                if (!CanBufferCard) continue;
                 if (Hit("endTurn",input.Point) != null) { SendIntent("endTurn",-1,-1,MirrorState.Hash(_state!),_events); continue; }
                 var hit = Hit("play",input.Point);
                 var hand = _state!.Players[0].PlayerCombatState?.Hand.Cards;
                 if (hit == null || hand == null || hit.Index < 0 || hit.Index >= hand.Count) continue;
-                _dragCard = hand[hit.Index]; _dragIndex = hit.Index; _dragStart = input.Point;
-                _dragHash = MirrorState.Hash(_state); _dragEvents = _events; _dragGeneration = _generation;
-                if (Diagnostic) GD.Print("[RMP:Mirror:Input] drag card=" + _dragCard.Id + " handIndex=" + _dragIndex + " events=" + _dragEvents);
+                _dragCard = hand[hit.Index]; _dragStart = input.Point; _dragGeneration = _generation;
+                _dragTurn = _state.Players[0].PlayerCombatState!.TurnNumber;
+                if (Diagnostic) GD.Print("[RMP:Mirror:Input] drag card=" + _dragCard.Id + " handIndex=" + hit.Index + " events=" + _events);
                 var holder = NPlayerHand.Instance!.GetCardHolder(_dragCard);
                 if (holder == null) { CancelDrag(); continue; }
                 _dragReleased = false;
@@ -380,7 +403,7 @@ internal sealed partial class MirrorRenderer : IDisposable
                 _dragDiagnostic = true;
                 GD.Print("[RMP:Mirror:Input] native drag pointer=" + NativePointer + " startY=" + typeof(NMouseCardPlay).GetField("_dragStartYPosition", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(_nativePlay) + " threshold=" + typeof(NMouseCardPlay).GetProperty("PlayZoneThreshold", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(_nativePlay) + " targeting=" + NTargetManager.Instance?.IsInSelection);
             }
-            if (!NativeIdle || !_control || _events != _dragEvents) { CancelDrag(); return; }
+            if (!CanBufferCard || _generation != _dragGeneration || _state!.Players[0].PlayerCombatState!.TurnNumber != _dragTurn) { CancelDrag(); return; }
             int target = Hit("target",_pointer)?.Index ?? -1;
             var creature = target >= 0 ? _state!.Players[0].Creature.CombatState?.Creatures.ElementAtOrDefault(target) : null;
             bool legal = creature != null && _dragCard.CanPlayTargeting(creature);
@@ -412,6 +435,9 @@ internal sealed partial class MirrorRenderer : IDisposable
     private bool UiOnlyOpen => SceneMonitor.FindSettingsScreen()?.IsVisibleInTree() == true;
     private bool PresentationOpen => UiOnlyOpen || NCapstoneContainer.Instance?.CurrentCapstoneScreen != null ||
         NMapScreen.Instance?.IsOpen == true || NOverlayStack.Instance?.Peek() != null || NModalContainer.Instance?.OpenModal != null;
+    private Control? PresentationScrollRoot => NCapstoneContainer.Instance?.CurrentCapstoneScreen is NDeckViewScreen deck ? deck :
+        NCapstoneContainer.Instance?.CurrentCapstoneScreen is NCardPileScreen pile ? pile : null;
+    private static string WheelValue(float wheel) => (wheel > 0 ? "up:" : "down:") + Math.Min(64, Math.Abs(wheel)).ToString(System.Globalization.CultureInfo.InvariantCulture);
     private Control? LocalUiAt(Vector2 point)
     {
         if (_state == null || _generation != _desiredGeneration) return null;
@@ -438,8 +464,8 @@ internal sealed partial class MirrorRenderer : IDisposable
         if (pause != null)
             return LocalSpectatorSource.Descendants<NClickableControl>(pause).LastOrDefault(n =>
                 n.Name.ToString() is "Resume" or "Settings" or "Compendium" or "GiveUp" or "SaveAndQuit" or "RmpQuickSl" && n.IsEnabled && Contains(n, point));
-        if (screen is Node screenNode && screen.GetType().Name == "NDeckViewScreen")
-            return LocalSpectatorSource.Descendants<NBackButton>(screenNode).LastOrDefault(n => n.IsEnabled && Contains(n, point)) ??
+        if (PresentationScrollRoot is { } screenNode)
+            return LocalSpectatorSource.Descendants<NClickableControl>(screenNode).LastOrDefault(n => n.IsEnabled && MirrorNativeUi.Parent<NCardHolder>(n) == null && Contains(n, point)) ??
                 (Control?)LocalSpectatorSource.Descendants<NCardHolder>(screenNode).LastOrDefault(n => n.Hitbox.IsEnabled && Contains(n.Hitbox, point));
         var top = NRun.Instance?.GlobalUi.TopBar;
         if (top == null) return null;
@@ -454,7 +480,7 @@ internal sealed partial class MirrorRenderer : IDisposable
     }
     private void CancelDrag()
     {
-        _dragCard = null; _dragIndex = -1; _dragReleased = false;
+        _dragCard = null; _dragReleased = false;
         var play = _nativePlay; _nativePlay = null;
         if (play != null && GodotObject.IsInstanceValid(play) && !play.IsQueuedForDeletion()) play.CancelPlayCard();
     }
@@ -464,9 +490,17 @@ internal sealed partial class MirrorRenderer : IDisposable
         if (_notice == null)
         {
             _noticeLayer = new CanvasLayer { Layer = 110 }; NGame.Instance.AddChild(_noticeLayer);
-            _notice = new Label { Position = new Vector2(16,16), MouseFilter = Control.MouseFilterEnum.Ignore };
+            _notice = new Label { MouseFilter = Control.MouseFilterEnum.Ignore, HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center, AutowrapMode = TextServer.AutowrapMode.WordSmart };
+            _notice.AddThemeColorOverride("font_color", Colors.White);
+            _notice.AddThemeColorOverride("font_outline_color", Colors.Black);
+            _notice.AddThemeConstantOverride("outline_size", 6);
+            _notice.AddThemeFontSizeOverride("font_size", 26);
             _noticeLayer.AddChild(_notice);
         }
+        var size = NGame.Instance.GetViewport().GetVisibleRect().Size;
+        _notice.Position = new Vector2(size.X * .08f, size.Y * .78f);
+        _notice.Size = new Vector2(size.X * .84f, size.Y * .14f);
         _notice.Text = _error.Length > 0 ? "同步失败，控制已暂停：" + _error.Split('\n')[0] : !_sceneReady ? _phase : "";
     }
     private List<MirrorHit> CaptureHits()
@@ -493,6 +527,9 @@ internal sealed partial class MirrorRenderer : IDisposable
             Add("endTurn", -1, combat.Ui.EndTurnButton);
         }
         Add("ui.pause", -1, NRun.Instance?.GlobalUi.TopBar.Pause);
+        Add("ui.deck", -1, NRun.Instance?.GlobalUi.TopBar.Deck);
+        if (PresentationScrollRoot is { } presentation)
+            Add("ui.return", -1, LocalSpectatorSource.Descendants<NClickableControl>(presentation).FirstOrDefault(n => n.IsEnabled && n.IsVisibleInTree() && (n is NBackButton || n.Name.ToString() == "BackButton")));
         if (NCapstoneContainer.Instance?.CurrentCapstoneScreen is Node screen)
         {
             foreach (var button in LocalSpectatorSource.Descendants<NClickableControl>(screen).Where(n => n.IsEnabled && n.IsVisibleInTree()))
@@ -514,6 +551,7 @@ internal sealed partial class MirrorRenderer : IDisposable
         try
         {
             _generation = message.Generation; _wire.Identity.Generation = _generation; _events = 0; _error = ""; _waitingForAuthority = false; _drawFrames = 0;
+            _authorityReady = false; _pendingCards.Clear(); _submittedCard = null;
             Stage("重建原版对局");
             MirrorFastRestore.Replica = message.FastRestore;
             CheckGeneration(message.Generation);
@@ -560,7 +598,7 @@ internal sealed partial class MirrorRenderer : IDisposable
                 manager.MapDrawingsToLoad = null;
             }
             if (message.FastRestore && NCombatRoom.Instance != null)
-                while (CombatManager.Instance.IsStarting || CombatManager.Instance.IsInProgress && _state.Players[0].PlayerCombatState?.Phase != PlayerTurnPhase.Play && !LocalSpectatorSource.PendingNativeChoice)
+                while (!LocalSpectatorSource.PendingNativeChoice && (CombatManager.Instance.IsStarting || CombatManager.Instance.IsInProgress && _state.Players[0].PlayerCombatState?.Phase != PlayerTurnPhase.Play))
                     await Frame(message.Generation);
             MirrorFastRestore.Replica = false;
             CheckGeneration(message.Generation);
@@ -646,7 +684,8 @@ internal sealed partial class MirrorRenderer : IDisposable
                 // Map travel is rebased from the authoritative next-room
                 // checkpoint. Starting a second asynchronous room entry here
                 // would race that rebase and keep a freed map scene alive.
-                if (operation.Kind == "button" && (node is NMapPoint || node is NProceedButton && _state?.CurrentRoom?.RoomType == RoomType.Boss)) { }
+                if (operation.Kind == "button" && node is NMapPoint point) ShowMapSelection(point);
+                else if (operation.Kind == "button" && node is NProceedButton && _state?.CurrentRoom?.RoomType == RoomType.Boss) { }
                 else if (operation.Kind == "button" && node is NClickableControl clickable) clickable.ForceClick();
                 else if (operation.Kind == "card" && node is NCardHolder holder) holder.EmitSignal(NCardHolder.SignalName.Pressed, holder);
                 else if (operation.Kind == "buy" && node is NMerchantSlot slot)
@@ -677,12 +716,15 @@ internal sealed partial class MirrorRenderer : IDisposable
     internal void SubmitNativeCard(NCardPlay play, Creature? target)
     {
         var card = _dragCard;
-        int index = _dragIndex, events = _dragEvents; string hash = _dragHash;
-        bool valid = card != null && card == play.Holder.CardModel && _generation == _dragGeneration && _events == events &&
-            NativeIdle && MirrorState.Hash(_state!) == hash && _state!.Players[0].PlayerCombatState?.Hand.Cards.ElementAtOrDefault(index) == card && card.CanPlayTargeting(target);
-        int targetIndex = target == null ? -1 : target.CombatState.Creatures.ToList().IndexOf(target);
+        bool valid = card != null && card == play.Holder.CardModel && _generation == _dragGeneration &&
+            CanBufferCard && _state!.Players[0].PlayerCombatState!.TurnNumber == _dragTurn && _state.Players[0].PlayerCombatState.Hand.Cards.Contains(card);
+        int turn = _dragTurn;
         CancelDrag();
-        if (valid) SendIntent("play", index, targetIndex, hash, events);
+        if (valid && _pendingCards.Count < 8 && !_pendingCards.Any(p => ReferenceEquals(p.Card, card)))
+        {
+            _pendingCards.Enqueue(new BufferedCard(card!, target, _generation, _epoch, turn, Time.GetTicksMsec()));
+            if (Diagnostic) GD.Print("[RMP:Mirror:Input] buffered card=" + card!.Id + " waiting=" + _waitingForAuthority + " busy=" + _busy);
+        }
     }
     private void Quit() { Dispose(); ((SceneTree)Engine.GetMainLoop()).Quit(); }
     public void Dispose()
