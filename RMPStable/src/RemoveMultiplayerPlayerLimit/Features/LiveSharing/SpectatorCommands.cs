@@ -82,9 +82,18 @@ internal sealed partial class LocalSpectatorSource
 	private static readonly FieldInfo? ChooseOpenedTicks = typeof(NChooseACardSelectionScreen).GetField("_openedTicks", BindingFlags.Instance | BindingFlags.NonPublic);
 	private static readonly ulong ChooseCooldown = (ulong)(typeof(NChooseACardSelectionScreen).GetField("_noSelectionTimeMsec", BindingFlags.Static | BindingFlags.NonPublic)?.GetRawConstantValue() ?? 350UL);
 	private static bool SelectionCooldownComplete(Node selection) => ChooseOpenedTicks?.GetValue(selection) is ulong opened && Time.GetTicksMsec() - opened > ChooseCooldown;
-	internal static bool NativeReplayReady(Node node)
+	internal static string HandSelectionContext(Node node) => NPlayerHand.Instance is { } hand &&
+		(node is NHandCardHolder or NSelectedHandCardHolder || node == HandConfirm?.GetValue(hand)) &&
+		hand.CurrentMode is NPlayerHand.Mode.SimpleSelect or NPlayerHand.Mode.UpgradeSelect ? "hand:" + hand.CurrentMode : "";
+	private static readonly FieldInfo? HandCompletion = typeof(NPlayerHand).GetField("_selectionCompletionSource", BindingFlags.Instance | BindingFlags.NonPublic);
+	internal static bool NativeReplayReady(Node node, string selectionContext = "")
 	{
 		if (!node.IsNodeReady() || node.IsQueuedForDeletion()) return false;
+		// A queued play action may still be animating when the next operation
+		// arrives. Never interpret a hand choice as a normal card play.
+		if (selectionContext.StartsWith("hand:", StringComparison.Ordinal) &&
+			(NPlayerHand.Instance is not { } hand || "hand:" + hand.CurrentMode != selectionContext || hand.PeekButton.IsPeeking ||
+			 HandCompletion?.GetValue(hand)?.GetType().GetProperty("Task")?.GetValue(HandCompletion.GetValue(hand)) is not Task { IsCompleted: false })) return false;
 		if (NOverlayStack.Instance?.Peek() is Node overlay && (node == overlay || overlay.IsAncestorOf(node)) && !SelectorActive(overlay, node)) return false;
 		if (node is NCardHolder holder) return holder.Hitbox.IsEnabled && CardClickable?.GetValue(holder) is true;
 		return node is not NClickableControl button || button.IsEnabled;

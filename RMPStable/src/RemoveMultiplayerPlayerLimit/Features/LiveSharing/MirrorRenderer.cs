@@ -140,7 +140,8 @@ internal sealed partial class MirrorRenderer : IDisposable
                     GD.Print("[RMP:Mirror:Window] owned popup source=" + message.Window); break;
                 case "clip":
                     if (!_attached) throw new InvalidDataException("Window ownership required before clipping");
-                    MirrorWin32.ClipOwn(message); break;
+                    MirrorWin32.ClipOwn(message);
+                    _presentationWheelScale = float.IsFinite(message.WheelScale) ? Math.Clamp(message.WheelScale, 1, 8) : 1; break;
                 case "control":
                     if (message.Epoch <= _epoch) break;
                     _control = message.Control; _epoch = message.Epoch; _statusTimer = 0; CancelDrag(); _pressedUi = null;
@@ -211,6 +212,7 @@ internal sealed partial class MirrorRenderer : IDisposable
         }
         UpdateNotice();
     }
+    private float _presentationWheelScale = 1;
     private bool NativeIdle => !_busy && _generation == _desiredGeneration && _error.Length == 0 && _state != null && _replay != null && MirrorHost.SourceIdle;
     private bool InterceptInput(uint message, nuint key, nint data)
     {
@@ -341,7 +343,7 @@ internal sealed partial class MirrorRenderer : IDisposable
                 if (PresentationScrollRoot is { } local)
                 {
                     var container = LocalSpectatorSource.Descendants<Control>(local).LastOrDefault(n => n is NCardGrid or NScrollableContainer && Contains(n, input.Point));
-                    if (container != null && input.Wheel != 0) LocalSpectatorSource.ScrollNative(container, WheelValue(input.Wheel));
+                    if (container != null && input.Wheel != 0) LocalSpectatorSource.ScrollNative(container, WheelValue(input.Wheel * _presentationWheelScale));
                     continue;
                 }
                 if (!_control || _state == null || !_sceneReady) continue;
@@ -469,7 +471,12 @@ internal sealed partial class MirrorRenderer : IDisposable
                 (Control?)LocalSpectatorSource.Descendants<NCardHolder>(screenNode).LastOrDefault(n => n.Hitbox.IsEnabled && Contains(n.Hitbox, point));
         var top = NRun.Instance?.GlobalUi.TopBar;
         if (top == null) return null;
-        return new NClickableControl[] { top.Pause, top.Deck }.LastOrDefault(n => n.IsEnabled && Contains(n, point));
+        // The original pile button cancels targeting. Do not let a local
+        // browsing click cancel an authoritative potion/other choice task.
+        return new NClickableControl[] { top.Pause, top.Deck }.Concat(NCombatRoom.Instance == null || NTargetManager.Instance?.IsInSelection == true ? Enumerable.Empty<NClickableControl>() :
+            LocalSpectatorSource.Descendants<NClickableControl>(NCombatRoom.Instance).Where(n =>
+                n.GetType().Name is "NDrawPileButton" or "NDiscardPileButton" or "NExhaustPileButton"))
+            .LastOrDefault(n => n.IsEnabled && Contains(n, point));
     }
     private void SendIntent(string kind, int index, int target, string hash, int events, string nodeKey = "", string value = "")
     {
@@ -525,6 +532,9 @@ internal sealed partial class MirrorRenderer : IDisposable
         {
             foreach (var node in combat.CreatureNodes.Where(n => n.Entity.CombatState != null)) Add("target", node.Entity.CombatState.Creatures.ToList().IndexOf(node.Entity), node.Hitbox);
             Add("endTurn", -1, combat.Ui.EndTurnButton);
+            foreach (var button in LocalSpectatorSource.Descendants<NClickableControl>(combat))
+                if (button.GetType().Name is "NDrawPileButton" or "NDiscardPileButton" or "NExhaustPileButton")
+                    Add("ui." + (button.GetType().Name == "NDrawPileButton" ? "draw" : button.GetType().Name == "NDiscardPileButton" ? "discard" : "exhaust"), -1, button);
         }
         Add("ui.pause", -1, NRun.Instance?.GlobalUi.TopBar.Pause);
         Add("ui.deck", -1, NRun.Instance?.GlobalUi.TopBar.Deck);
@@ -680,9 +690,9 @@ internal sealed partial class MirrorRenderer : IDisposable
             {
                 var deadline = Stopwatch.StartNew();
                 Node? node;
-                while ((node = MirrorNativeUi.Resolve(operation.NodeKey)) == null || node is CanvasItem canvas && !canvas.IsVisibleInTree() || !LocalSpectatorSource.NativeReplayReady(node))
+                while ((node = MirrorNativeUi.Resolve(operation.NodeKey)) == null || node is CanvasItem canvas && !canvas.IsVisibleInTree() || !LocalSpectatorSource.NativeReplayReady(node, operation.Value))
                 {
-                    if (deadline.Elapsed.TotalSeconds > 20) throw new InvalidDataException("Native UI unavailable: " + operation.Kind + ":" + operation.NodeKey + " generation=" + generation + " operation=" + _events + "/" + operations.Count);
+                    if (deadline.Elapsed.TotalSeconds > 20) throw new InvalidDataException("Native UI unavailable: " + operation.Kind + ":" + operation.NodeKey + " selection=" + operation.Value + " hand=" + NPlayerHand.Instance?.CurrentMode + " generation=" + generation + " operation=" + _events + "/" + operations.Count + " previous=" + string.Join(";", operations.Take(_events).TakeLast(4).Select(o => o.Kind + ":" + o.NodeKey + ":" + o.Value)));
                     await Frame(generation);
                 }
                 // Map travel is rebased from the authoritative next-room

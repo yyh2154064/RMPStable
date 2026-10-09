@@ -142,7 +142,7 @@ internal static class MirrorJournal
     {
         entered = false;
         if (!Recording || _uiDepth != 0 || MirrorNativeUi.IsLocalPresentation(node) || MirrorNativeUi.Key(node) is not { Length: > 0 } key) return;
-        Operations.Add(new MirrorOperation { Kind = kind, NodeKey = key });
+        Operations.Add(new MirrorOperation { Kind = kind, NodeKey = key, Value = LocalSpectatorSource.HandSelectionContext(node) });
         _uiDepth++; entered = true;
     }
     private static void ForcedButton(NClickableControl __instance, out bool __state)
@@ -158,7 +158,10 @@ internal static class MirrorJournal
     private static void SignalEmitted(GodotObject __instance, StringName signal, out bool __state)
     {
         __state = false;
-        if (signal.ToString() == "Pressed" && __instance is NCardHolder holder && !MirrorNativeUi.IsHandPlay(holder) && MirrorNativeUi.Parent<NMerchantSlot>(holder) == null)
+        // Mouse hand selection uses HolderMouseClicked; controller/remote
+        // selection uses Pressed. Both run the same native selection handler.
+        if ((signal.ToString() == "Pressed" || signal.ToString() == "HolderMouseClicked" && __instance is NHandCardHolder) &&
+            __instance is NCardHolder holder && !MirrorNativeUi.IsHandPlay(holder) && MirrorNativeUi.Parent<NMerchantSlot>(holder) == null)
             BeginUi(holder, "card", out __state);
     }
     private static void MerchantSelected(NMerchantSlot __instance, out bool __state) => BeginUi(__instance, "buy", out __state);

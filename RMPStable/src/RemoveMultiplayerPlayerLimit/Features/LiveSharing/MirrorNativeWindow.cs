@@ -42,6 +42,7 @@ internal static class MirrorWin32
     [DllImport("user32.dll")] internal static extern bool ReleaseCapture();
     [DllImport("user32.dll")] internal static extern nint GetCapture();
     [DllImport("user32.dll")] internal static extern bool GetKeyboardState([Out] byte[] state);
+    [DllImport("user32.dll", SetLastError = true)] internal static extern bool PostMessageW(nint window, uint message, nuint wparam, nint lparam);
     [DllImport("user32.dll")] internal static extern int SetWindowRgn(nint window, nint region, bool redraw);
     [DllImport("gdi32.dll")] internal static extern nint CreateRectRgn(int left, int top, int right, int bottom);
     [DllImport("gdi32.dll")] internal static extern int CombineRgn(nint destination, nint a, nint b, int mode);
@@ -143,8 +144,24 @@ internal sealed class MirrorWindowHost : IDisposable
             return _visible && Attached && source.X >= 0 && source.X < 1 && source.Y >= 0 && source.Y < 1 && child.X >= 0 && child.X < 1 && child.Y >= 0 && child.Y < 1;
         }
     }
-    private bool InterceptSourceKey(uint message, nuint key, nint _)
+    private bool InterceptSourceKey(uint message, nuint key, nint data)
     {
+        // A nonactivating popup can leave WM_MOUSEWHEEL addressed to the
+        // focused owner. Route that exact message once using its screen point.
+        if (message == 0x20A && Visible)
+        {
+            var point = new MirrorWin32.Point { X = (short)((long)data & 65535), Y = (short)(((long)data >> 16) & 65535) };
+            var sourcePoint = point;
+            if (MirrorWin32.ScreenToClient(_child, ref point) && MirrorWin32.ScreenToClient(_parent, ref sourcePoint) &&
+                point.X >= _lastClip.Left && point.X < _lastClip.Right && point.Y >= _lastClip.Top && point.Y < _lastClip.Bottom &&
+                sourcePoint.X >= 0 && sourcePoint.Y >= 0 && MirrorWin32.GetClientRect(_parent, out var client) && sourcePoint.X < client.Right && sourcePoint.Y < client.Bottom &&
+                !(point.X >= _lastClip.Width - _lastClip.CornerWidth && point.Y >= _lastClip.Height - _lastClip.CornerHeight))
+            {
+                if (!MirrorWin32.PostMessageW(_child, message, key, data)) GD.PrintErr("[RMP:Mirror:Input] wheel forwarding failed: " + Marshal.GetLastPInvokeError());
+                return true;
+            }
+            return false;
+        }
         if (!MirrorWin32.Keyboard(message)) return false;
         // A key held before crossing into the child must still be released in
         // the source, otherwise blocking key-up leaves a stuck Godot key state.
@@ -184,7 +201,8 @@ internal sealed class MirrorWindowHost : IDisposable
         if (!_positioned || clip != _lastClip)
         {
             _lastClip = clip;
-            SendClip?.Invoke(new MirrorMessage { Kind = "clip", Width = bounds.Item3, Height = bounds.Item4, Clip = new[] {left,top,right,bottom}, CornerWidth = cornerWidth, CornerHeight = cornerHeight });
+            SendClip?.Invoke(new MirrorMessage { Kind = "clip", Width = bounds.Item3, Height = bounds.Item4, Clip = new[] {left,top,right,bottom}, CornerWidth = cornerWidth, CornerHeight = cornerHeight,
+                WheelScale = Math.Clamp(client.Bottom / (float)bounds.Item4, 1, 8) });
         }
         show &= content.IsVisibleInTree() && !MirrorWin32.IsIconic(_parent) && right > left && bottom > top;
         if (!_positioned || _last != bounds || _visible != show)

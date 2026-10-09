@@ -29,9 +29,9 @@ $env:RMP_MULTI_FEEDBACK_TEST = if ($Mode -eq 'feedback') {'1'} else {'0'}
 $env:RMP_MULTI_HEADLESS = '0'; $env:RMP_MULTI_MAIN_PACK = $MainPack
 Copy-Item -LiteralPath (Join-Path $root 'build/package/RMPStable') -Destination (Join-Path $runtime 'mods') -Recurse -Force
 Copy-Item -LiteralPath (Join-Path $root 'build/test/MultiInstanceSmoke.dll'), (Join-Path $repo 'tests/MultiInstanceSmoke/MultiInstanceSmoke.json') -Destination (Join-Path $runtime 'mods/MultiInstanceSmoke') -Force
-$log = Join-Path $evidence ("test-v8-$Mode.log")
+$log = Join-Path $evidence ("test-v9-$Mode.log")
 @{dll=(Get-FileHash -LiteralPath (Join-Path $runtime 'mods/RMPStable/RMPStable.dll')).Hash;test=(Get-FileHash -LiteralPath (Join-Path $runtime 'mods/MultiInstanceSmoke/MultiInstanceSmoke.dll')).Hash} |
-    ConvertTo-Json | Set-Content -LiteralPath (Join-Path $evidence "test-v8-$Mode-manifest.json") -Encoding utf8
+    ConvertTo-Json | Set-Content -LiteralPath (Join-Path $evidence "test-v9-$Mode-manifest.json") -Encoding utf8
 $arguments = '--main-pack "' + $MainPack + '" --force-steam off --rendering-method forward_plus --rendering-driver d3d12 --windowed --position -30000,-30000 --max-fps 120 --resolution 1280x720 --quit-after 36000 --log-file "' + $log + '"'
 $owned = Start-Process -FilePath (Join-Path $runtime 'SlayTheSpire2.exe') -WorkingDirectory $runtime -ArgumentList $arguments -WindowStyle Hidden -PassThru
 try {

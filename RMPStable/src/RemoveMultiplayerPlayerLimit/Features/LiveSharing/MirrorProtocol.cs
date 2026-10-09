@@ -40,6 +40,7 @@ internal sealed class MirrorMessage
     public int[] Clip { get; set; } = Array.Empty<int>();
     public int CornerWidth { get; set; }
     public int CornerHeight { get; set; }
+    public float WheelScale { get; set; } = 1;
     public double Fps { get; set; }
     public double ProcessMs { get; set; }
     public string Build { get; set; } = "";

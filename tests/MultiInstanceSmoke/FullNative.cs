@@ -13,6 +13,7 @@ using MegaCrit.Sts2.Core.Models.Cards;
 using MegaCrit.Sts2.Core.Models.Characters;
 using MegaCrit.Sts2.Core.Nodes;
 using MegaCrit.Sts2.Core.Nodes.Combat;
+using MegaCrit.Sts2.Core.Nodes.Cards.Holders;
 using MegaCrit.Sts2.Core.Nodes.Rooms;
 using MegaCrit.Sts2.Core.Nodes.Screens.Map;
 using MegaCrit.Sts2.Core.Nodes.Screens.Overlays;
@@ -37,7 +38,8 @@ public static partial class Smoke
             player.Deck.Clear(true);
             player.Deck.AddInternal(state.CreateCard<SculptingStrike>(player),silent:true);
             player.Deck.AddInternal(state.CreateCard<DefendIronclad>(player),silent:true);
-            for(int i=0;i<3;i++)
+            player.Deck.AddInternal(state.CreateCard<Transfigure>(player),silent:true);
+            for(int i=0;i<2;i++)
             { var card=state.CreateCard<Whirlwind>(player); card.UpgradeInternal(); card.FinalizeUpgradeInternal(); player.Deck.AddInternal(card,silent:true); }
             RunManager.Instance.SetUpNewSingleplayer(state,true); await PreloadManager.LoadRunAssets(new[]{character}); RunManager.Instance.Launch();
             NGame.Instance.RootSceneContainer.SetCurrentScene(NRun.Create(state)); await RunManager.Instance.SetActInternal(0);
@@ -81,7 +83,7 @@ public static partial class Smoke
                 await Frames(30);
                 await Until(()=>Verified && ((int)Field(process,"LastEvents")!>beforeEvents || (long)Field(Field(process,"Wire")!,"Identity")!.GetType().GetField("Generation",Any)!.GetValue(Field(Field(process,"Wire")!,"Identity"))!>beforeGeneration),label+" executes and authority and replica agree");
             }
-            async Task Drag(CardModel card,bool arrow)
+            async Task Drag(CardModel card,bool arrow,bool settle = true)
             {
                 await Until(()=>Verified,"card drag native state ready");
                 await Frames(30);
@@ -100,7 +102,7 @@ public static partial class Smoke
                 }
                 Send(0x200,p.X,p.Y); Send(0x201,p.X,p.Y); Send(0x200,end.X,end.Y); await Frames(30);
                 Check((bool)Field(process,"TargetArrowVisible")! == arrow,card.Id+" uses original target type arrow rule");
-                Send(0x202,end.X,end.Y); await Frames(30);
+                Send(0x202,end.X,end.Y); await Frames(settle ? 30 : 2);
             }
             if(Environment.GetEnvironmentVariable("RMP_MULTI_TREASURE_TEST") != "1")
             {
@@ -151,15 +153,43 @@ public static partial class Smoke
             await Until(()=>NCombatRoom.Instance!=null && Verified,"map travel builds native combat");
             await Drag(player.PlayerCombatState!.Hand.Cards.OfType<DefendIronclad>().First(),false);
             await Until(()=>Verified && player.Creature.Block>0,"self target defense resolves without red arrow");
-            await Drag(player.PlayerCombatState!.Hand.Cards.OfType<SculptingStrike>().First(),true);
-            await Until(()=>Verified && NPlayerHand.Instance?.CurrentMode==NPlayerHand.Mode.SimpleSelect,"sculpting strike opens original pending hand selection in both processes");
-            var selection=player.PlayerCombatState!.Hand.Cards.First();
-            await Click(a=>Kind(a)=="select","sculpting strike native hand selection");
-            if(NPlayerHand.Instance?.CurrentMode==NPlayerHand.Mode.SimpleSelect) await Click(a=>Kind(a)=="choice","sculpting strike confirm selection");
+            async Task SourceMouseChoice(string label, bool reselect)
+            {
+                // Real source mouse signal, without waiting for replica replay.
+                // This was absent from the old window-only selection fixture.
+                await Until(()=>NPlayerHand.Instance?.CurrentMode==NPlayerHand.Mode.SimpleSelect,label+" source awaits hand choice");
+                var hand=NPlayerHand.Instance!;
+                void Mouse(NHandCardHolder holder) => holder.GetType().GetMethod("OnMousePressed",Any)!.Invoke(holder,new object[]{new InputEventMouseButton{ButtonIndex=MouseButton.Left,Pressed=true}});
+                var chosen=hand.ActiveHolders.First(h=>h.CardModel is Whirlwind);
+                var card=chosen.CardModel!;
+                var journal=(System.Collections.IList)Type("MirrorJournal").GetField("Operations",Any)!.GetValue(null)!;
+                int before=journal.Count;
+                Mouse(chosen);
+                if(reselect)
+                {
+                    var selected=Descendants<NSelectedHandCardHolder>(hand).Single(h=>h.CardModel==card);
+                    selected.EmitSignal(NCardHolder.SignalName.Pressed,selected);
+                    Mouse(hand.ActiveHolders.Single(h=>h.CardModel==card));
+                }
+                var confirm=(MegaCrit.Sts2.Core.Nodes.GodotExtensions.NClickableControl)Field(hand,"_selectModeConfirmButton")!;
+                Check(confirm.IsEnabled,label+" original confirm enabled after mouse choice");
+                confirm.ForceClick();
+                Check(journal.Count>=before+(reselect?4:2),label+" records mouse select/deselect/reselect and confirm");
+                await Until(()=>Verified && hand.CurrentMode==NPlayerHand.Mode.Play && !RunManager.Instance.ActionExecutor.IsRunning &&
+                    (int)Field(process,"LastEvents")! == journal.Count,label+" rapid source choice and native replica converge");
+            }
+            await Drag(player.PlayerCombatState!.Hand.Cards.OfType<SculptingStrike>().First(),true,false);
+            await SourceMouseChoice("sculpting strike",true);
             await Until(()=>Verified && NPlayerHand.Instance?.CurrentMode==NPlayerHand.Mode.Play,"sculpting strike selection completes and combat resumes");
             Check(player.PlayerCombatState!.Hand.Cards.Any(c=>c.GetKeywordsWithSources(KeywordSources.Local).Contains(CardKeyword.Ethereal)),"selected native card receives ethereal");
+            await Drag(player.PlayerCombatState!.Hand.Cards.OfType<Transfigure>().First(),false,false);
+            await SourceMouseChoice("transfigure",false);
+            Check(player.PlayerCombatState!.Hand.Cards.OfType<Whirlwind>().Any(c=>c.BaseReplayCount==1),"transfigure original repeat modification reaches selected native card");
             await Click(a=>Node(a)?.GetType().Name=="NPotionHolder" && Node(a)?.GetType().GetProperty("Potion")?.GetValue(Node(a))!=null,"open original potion popup");
             await Click(a=>Node(a) is Node n && n.Name.ToString()=="UseButton","use original targeted potion");
+            var pileHit=Hits().Cast<object>().First(h=>(string)h.GetType().GetProperty("Kind")!.GetValue(h)! =="ui.discard");
+            var pilePoint=Center(pileHit); Send(0x201,pilePoint.X,pilePoint.Y); await Frames(2); Send(0x202,pilePoint.X,pilePoint.Y); await Frames(30);
+            Check(Verified && NTargetManager.Instance?.IsInSelection==true,"local pile click cannot cancel authoritative potion targeting");
             await Click(a=>Kind(a)=="target","choose original potion target");
             await Until(()=>Verified && !player.Potions.Any(),"native targeted potion resolves in both processes");
             for(int round=0;round<8 && CombatManager.Instance.IsInProgress;round++)

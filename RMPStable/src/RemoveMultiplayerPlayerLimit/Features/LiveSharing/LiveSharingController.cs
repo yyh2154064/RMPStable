@@ -178,6 +178,8 @@ internal static partial class LiveSharingController
             (message.NodeKey.Length > 0 ? a.NativePath == message.NodeKey :
             a.Kind == "endTurn" && message.Index == -1 || a.Kind == "play" && a.NativeIndex == message.Index));
         if (action == null) return Reject("当前无法执行此操作");
+        if (MirrorNativeUi.Resolve(action.NativePath) is Node presentation && MirrorNativeUi.IsLocalPresentation(presentation))
+            return Reject("浏览操作应在窗口内完成");
         var target = snapshot.Control.Targets.FirstOrDefault(t => t.NativeIndex == message.TargetIndex && action.TargetIds.Contains(t.Id));
         if (action.RequiresTarget && target == null) return Reject("目标已失效");
         return Execute(state,new SpectatorCommand { Session = snapshot.Session, SourceId = snapshot.SourceId, Context = snapshot.Control.Context,

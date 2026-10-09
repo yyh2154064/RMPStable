@@ -1,4 +1,36 @@
-# Native multi-instance (.8)：2026-10-09 同步恢复与初始化反馈修复
+# Native multi-instance (.9)：2026-10-09 战斗牌堆与本体鼠标选牌
+
+当前分支为 `multiInstanceTest`，版本 `0.3.9-multiInstance.9`，从 .8 `379983d` 接续。仍只保留 `main`、`liveSharingTest`、`multiInstanceTest`，不合并正式分支或另一方案。资源继续复用 `F:/projectFile/RMPStable-development`，没有新建 C 盘工作树、游戏副本或构建/测试档案。
+
+## .9 定位与修复
+
+用户 .8 的 `844a68a231734c0382e7636a6ede7adb/renderer.log` 在转化（TRANSFIGURE）后记录 `Native UI unavailable: button:run/NSceneContainer#0/NCombatRoom#0/NCombatUi#0/NPlayerHand#0/NConfirmButton#0 generation=1 operation=54/55`。该日志之前的一次雕琢打击已选择 WITHER 并继续运行；这条具体异常不能归为雕琢打击触发。两种卡牌共用原版手牌选择流程，均加入回归。原始主进程/副本日志只读复制至 F 盘 `evidence/user-v8-source.log`、`user-v8-renderer.log`。
+
+战斗牌堆按钮没有进入副本本地浏览分支，通用请求打开了本体牌堆，而 .8 已把浏览排除在 journal 外；副本等待新的权威操作事件，直到本体出牌才解除等待。本轮把三个牌堆按钮纳入副本本地浏览，观战和控制模式均可用；权威端同时拒绝将呈现操作作为跨进程游戏请求。目标选择期间不让本地牌堆按钮独自取消原版目标选择任务。空牌堆沿用原版提示气泡，不强行打开空页面。
+
+本体鼠标选手牌发出 `NHandCardHolder.HolderMouseClicked`，窗口/控制器使用 `NCardHolder.Pressed`。原记录器仅处理后者，会漏记本体鼠标选中的牌，随后记录确认，副本没有对应选牌而等待超时。现在记录两条输入路径，保留选中、取消、重选的顺序；手牌选择/确认同时记录选择模式。副本先等待相同模式且未完成的原版选择任务，再执行原版控件，避免动作仍在动画阶段时把选牌当成普通出牌。超时日志增加当前模式和前四条操作上下文，不记录管道密钥或二进制载荷。
+
+非激活副本可能让滚轮消息仍送到有焦点的本体窗口。主窗口钩子按消息的屏幕坐标、可见区域和认证 HWND，将窗口区域滚轮异步转发一次并阻止本体处理。卡组/牌堆仍调用原版网格滚动方法，保留插值；按本体/副本客户区高度比补偿缩小窗口的移动距离，倍率限制 1–8，保留连续和不足一格输入。物理鼠标体感仍需实机反馈，注入 Win32 消息不是实际物理滚轮测试。
+
+## .9 最终验收
+
+日志和 manifest 位于 F 盘 `evidence`。两份 payload、bootstrap、harness 编译零警告零错误；运行针对 v0.111.0，v0.107.1 仅编译。使用独立 runtime/档案、屏幕外静音 D3D12/Forward+、禁用 Steam，仅只读正式游戏 PCK；没有操作当前游戏、真实存档或系统鼠标。
+
+| 最终记录 | 结果 |
+| --- | --- |
+| `build-v9.log` | 四个构建目标成功 |
+| `test-v9-full.log` / manifest | 223 项 PASS，FULL PASSED，退出码 0 |
+| `test-v9-feedback.log` / manifest | 164 项 PASS，FEEDBACK PASSED，退出码 0 |
+
+两次最终验收使用同一发布 DLL，SHA-256 为 `03938F3EF06DA48E003B0A00D0F0188EE46CFF59830075EE5188BCD225918C76`。完整回归 harness 为 `4EC3932C8782325C00D16B01CE242E8BA0A5A7360CC7E5FFD4A5EF0905A393E2`；随后专项 harness 增加返回后结束回合及诊断文件原子发布，为 `CABF0CA60F1B88F86C345E380B99C6DC4E5313D2004BE475B003E36D2ED9CECB`，生产 DLL 没有变化。合计 387 个断言包含输入消息分发，不代表 387 个独立游戏场景。最终交付清单 `delivery-v9.json` 核对四个文件哈希；测试档案清除前保存副本日志与诊断截图至 F 盘 evidence。
+
+专项覆盖三个非空牌堆各自的观战/控制浏览与返回、本体页面和 journal 不变、返回后窗口直接结束回合、主窗口收到滚轮的转发和缩放补偿、连续三张牌、工具箱、两次 F5、初始化转场和错误按钮恢复。完整流程改用本体鼠标信号，在雕琢打击选择时立即取消重选并确认、转化选择立即确认；等待原版施法结算后验证附魔和增加重复次数；再验证药水目标选择不会被本地牌堆点击取消，以及地图、奖励、火堆、商店、宝箱、事件和下一章节。
+
+迭代日志保留：`empty-pile` 是测试错误地期待空弃牌堆打开页面；`fixture-keywords` 是测试临时加入的牌组关键词未被原版存档保存，改为原版固有先天/消耗的开机流程准备牌堆；`premature-check` 是效果检查未等待施法，且把原版额外重复次数初值 0 当成 1；`diagnostic-file-race` 是测试 JSON 同时读写导致观察任务停止，现采用临时文件原子发布及共享删除的只读句柄。它们不作为最终通过记录。`before-target-guard` 是补上目标选择边界前通过的专项，不作为最终发布验收。
+
+退出仍有 Godot RID/资源释放诊断和已有多人消息注册诊断；本轮未修复，不宣称日志零错误或长期资源释放已验收。没有穷举全部卡牌/遗物、其他 gameplay mod、全屏、高 DPI 或朋友联机。失败时使用“重新同步”或 F8 关闭后重开，只重建副本，不回滚本体。旧版漏记的本体选择不能凭空补回，安装新版后必须重启游戏。
+
+## .8 历史记录：同步恢复与初始化反馈修复
 
 当前测试分支为 `multiInstanceTest`，版本 `0.3.9-multiInstance.8`，从 .7 `283e239` 接续。本轮不合并正式 `main` 或本地模拟方案。用户指定只保留 `main`、`liveSharingTest`（.13）与 `multiInstanceTest`；工作规则见 `AGENTS.md`，C 盘清理结果及唯一开发资源入口见 `development-resources.md`。
 
