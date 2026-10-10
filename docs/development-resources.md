@@ -1,6 +1,6 @@
 # 2026-10-09 开发资源清理与后续入口
 
-本机与 GitHub 仅保留 `main`、`liveSharingTest`、`multiInstanceTest`。主仓库 `C:/Project_file/RMPStable-Github` 当前在既有 `multiInstanceTest` 开发；`main` 仍为 `ef59867edb864cb77bf66fd98f1fd4fe496afa5e`，本地模拟方案 `liveSharingTest` 仍为 `7227412795362e90d835549057cf86274dc07c9e`。不创建其他分支或 detached HEAD 开发，不混合两个方案。
+本机与 GitHub 仅保留 `main`、`liveSharingTest`、`multiInstanceTest`。主仓库 `C:/Project_file/RMPStable-Github` 当前在既有 `multiInstanceTest` 开发；`main` 仍为 `ef59867edb864cb77bf66fd98f1fd4fe496afa5e`。测试分支 HEAD 随规则/文档同步提交更新，以 Git 查询为准。不创建其他分支或 detached HEAD 开发，不混合两个方案。最新交接与测试规则见 `session-context.md`；`.12` 及此前功能已由用户验收，旧测试入口只作历史参考。
 
 ## 已完成 C 盘清理
 
@@ -31,4 +31,4 @@ C 盘可用空间从初查的 34,430,046,208 字节增加到清理完成时的 3
 
 `tools/Build-MultiInstance.ps1` 默认将输出写到上述 F 盘 build。传入既有 references 和桌面 `RMPStable.pck`，不会启动游戏或部署正式安装。`tools/Test-MultiInstance.ps1 -Mode feedback` / `-Mode full` / `-Mode replay` 复用 F 盘 runtime，独立 profile、静音、屏幕外运行、禁止 Steam，日志放 evidence。运行目录只能串行使用；脚本拒绝覆盖已有测试档案。测试完成后保留日志及必要截图，清理测试 profile，不持续积累档案。
 
-2026-10-11 用户持续授权在上述已有 F 盘资源中后台构建、运行和测试，无需逐次询问。继续隔离真实安装与存档；修改未审批的工作范围才请求审批。仓库本地的 `.tools/maintenance/Run-BackgroundTests.ps1` 只读取固定模式 `full` / `feedback` / `replay` / `all` / `ending`，串行复用 runtime，并在重试前归档和清理对应测试档案。`ending` 是结算快速诊断，不能代替最终三套完整验收。
+2026-10-11 用户持续授权在上述已有 F 盘资源中后台构建、运行和测试，无需逐次询问。继续隔离真实安装与存档；修改未审批的工作范围才请求审批。每轮重新编写仅覆盖新问题的专项脚本，复用上述环境与启动/清理工具。旧 `.tools/maintenance/Run-BackgroundTests.ps1` 的 `full` / `feedback` / `replay` / `all` / `ending` 是历史入口，禁止默认用于后续开发或交付；不再要求三套完整验收。用户手动通过后移除对应活动测试，后续默认功能正常。

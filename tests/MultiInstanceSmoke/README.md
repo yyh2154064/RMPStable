@@ -1,5 +1,7 @@
 # Isolated native mirror smoke harness
 
+**2026-10-11 policy: this cumulative harness is historical reference for the accepted .12 baseline. Do not run it by default for later fixes or delivery. Write a new independent focused script for each round's newly reported issues; user manual acceptance retires those cases from active testing. See `AGENTS.md` and `docs/session-context.md`. The instructions below describe historical runs.**
+
 Build this project with `GameManagedDir` set to the matching game's managed directory.
 Use `GameCompatibility=beta` for v0.111.0; stable uses the default.
 Stage the DLL and JSON alongside RMP in an **owned copy** of the game executable/managed runtime. Do not change the installed game's mods directory.
