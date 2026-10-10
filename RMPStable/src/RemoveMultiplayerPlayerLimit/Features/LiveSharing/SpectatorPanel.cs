@@ -41,10 +41,27 @@ internal sealed partial class SpectatorView
 			_pinned = SpectatorPreferences.Current.Pinned;
 			_pin = CreatePinButton(); panel.AddChild(_pin);
 			_controlToggle = CreateControlToggle(); panel.AddChild(_controlToggle);
-			_refresh = new Button { Name = "RebuildMirror", Text = "↻", Flat = true, FocusMode = Control.FocusModeEnum.None,
-				Size = new Vector2(36,36), TooltipText = T("重新同步：重建窗口，保留本体当前对局", "Resync: rebuild the window while preserving the source run") };
-			_refresh.AddThemeFontSizeOverride("font_size", 28);
+			_refresh = new Button { Name = "RebuildMirror", Flat = true, FocusMode = Control.FocusModeEnum.None, Size = new Vector2(36,36) };
+			foreach (var style in new[] { "normal", "hover", "pressed", "focus" }) _refresh.AddThemeStyleboxOverride(style, new StyleBoxEmpty());
+			var refreshIcon = new Label { Text = "↻", HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
+				Position = Vector2.Zero, Size = new Vector2(36,36), MouseFilter = Control.MouseFilterEnum.Ignore };
+			refreshIcon.AddThemeFontSizeOverride("font_size", 22); _refresh.AddChild(refreshIcon);
 			panel.AddChild(_refresh); _refresh.Pressed += LiveSharingController.RecoverMirror;
+			// Godot tooltips below the title are occluded by the native child HWND.
+			var refreshHint = new Label { Name = "RebuildMirrorHint", Text = T("重新同步 · 保留本体对局", "Resync · keep source run"),
+				Visible = false, MouseFilter = Control.MouseFilterEnum.Ignore, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+			refreshHint.AddThemeFontSizeOverride("font_size", 16);
+			refreshHint.AddThemeColorOverride("font_shadow_color", Colors.Black); refreshHint.AddThemeConstantOverride("shadow_outline_size", 5);
+			panel.AddChild(refreshHint);
+			void HintPosition()
+			{
+				refreshHint.Size = new Vector2(Math.Min(panel.Size.X, 300), 28);
+				refreshHint.Position = new Vector2(Math.Clamp(_refresh.Position.X - 130, 0, Math.Max(0, panel.Size.X - refreshHint.Size.X)), panel.Position.Y >= 30 ? -30 : 5);
+				// At the top screen edge, use empty title space to the left of controls.
+				if (panel.Position.Y < 30) refreshHint.Position = new Vector2(Math.Max(0, _refresh.Position.X - refreshHint.Size.X), 5);
+			}
+			_refresh.MouseEntered += () => { HintPosition(); refreshHint.Show(); };
+			_refresh.MouseExited += refreshHint.Hide;
 			// Clip at the displayed content rectangle, not at the unscaled 1920x1080
 			// surface. A single layout calculation owns the frame and picture edges.
 			var content = new Control { Name = "SpectatorContent", Position = new Vector2(inset, titleHeight), ClipContents = true, MouseFilter = Control.MouseFilterEnum.Stop };
@@ -77,6 +94,7 @@ internal sealed partial class SpectatorView
 				_pin.Position = new Vector2(width - 94 * navigationScale, 3 * navigationScale);
 				dismiss.Position = new Vector2(width - 56 * navigationScale, 3 * navigationScale); resize.Position = panel.Size - resize.Size;
 				panel.Position = new Vector2(Math.Clamp(panel.Position.X, 0, Math.Max(0, bounds.X - panel.Size.X)), Math.Clamp(panel.Position.Y, 0, Math.Max(0, bounds.Y - panel.Size.Y)));
+				HintPosition();
 			}
 			var preferences = SpectatorPreferences.Current;
 			Layout(preferences.HasLayout ? preferences.Width : 640f * 5 / 6);

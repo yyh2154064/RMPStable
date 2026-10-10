@@ -50,7 +50,7 @@ internal static partial class LiveSharingController
 		BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
 	private static void RegisterInput()
 	{
-		if (NInputManager.Instance == null) return;
+		if (NInputManager.Instance == null || !NInputManager.Instance.IsNodeReady()) return;
 		try
 		{
 			if (Inputs?.GetValue(null) is not ICollection<StringName> inputs ||

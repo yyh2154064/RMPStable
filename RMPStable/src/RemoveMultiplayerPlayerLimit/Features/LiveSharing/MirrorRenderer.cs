@@ -242,6 +242,11 @@ internal sealed partial class MirrorRenderer : IDisposable
     private bool NativeIdle => !_busy && _generation == _desiredGeneration && _error.Length == 0 && _state != null && _replay != null && MirrorHost.SourceIdle;
     private bool InterceptInput(uint message, nuint key, nint data)
     {
+        if (MirrorWin32.Keyboard(message))
+        {
+            if (_keyboard.Count < 128) _keyboard.Enqueue((message, (uint)key, (long)data, _desiredGeneration, _epoch));
+            return true;
+        }
         if (message == MirrorWin32.Move || MirrorWin32.Button(message) && message is not 0x20A and not 0x20E)
         {
             MirrorWin32.GetClientRect(MirrorWin32.OwnWindow,out var size);
@@ -266,7 +271,7 @@ internal sealed partial class MirrorRenderer : IDisposable
                 _pointer = new Vector2(point.X / (float)Math.Max(1, size.Right), point.Y / (float)Math.Max(1, size.Bottom));
             _buttons.Enqueue((message,_pointer,_desiredGeneration,_epoch,(short)((ulong)key >> 16) / 120f));
         }
-        if ((message is 0x204 or 0x205 or 0x207 or 0x208 || message == MirrorWin32.KeyDown && key == 27) && _buttons.Count < 32)
+        if (message is 0x204 or 0x205 or 0x207 or 0x208 && _buttons.Count < 32)
         {
             _buttons.Enqueue((message,_pointer,_desiredGeneration,_epoch,0));
             if (_control && message is 0x204 or 0x207) MirrorWin32.SetCapture(MirrorWin32.OwnWindow);
@@ -306,10 +311,19 @@ internal sealed partial class MirrorRenderer : IDisposable
     }
     private void ProcessLocalInput()
     {
+        ProcessKeyboard();
         while (_buttons.TryDequeue(out var input))
         {
             if (Diagnostic && input.Message == MirrorWin32.LeftDown) GD.Print("[RMP:Mirror:Input] down point=" + input.Point + " control=" + _control + " idle=" + NativeIdle + " waiting=" + _waitingForAuthority + " localUi=" + LocalUiAt(input.Point)?.GetType().Name + " generation=" + input.Generation + "/" + _desiredGeneration + " epoch=" + input.Epoch + "/" + _epoch);
             if (input.Generation != _desiredGeneration || input.Epoch != _epoch) continue;
+            if (_keyboardCard && _dragCard != null && input.Message is MirrorWin32.LeftDown or MirrorWin32.LeftUp)
+            {
+                var position = ViewportPoint(input.Point);
+                using var click = new InputEventMouseButton { ButtonIndex = MouseButton.Left, Pressed = input.Message == MirrorWin32.LeftDown, Position = position, GlobalPosition = position };
+                _nativePlay?._Input(click);
+                if (NTargetManager.Instance?.IsInSelection == true) NTargetManager.Instance._Input(click);
+                continue;
+            }
             if (input.Message == MirrorWin32.KeyDown && _mapGestureKey.Length > 0) FinishMapGesture(input.Point);
             if (input.Message is 0x204 or 0x207 && NMapScreen.Instance?.IsOpen == true && _control && NativeIdle)
             {
@@ -355,7 +369,8 @@ internal sealed partial class MirrorRenderer : IDisposable
                     {
                         string menuName = menu.Name.ToString();
                         NCapstoneContainer.Instance.Close();
-                        SendIntent("menu", -1, -1, MirrorState.Hash(_state!), _events, value: menuName);
+                        if (menuName == "RmpQuickSl") RequestKeyboardSl();
+                        else SendIntent("menu", -1, -1, MirrorState.Hash(_state!), _events, value: menuName);
                     }
                 }
                 else if (GodotObject.IsInstanceValid(releasedUi) && Contains(releasedUi, input.Point) && releasedUi is NClickableControl clickable)
@@ -366,6 +381,12 @@ internal sealed partial class MirrorRenderer : IDisposable
             }
             if (input.Message == 0x20A)
             {
+                if (SceneMonitor.FindSettingsScreen() is { } settings && settings.IsVisibleInTree())
+                {
+                    var scrollable = LocalSpectatorSource.Descendants<NScrollableContainer>(settings).LastOrDefault(n => n.IsVisibleInTree() && Contains(n, input.Point));
+                    if (scrollable != null && input.Wheel != 0) LocalSpectatorSource.ScrollNative(scrollable, WheelValue(input.Wheel * _presentationWheelScale));
+                    continue;
+                }
                 if ((PresentationScrollRoot ?? NOverlayStack.Instance?.Peek() as MegaCrit.Sts2.Core.Nodes.Screens.CardSelection.NCardGridSelectionScreen) is { } local)
                 {
                     var container = LocalSpectatorSource.Descendants<Control>(local).LastOrDefault(n => n is NCardGrid or NScrollableContainer && Contains(n, input.Point));
@@ -375,7 +396,7 @@ internal sealed partial class MirrorRenderer : IDisposable
                 if (!_control || _state == null || !_sceneReady) continue;
                 var scroll = _commands.CaptureCommands(_state!).Control.Actions.LastOrDefault(a => a.Enabled && a.Kind == "scroll" &&
                     MirrorNativeUi.Resolve(a.NativePath) is Control node && Contains(node, input.Point));
-                if (scroll != null && input.Wheel != 0) QueueScroll(scroll.NativePath, WheelValue(input.Wheel * (NMapScreen.Instance?.IsOpen == true ? 4 : 1)));
+                if (scroll != null && input.Wheel != 0) QueueScroll(scroll.NativePath, WheelValue(input.Wheel * (NMapScreen.Instance?.IsOpen == true ? 3.25f : 1)));
                 continue;
             }
             if (UiOnlyOpen || NCapstoneContainer.Instance?.CurrentCapstoneScreen is NPauseMenu) { CancelDrag(); continue; }
@@ -471,6 +492,8 @@ internal sealed partial class MirrorRenderer : IDisposable
     private Control? LocalUiAt(Vector2 point)
     {
         if (_state == null || _generation != _desiredGeneration) return null;
+        if (QuickSl.QuickSlController.ConfirmationOpen && NModalContainer.Instance?.OpenModal is Node confirmation)
+            return LocalSpectatorSource.Descendants<NClickableControl>(confirmation).LastOrDefault(n => n.IsEnabled && Contains(n, point));
         var inspector = NGame.Instance?.InspectCardScreen?.IsVisibleInTree() == true ? (Control)NGame.Instance.InspectCardScreen :
             NGame.Instance?.InspectRelicScreen?.IsVisibleInTree() == true ? NGame.Instance.InspectRelicScreen : null;
         if (inspector != null)
@@ -515,6 +538,7 @@ internal sealed partial class MirrorRenderer : IDisposable
     }
     private void CancelDrag()
     {
+        _keyboardCard = false;
         _dragCard = null; _dragReleased = false;
         var play = _nativePlay; _nativePlay = null;
         if (play != null && GodotObject.IsInstanceValid(play) && !play.IsQueuedForDeletion()) play.CancelPlayCard();

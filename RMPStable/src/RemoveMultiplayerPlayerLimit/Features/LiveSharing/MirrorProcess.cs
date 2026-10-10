@@ -63,6 +63,21 @@ internal sealed class MirrorProcess : IDisposable
             ModSettings = new ModSettings { PlayerAgreedToModLoading = true,
                 ModList = ModManager.Mods.Select(mod => new SettingsSaveMod(mod) { IsEnabled = mod.manifest?.id == "RMPStable" || diagnosticTest && mod.manifest?.id == "MultiInstanceSmoke" }).ToList() }
         };
+        // Key bindings are seeded from the source, then remain isolated in this profile.
+        foreach (var mapping in typeof(SettingsSave).GetProperties().Where(p => p.CanRead && p.CanWrite && p.Name.Contains("Mapping", StringComparison.Ordinal)))
+            mapping.SetValue(settings, mapping.GetValue(SaveManager.Instance.SettingsSave));
+        foreach (var mapping in typeof(SettingsSave).GetFields().Where(f => !f.IsStatic && !f.IsInitOnly && f.Name.Contains("Mapping", StringComparison.Ordinal)))
+            mapping.SetValue(settings, mapping.GetValue(SaveManager.Instance.SettingsSave));
+        if (MegaCrit.Sts2.Core.Nodes.CommonUi.NInputManager.Instance is { } input && input.IsNodeReady())
+        {
+#if STS2_0111
+            const string mapField = "_mKbInputMap";
+#else
+            const string mapField = "_keyboardInputMap";
+#endif
+            if (input.GetType().GetField(mapField, System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)?.GetValue(input) is System.Collections.Generic.Dictionary<StringName,Key> keys)
+                settings.KeyboardMapping = keys.ToDictionary(k => k.Key.ToString(), k => k.Value.ToString());
+        }
         File.WriteAllText(Path.Combine(account, "settings.save"), JsonSerializationUtility.ToJson(settings));
         foreach (string relative in new[] { "saves/progress.save", "saves/prefs.save" })
         {

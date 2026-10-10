@@ -163,9 +163,11 @@ internal static partial class LiveSharingController
             return Reject("状态或控制权限已变化，请重新操作");
         if (message.Model == "menu")
         {
-            if (message.Value is not "GiveUp" and not "SaveAndQuit" and not "Compendium" and not "RmpQuickSl" || SourceMenuOpen ||
-                NModalContainer.Instance?.OpenModal != null || NRun.Instance?.GlobalUi.TopBar.Pause.IsEnabled != true) return Reject("当前无法执行此操作");
-            if (message.Value == "RmpQuickSl") QuickSl.QuickSlController.RequestFromMirror();
+            if (message.Value is not "GiveUp" and not "SaveAndQuit" and not "Compendium" and not "RmpQuickSl" and not "RmpQuickSlConfirmed" || SourceMenuOpen ||
+                NModalContainer.Instance?.OpenModal != null || message.Value != "RmpQuickSlConfirmed" && NRun.Instance?.GlobalUi.TopBar.Pause.IsEnabled != true) return Reject("当前无法执行此操作");
+            if (message.Value == "RmpQuickSlConfirmed")
+            { if (!QuickSl.QuickSlController.ConfirmFromMirror()) return Reject("当前无法执行 SL"); }
+            else if (message.Value == "RmpQuickSl") QuickSl.QuickSlController.RequestFromMirror();
             else
             {
                 SourceMenuOpen = _sourceMenuStarting = true;

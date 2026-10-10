@@ -79,7 +79,7 @@ internal sealed partial class SpectatorView : IDisposable
         _retry.Visible = _mirror.Error.Length > 0;
         _retry.Position = new Vector2(_content.Size.X * .4f, _content.Size.Y * .91f);
         _retry.Size = new Vector2(_content.Size.X * .2f, Math.Max(24, _content.Size.Y * .07f));
-        if (host?.TakeEscape() == true) SetPreferredControl(false);
+
         _status.Position = new Vector2(_content.Size.X * .08f, _content.Size.Y * (_retry.Visible ? .68f : .78f));
         _status.Size = new Vector2(_content.Size.X * .84f, Math.Max(50,_content.Size.Y * .14f));
         LiveSharingController.RouteMapInput(!sourceDialog && _panel.GetGlobalRect().HasPoint(ShellPointer()));

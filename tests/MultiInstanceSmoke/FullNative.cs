@@ -104,6 +104,14 @@ public static partial class Smoke
                 Check((bool)Field(process,"TargetArrowVisible")! == arrow,card.Id+" uses original target type arrow rule");
                 Send(0x202,end.X,end.Y); await Frames(settle ? 30 : 2);
             }
+            async Task Keyboard(uint key)
+            {
+                var host=mirror.GetType().GetProperty("Window",Any)!.GetValue(mirror)!;
+                Check((bool)Call(host,"RouteKeyboard",0x100u,(nuint)key,(nint)1,true)!,"full keyboard input routes to replica");
+                await Frames(2);
+                Check((bool)Call(host,"RouteKeyboard",0x101u,(nuint)key,unchecked((nint)0xC0000001),false)!,"full keyboard release retains replica owner");
+                await Frames(20);
+            }
             if(Environment.GetEnvironmentVariable("RMP_MULTI_TREASURE_TEST") != "1")
             {
             await Frames(150);
@@ -178,7 +186,13 @@ public static partial class Smoke
                 await Until(()=>Verified && hand.CurrentMode==NPlayerHand.Mode.Play && !RunManager.Instance.ActionExecutor.IsRunning &&
                     (int)Field(process,"LastEvents")! == journal.Count,label+" rapid source choice and native replica converge");
             }
-            await Drag(player.PlayerCombatState!.Hand.Cards.OfType<SculptingStrike>().First(),true,false);
+            var sculpting=player.PlayerCombatState!.Hand.Cards.OfType<SculptingStrike>().First();
+            int sculptingIndex=NPlayerHand.Instance!.ActiveHolders.ToList().FindIndex(h=>h.CardModel==sculpting);
+            var sculptingKey=MegaCrit.Sts2.Core.Nodes.CommonUi.NInputManager.Instance.GetMKbHotkey("mega_select_card_"+(sculptingIndex+1));
+            Check(sculptingKey!=Godot.Key.None,"targeted card has original numeric shortcut");
+            await Keyboard((uint)sculptingKey);
+            await Until(()=>(bool)Field(process,"TargetArrowVisible")!,"numeric targeted-card shortcut shows original arrow");
+            await Keyboard(39); await Keyboard(13);
             await SourceMouseChoice("sculpting strike",true);
             await Until(()=>Verified && NPlayerHand.Instance?.CurrentMode==NPlayerHand.Mode.Play,"sculpting strike selection completes and combat resumes");
             Check(player.PlayerCombatState!.Hand.Cards.Any(c=>c.GetKeywordsWithSources(KeywordSources.Local).Contains(CardKeyword.Ethereal)),"selected native card receives ethereal");
@@ -197,7 +211,16 @@ public static partial class Smoke
                 await Until(()=>Verified,"full combat round consistent");
                 var whirlwind=player.PlayerCombatState!.Hand.Cards.OfType<Whirlwind>().FirstOrDefault();
                 if(whirlwind!=null && player.PlayerCombatState.Energy>0) { await Drag(whirlwind,false); await Until(()=>Verified,"all enemies card resolves without single target arrow"); }
-                if(CombatManager.Instance.IsInProgress) await Click(a=>Kind(a)=="endTurn","full combat end turn");
+                if(CombatManager.Instance.IsInProgress)
+                {
+                    if(round==0)
+                    {
+                        int turn=player.PlayerCombatState!.TurnNumber;
+                        await Keyboard((uint)MegaCrit.Sts2.Core.Nodes.CommonUi.NInputManager.Instance.GetMKbHotkey("ui_end_turn"));
+                        await Until(()=>Verified && (!CombatManager.Instance.IsInProgress || player.PlayerCombatState!.TurnNumber>turn),"native end-turn keyboard binding executes on authority");
+                    }
+                    else await Click(a=>Kind(a)=="endTurn","full combat end turn");
+                }
             }
             await Until(()=>!CombatManager.Instance.IsInProgress && Verified,"combat finishes into identical original rewards");
             await Until(()=>Verified && Actions().Any(a=>Enabled(a)&&Node(a)?.GetType().Name=="NRewardButton"),"original rewards are interactive");

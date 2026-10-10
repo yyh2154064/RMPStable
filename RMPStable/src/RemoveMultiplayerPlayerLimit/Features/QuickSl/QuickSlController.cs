@@ -76,6 +76,13 @@ internal static class QuickSlController
 	internal static uint NativeHotkey { get; private set; } = 0x74;
     internal static bool ConfirmationOpen => _popupOpen;
     internal static void RequestFromMirror() => TriggerRequested();
+    internal static void ShowReplicaConfirmation(Action confirm) => ShowConfirmation(Localization.Get("QUICK_SL_CONFIRM_TITLE", "Quick SL"), Localization.Get("QUICK_SL_CONFIRM_SINGLE", "Return to the latest native save checkpoint?"), confirm);
+    internal static bool ConfirmFromMirror()
+    {
+        if (!_popupOpen && !_operationRunning && RunManager.Instance.IsInProgress && RunManager.Instance.NetService?.Type == NetGameType.Singleplayer)
+        { TaskHelper.RunSafely(RunSingleplayerSlAsync()); return true; }
+        return false;
+    }
 	private static RecoveryState? _recovery;
 
 	private static Key GetHotkey()
@@ -160,7 +167,7 @@ internal static class QuickSlController
 
 	private static void RegisterInputAction()
 	{
-		if (NInputManager.Instance == null)
+		if (NInputManager.Instance == null || !NInputManager.Instance.IsNodeReady())
 		{
 			return;
 		}
@@ -301,6 +308,7 @@ internal static class QuickSlController
 
 	private static void PollHotkey()
 	{
+		if (LiveSharing.MirrorRenderer.IsRenderer) return;
 		Key key = _inputRegistered ? GetHotkey() : Key.F5;
 		NativeHotkey = key >= Key.F1 && key <= Key.F35 ? (uint)(0x70 + (int)(key - Key.F1)) : (uint)key;
 		bool down = key != Key.None && Input.IsKeyPressed(key);

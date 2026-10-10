@@ -37,14 +37,21 @@ public static partial class Smoke
         {
             await ((SceneTree)Engine.GetMainLoop()).ToSignal(Engine.GetMainLoop(), SceneTree.SignalName.ProcessFrame);
             if (NGame.Instance == null || NRun.Instance == null) continue;
-            var root = NCapstoneContainer.Instance?.CurrentCapstoneScreen as Node ?? NOverlayStack.Instance?.Peek() as Node;
-            var scroll = root == null ? null : Descendants<Control>(root).FirstOrDefault(n => n is NCardGrid or NScrollableContainer);
+            var settings = Type("LiveSharingController").Assembly.GetType("RemoveMultiplayerPlayerLimit.Infrastructure.SceneMonitor")!.GetMethod("FindSettingsScreen",Any)!.Invoke(null,null) as Control;
+            var root = settings?.IsVisibleInTree()==true ? settings : NCapstoneContainer.Instance?.CurrentCapstoneScreen as Node ?? NOverlayStack.Instance?.Peek() as Node;
+            var scroll = root == null ? null : Descendants<Control>(root).LastOrDefault(n => n is NCardGrid or NScrollableContainer && n.IsVisibleInTree());
             float offset = scroll == null ? 0 : (float)Field(scroll, scroll is NCardGrid ? "_targetDrag" : "_targetDragPosY")!;
             var renderer = Type("MirrorRenderer").GetField("Active", Any)!.GetValue(null);
             var notice = renderer == null ? null : Field(renderer, "_notice") as Label;
             var feedbackPath=Path.Combine(Environment.GetEnvironmentVariable("RMP_MULTI_PROFILE_ROOT")!, "feedback-state.json");
             File.WriteAllText(feedbackPath+".tmp",
-                System.Text.Json.JsonSerializer.Serialize(new { Screen = root?.GetType().Name ?? "", Instance = root?.GetInstanceId() ?? 0, Offset = offset,
+                System.Text.Json.JsonSerializer.Serialize(new { Screen = root != null && Descendants<Node>(root).Any(n=>n.GetType().Name=="NPauseMenu" && n is Control c && c.IsVisibleInTree()) && settings?.IsVisibleInTree()!=true ? "NPauseMenu" : root?.GetType().Name ?? "", Instance = root?.GetInstanceId() ?? 0, Offset = offset,
+                    QuickSlOpen = (bool)Type("LiveSharingController").Assembly.GetType("RemoveMultiplayerPlayerLimit.Features.QuickSl.QuickSlController")!.GetProperty("ConfirmationOpen",Any)!.GetValue(null)!,
+                    VolumeMaster = SaveManager.Instance.SettingsSave.VolumeMaster,
+                    ShowRunTimer = SaveManager.Instance.PrefsSave.ShowRunTimer,
+                    CardInputReady = renderer != null && (bool)renderer.GetType().GetProperty("CanBufferCard",Any)!.GetValue(renderer)! && (bool)renderer.GetType().GetProperty("NativeIdle",Any)!.GetValue(renderer)!,
+                    CardKey1 = NInputManager.Instance.GetMKbHotkey("mega_select_card_1").ToString(),
+                    SettingsControls = settings?.IsVisibleInTree()==true ? Descendants<MegaCrit.Sts2.Core.Nodes.GodotExtensions.NClickableControl>(settings).Where(c=>c.IsVisibleInTree() && c.IsEnabled).Select(c=> new { Name=c.Name.ToString(), Type=c.GetType().Name, Rect=Normalized(c) }).ToArray() : null,
                     Waiting = renderer != null && (bool)Field(renderer,"_waitingForAuthority")!, Busy = renderer != null && (bool)Field(renderer,"_busy")!,
                     AuthorityReady = renderer != null && (bool)Field(renderer,"_authorityReady")!, Events = renderer == null ? 0 : (int)Field(renderer,"_events")!,
                     PresentFrames = renderer == null ? -1 : (int)Field(renderer,"_presentFrames")!,
@@ -90,8 +97,9 @@ public static partial class Smoke
     {
         var viewport=control.GetViewport();
         var rect=(viewport.GetFinalTransform()*control.GetGlobalTransformWithCanvas())*new Rect2(Vector2.Zero,control.Size);
-        var size=DisplayServer.WindowGetSize();
-        return new[]{rect.Position.X/size.X,rect.Position.Y/size.Y,rect.Size.X/size.X,rect.Size.Y/size.Y};
+        var window=(nint)Type("MirrorWin32").GetProperty("OwnWindow",Any)!.GetValue(null)!;
+        GetClientRect(window,out var size);
+        return new[]{rect.Position.X/size.Right,rect.Position.Y/size.Bottom,rect.Size.X/size.Right,rect.Size.Y/size.Bottom};
     }
     private static async Task RunFeedback()
     {
@@ -142,8 +150,71 @@ public static partial class Smoke
                 var r=(float[])h.GetType().GetProperty("Rect")!.GetValue(h)!;
                 Send(0x200,r[0]+r[2]/2,r[1]+r[3]/2); Send(0x201,r[0]+r[2]/2,r[1]+r[3]/2); await Frames(2); Send(0x202,r[0]+r[2]/2,r[1]+r[3]/2);
             }
+            async Task KeyPress(uint key, bool owner=true)
+            {
+                var host=mirror.GetType().GetProperty("Window",Any)!.GetValue(mirror)!;
+                if(owner) Check((bool)Call(host,"RouteKeyboard",0x100u,(nuint)key,(nint)1,true)!,"key over replica routes to child");
+                else Check(SendMessageTimeoutW(window,0x100,(nuint)key,1,2,1000,out _)!=0,"child key down dispatched");
+                await Frames(2);
+                if(owner) Check((bool)Call(host,"RouteKeyboard",0x101u,(nuint)key,unchecked((nint)0xC0000001),false)!,"replica key release stays with child after pointer leaves");
+                else Check(SendMessageTimeoutW(window,0x101,(nuint)key,unchecked((nint)0xC0000001),2,1000,out _)!=0,"child key up dispatched");
+                await Frames(15);
+            }
+            uint Shortcut(string action)
+            {
+                var key=NInputManager.Instance.GetMKbHotkey(action);
+                Check(key!=Key.None,"native shortcut is registered: "+action);
+                return key>=Key.F1 && key<=Key.F35 ? (uint)(0x70+(key-Key.F1)) : key==Key.Enter?13u : (uint)key;
+            }
+            var refresh=(Button)Field(view,"_refresh")!;
+            var keyboardHost=mirror.GetType().GetProperty("Window",Any)!.GetValue(mirror)!;
+            Check(!(bool)Call(keyboardHost,"RouteKeyboard",0x100u,(nuint)90,(nint)1,false)!,"source-area key stays in source");
+            Check(!(bool)Call(keyboardHost,"RouteKeyboard",0x100u,(nuint)90,(nint)(1L<<30|1),true)!,"source-held key repeat keeps original owner across pointer boundary");
+            Check(!(bool)Call(keyboardHost,"RouteKeyboard",0x101u,(nuint)90,unchecked((nint)0xC0000001),true)!,"source-held key release reaches source after pointer enters replica");
+            var toggle=(Button)Field(view,"_controlToggle")!;
+            Check(Math.Abs(refresh.Position.Y+refresh.Size.Y*refresh.Scale.Y/2-toggle.Position.Y-toggle.Size.Y*toggle.Scale.Y/2)<1,"rebuild control shares the watch/control vertical center");
+            refresh.EmitSignal(Control.SignalName.MouseEntered); await Frames(2);
+            var hint=refresh.GetParent().GetNode<Label>("RebuildMirrorHint");
+            var content=(Control)Field(view,"_content")!;
+            Check(hint.Visible && hint.Position.Y+hint.Size.Y<=content.Position.Y,"rebuild hint remains above native game content");
+            await NGame.Instance.ToSignal(RenderingServer.Singleton,RenderingServer.SignalName.FramePostDraw);
+            using(var pixels=NGame.Instance.GetViewport().GetTexture().GetImage()) pixels.SavePng(Path.Combine(profile,"visual-rebuild-header.png"));
+            refresh.EmitSignal(Control.SignalName.MouseExited);
             await Frames(120); await Click("select");
             await Until(()=>NOverlayStack.Instance?.Peek()==null && player.PlayerCombatState?.Hand.Cards.Count>0 && Verified,"Toolbox native selection resolves and boss combat continues");
+            await Frames(45);
+            var sl=Controller.Assembly.GetType("RemoveMultiplayerPlayerLimit.Features.QuickSl.QuickSlController")!;
+            await KeyPress(Shortcut("rmpQuickSl"));
+            await Until(()=>ChildStatus().GetProperty("QuickSlOpen").GetBoolean(),"F5 over replica opens confirmation in replica");
+            Check(!(bool)sl.GetProperty("ConfirmationOpen",Any)!.GetValue(null)! && NModalContainer.Instance?.OpenModal==null,"replica F5 leaves source confirmation closed");
+            await KeyPress(27);
+            await Until(()=>!ChildStatus().GetProperty("QuickSlOpen").GetBoolean() && Verified,"Escape cancels replica F5 without source action");
+            await KeyPress(27);
+            await Until(()=>ChildStatus().GetProperty("Screen").GetString()=="NPauseMenu","Escape opens replica pause menu");
+            await Click("ui.settings");
+            await Until(()=>ChildStatus().GetProperty("Screen").GetString()=="NSettingsScreen","replica native settings open");
+            await Frames(60);
+            bool sourceTimer=SaveManager.Instance.PrefsSave.ShowRunTimer;
+            var timer=ChildStatus().GetProperty("SettingsControls").EnumerateArray().Single(c=>c.GetProperty("Type").GetString()=="NRunTimerTickbox");
+            var timerRect=timer.GetProperty("Rect").EnumerateArray().Select(v=>v.GetSingle()).ToArray();
+            bool childTimer=ChildStatus().GetProperty("ShowRunTimer").GetBoolean();
+            Send(0x200,timerRect[0]+timerRect[2]/2,timerRect[1]+timerRect[3]/2); Send(0x201,timerRect[0]+timerRect[2]/2,timerRect[1]+timerRect[3]/2); await Frames(2); Send(0x202,timerRect[0]+timerRect[2]/2,timerRect[1]+timerRect[3]/2);
+            await Until(()=>ChildStatus().GetProperty("ShowRunTimer").GetBoolean()!=childTimer,"replica settings checkbox changes replica preference");
+            Check(SaveManager.Instance.PrefsSave.ShowRunTimer==sourceTimer,"changing replica preference leaves source preference unchanged");
+            var settingsStatus=ChildStatus(); var settingsRect=settingsStatus.GetProperty("ScrollRect").EnumerateArray().Select(v=>v.GetSingle()).ToArray();
+            float settingsOffset=settingsStatus.GetProperty("Offset").GetSingle();
+            for(int i=0;i<3;i++) Wheel(settingsRect[0]+settingsRect[2]/2,settingsRect[1]+settingsRect[3]/2,-1,true);
+            await Until(()=>ChildStatus().GetProperty("Offset").GetSingle()<settingsOffset-80,"owner-directed settings wheel scrolls original settings container");
+            Check(!ReplicaSettingsVisible() && SaveManager.Instance.SettingsSave.VolumeMaster==0,"replica settings scroll leaves source settings closed and unchanged");
+            await KeyPress(27);
+            await Until(()=>ChildStatus().GetProperty("Screen").GetString()=="NPauseMenu","settings Escape returns to replica pause");
+            await KeyPress(27);
+            await Until(()=>ChildStatus().GetProperty("Screen").GetString()=="" && Verified,"keyboard returns to combat without source action");
+            await Until(()=>ChildStatus().GetProperty("CardInputReady").GetBoolean() && Verified,"native card input is ready for keyboard fixture");
+            int keyboardHand=player.PlayerCombatState!.Hand.Cards.Count;
+            int bootIndex=NPlayerHand.Instance!.ActiveHolders.ToList().FindIndex(h=>h.CardModel is BootSequence);
+            await KeyPress(Shortcut("mega_select_card_"+(bootIndex+1))); await Frames(30); await KeyPress(13);
+            await Until(()=>Verified && player.PlayerCombatState!.Hand.Cards.Count==keyboardHand-1 && player.PlayerCombatState.ExhaustPile.Cards.Any(c=>c is BootSequence),"numeric zero-cost card shortcut and Enter execute once on authority and converge");
             await Frames(90);
             await Frames(50);
             Check(player.PlayerCombatState!.Hand.Cards.Count(c=>c is DefendIronclad)>=3,"isolated fixture has three distinct defend cards for rapid input");
@@ -165,10 +236,6 @@ public static partial class Smoke
             }
             await Until(()=>Verified && player.PlayerCombatState!.Hand.Cards.Count==handBefore-3,"three rapid native card releases all reach authority and converge");
             Check(player.Creature.Block>=blocksBefore+15,"rapid cards produce all three original block results");
-            var boot=ChildStatus().GetProperty("Hand").EnumerateArray().Single(h=>h.GetProperty("Id").GetString()=="CARD.BOOT_SEQUENCE");
-            var bootRect=boot.GetProperty("Rect").EnumerateArray().Select(v=>v.GetSingle()).ToArray();
-            Send(0x200,bootRect[0]+bootRect[2]/2,bootRect[1]+bootRect[3]*.2f); Send(0x201,bootRect[0]+bootRect[2]/2,bootRect[1]+bootRect[3]*.2f);
-            Send(0x200,.5f,.35f); await Frames(3); Send(0x202,.5f,.35f);
             await Until(()=>Verified && player.PlayerCombatState!.ExhaustPile.Cards.Count>0 && player.PlayerCombatState.DiscardPile.Cards.Count>=3,"original zero-cost innate boot sequence prepares nonempty exhaust and discard piles");
             await Click("ui.deck"); await Frames(100);
             await Until(()=>File.Exists(Path.Combine(profile,"feedback-state.json")) && ChildStatus().GetProperty("Screen").GetString()=="NDeckViewScreen","replica deck opens locally");
@@ -219,12 +286,24 @@ public static partial class Smoke
             int turnBefore=player.PlayerCombatState!.TurnNumber;
             await Click("endTurn");
             await Until(()=>Verified && player.PlayerCombatState!.TurnNumber>turnBefore,"window end turn after pile return works without any intervening source action");
-            var sl=Controller.Assembly.GetType("RemoveMultiplayerPlayerLimit.Features.QuickSl.QuickSlController")!;
+            await Until(()=>Verified && ChildStatus().GetProperty("CardInputReady").GetBoolean(),"native card input is ready after turn transition");
             for(int repeat=0;repeat<2;repeat++)
             {
                 var clock=System.Diagnostics.Stopwatch.StartNew();
-                var task=(Task)sl.GetMethod("RunSingleplayerSlAsync",Any)!.Invoke(null,null)!;
-                await Until(()=>task.IsCompleted,"boss SL returns while Toolbox choice awaits user"); await task;
+                if(repeat==0)
+                {
+                    var previous=RunManager.Instance.DebugOnlyGetState();
+                    await KeyPress(Shortcut("rmpQuickSl"));
+                    await Until(()=>ChildStatus().GetProperty("QuickSlOpen").GetBoolean(),"replica F5 offers local confirmation before SL");
+                    await KeyPress(13);
+                    await Until(()=>!ReferenceEquals(previous,RunManager.Instance.DebugOnlyGetState()) && !(bool)sl.GetField("_operationRunning",Any)!.GetValue(null)!,"replica confirmation performs one authority SL without a source popup");
+                    Check(!(bool)sl.GetProperty("ConfirmationOpen",Any)!.GetValue(null)!,"confirmed replica SL never opens duplicate source confirmation");
+                }
+                else
+                {
+                    var task=(Task)sl.GetMethod("RunSingleplayerSlAsync",Any)!.Invoke(null,null)!;
+                    await Until(()=>task.IsCompleted,"boss SL returns while Toolbox choice awaits user"); await task;
+                }
                 state=RunManager.Instance.DebugOnlyGetState()!; player=state.Players[0];
                 Check(!NGame.Instance.Transition.InTransition && NGame.Instance.Transition.MouseFilter==Control.MouseFilterEnum.Ignore,"boss SL removes blocking transition");
                 Check(NGame.Instance.Transition.GetNode<Control>("SimpleTransition").Modulate.A<.01f,"boss SL leaves simple transition transparent");

@@ -61,6 +61,9 @@ internal static class MirrorWin32
     internal static void AttachOwn(nint parent, int owner)
     {
         var window = OwnWindow; RequireOwned(window, System.Environment.ProcessId); RequireOwned(parent, owner);
+        // Keep Godot's cached flag consistent with the Win32 style. Otherwise
+        // later engine flag updates can restore borders and shrink the client.
+        DisplayServer.WindowSetFlag(DisplayServer.WindowFlags.Borderless, true);
         long style = (long)GetLong(window, Style);
         // Each game's swapchain presents to a separate top-level HWND. Bind
         // ownership/z-order without turning the renderer into WS_CHILD.
@@ -121,8 +124,10 @@ internal sealed class MirrorWindowHost : IDisposable
     private readonly int _childProcess;
     private readonly MirrorWindowHook _keys;
     private (int X, int Y, int Width, int Height) _last;
-    private bool _visible, _escape, _disposed;
+    private bool _visible, _disposed;
     private readonly System.Collections.Generic.HashSet<nuint> _forwardKeys = new();
+    private readonly System.Collections.Generic.HashSet<nuint> _replicaKeys = new();
+    private readonly System.Collections.Generic.HashSet<nuint> _releasedReplicaKeys = new();
     internal Action<MirrorMessage>? SendClip;
     private (int Left, int Top, int Right, int Bottom, int Width, int Height, int CornerWidth, int CornerHeight) _lastClip;
     private bool _positioned;
@@ -163,24 +168,41 @@ internal sealed class MirrorWindowHost : IDisposable
             return false;
         }
         if (!MirrorWin32.Keyboard(message)) return false;
+        return RouteKeyboard(message, key, data, PointerInside);
+    }
+    private bool RouteKeyboard(uint message, nuint key, nint data, bool inside)
+    {
         // A key held before crossing into the child must still be released in
         // the source, otherwise blocking key-up leaves a stuck Godot key state.
         if (message is MirrorWin32.KeyUp or MirrorWin32.SysKeyUp && _forwardKeys.Remove(key)) return false;
-        if (!PointerInside)
+        if (message is MirrorWin32.KeyUp or MirrorWin32.SysKeyUp && _replicaKeys.Remove(key))
+        { if (!_releasedReplicaKeys.Remove(key)) MirrorWin32.PostMessageW(_child,message,key,data); return true; }
+        if (_forwardKeys.Contains(key)) return false;
+        if (_releasedReplicaKeys.Contains(key)) return true;
+        if (_replicaKeys.Contains(key) || inside && (uint)key != LiveSharingController.NativeHotkey)
+        {
+            if (message is MirrorWin32.KeyDown or MirrorWin32.SysKeyDown) _replicaKeys.Add(key);
+            MirrorWin32.PostMessageW(_child,message,key,data); return true;
+        }
+        if (!inside)
         {
             if (message is MirrorWin32.KeyDown or MirrorWin32.SysKeyDown) _forwardKeys.Add(key);
             return false;
         }
         // Keep the configured spectator hotkey handled by the source; all
         // gameplay keys over the replica are blocked before Godot sees them.
-        if ((uint)key == LiveSharingController.NativeHotkey || (uint)key == QuickSl.QuickSlController.NativeHotkey) { _forwardKeys.Add(key); return false; }
-        if (message == MirrorWin32.KeyDown && key == 0x1B) _escape = true;
+        if ((uint)key == LiveSharingController.NativeHotkey) { _forwardKeys.Add(key); return false; }
         return true;
     }
-    internal bool TakeEscape() { bool value = _escape; _escape = false; return value; }
+    private void ReleaseReplicaKeys()
+    {
+        foreach (var key in _replicaKeys)
+            if (_releasedReplicaKeys.Add(key)) MirrorWin32.PostMessageW(_child,MirrorWin32.KeyUp,key,unchecked((nint)(1L << 31 | 1L << 30)));
+    }
     internal void Hide()
     {
         _visible = false; _positioned = false;
+        ReleaseReplicaKeys();
         if (MirrorWin32.Owned(_child, _childProcess)) MirrorWin32.ShowWindowAsync(_child, 0);
     }
     internal void Layout(Control content, bool show)
@@ -205,6 +227,7 @@ internal sealed class MirrorWindowHost : IDisposable
                 WheelScale = Math.Clamp(client.Bottom / (float)bounds.Item4, 1, 8) });
         }
         show &= content.IsVisibleInTree() && !MirrorWin32.IsIconic(_parent) && right > left && bottom > top;
+        if (!show && _visible) ReleaseReplicaKeys();
         if (!_positioned || _last != bounds || _visible != show)
         {
             if (!MirrorWin32.SetWindowPos(_child,0,bounds.Item1,bounds.Item2,bounds.Item3,bounds.Item4,0x0010 | 0x0004 | 0x4000 | 0x0200 | (show ? 0x0040u : 0x0080u))) throw new Win32Exception(Marshal.GetLastPInvokeError());
@@ -214,7 +237,7 @@ internal sealed class MirrorWindowHost : IDisposable
     }
     public void Dispose()
     {
-        if (_disposed) return; _disposed = true; _keys.Dispose();
+        if (_disposed) return; _disposed = true; ReleaseReplicaKeys(); _keys.Dispose();
         // Never destroy or restyle the source HWND. Only MirrorProcess owns the
         // renderer process; keep ownership until it exits.
         if (MirrorWin32.Owned(_child,_childProcess)) MirrorWin32.ShowWindowAsync(_child,0);
