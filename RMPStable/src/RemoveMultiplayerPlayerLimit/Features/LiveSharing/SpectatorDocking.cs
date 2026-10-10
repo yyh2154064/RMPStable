@@ -18,7 +18,6 @@ internal sealed partial class SpectatorView
 	private Button CreatePinButton()
 	{
 		var button = new Button { Name = "SpectatorPin", Flat = true, ToggleMode = true, FocusMode = Control.FocusModeEnum.None, MouseFilter = Control.MouseFilterEnum.Stop, Size = new Vector2(36, 36) };
-		foreach (var style in new[] { "normal", "hover", "pressed", "focus" }) button.AddThemeStyleboxOverride(style, new StyleBoxEmpty());
 		// A compact conventional pushpin silhouette, independent of font glyphs.
 		var icon = new Node2D { Name = "Icon", Position = new Vector2(18, 18) };
 		button.AddChild(icon);
@@ -36,6 +35,7 @@ internal sealed partial class SpectatorView
 			_dockLeaveTime = 0; SlidePanel(false); RememberPanelLayout();
 		};
 		button.SetPressedNoSignal(_pinned); Refresh();
+		StyleToolbarButton(button, icon, () => new Color(_pinned ? "efc851" : "b7c7ce"));
 		return button;
 	}
 	private void RememberPanelLayout()

@@ -1,11 +1,11 @@
-# RMPStable 新会话上下文：.12 基线 / .13 待验收
+# RMPStable 新会话上下文：.12 基线 / .14 UI 待验收
 
-更新：2026-10-11。用户已手动验收通过 `0.3.9-multiInstance.12` 及此前单人功能。当前 `.13` 处理用户新反馈：搜刮静止鼠标悬停、首次无输入灰屏和窗口计时落后；等待用户最终手动验收。此前功能清单和累积回归不恢复。
+更新：2026-10-11。用户已手动验收通过 `0.3.9-multiInstance.12` 及此前单人功能。当前版本 `.14`，本轮只修改导航栏与默认布局，用户明确要求计入 `.14`，不升 `.15`。此前 `.13` 和占卜结果未收到整体验收声明，保留待验收，不重复测试。旧功能清单和累积回归不恢复。
 
 ## 必须持续遵守
 
 - 本机和 GitHub 只能有 `main`、`liveSharingTest`、`multiInstanceTest`，同名分支提交一致。不得另建分支/工作树，不以 detached HEAD 开发；`main` 不改名、不开发、不合并、不发布，除非用户特别授权。
-- `liveSharingTest` 保留本地模拟方案 `0.3.9-liveSharing.13`；`multiInstanceTest` 是当前原生多实例方案 `.13`。这两个 `.13` 是不同方案，不能混合或自行互相合并。
+- `liveSharingTest` 保留本地模拟方案 `0.3.9-liveSharing.13`；`multiInstanceTest` 是当前原生多实例方案 `.14`。两个方案不能混合或自行互相合并。
 - 在现有测试分支正常提交和推送，不强推、不改写历史。开始先核对分支、工作树、工作区和资源，保留用户未提交改动。
 - 不额外占用 C 盘开发空间；复用唯一主仓库及 F 盘资源，不新增克隆、运行副本、重复引用、缓存和包备份。构建、测试档案及大文件输出放 F 盘。清理先核对精确目标和证据，不触及真实游戏、真实存档、主仓库或其他项目。
 - 用户允许在既定 F 盘范围内后台构建、运行、隔离测试和必要清理，不逐次询问。保持长时间静默开发、尽量少打断；已审核事项不重复审核。只在修改既定范围外、从未批准的内容时请求审批；系统权限边界仍须遵守。后台启动隐藏窗口。
@@ -22,6 +22,10 @@
 ## 本轮结果与待验收
 
 本节专项脚本和详细结果文档位于 `multiInstanceTest`；`liveSharingTest` 只同步交接规则与状态，不合并另一方案的代码或测试。
+
+- `.14` 本轮四项 UI：不可用翻页箭头隐藏且位置固定；顺序观战/控制 → 重置 → 图钉 → 关闭，三个图标按钮统一 36×36 逻辑尺寸和反馈，模式按钮高 28、在高 40 的导航栏居中；默认整个窗口高为游戏视口 1/3、贴右、位于可见状态栏和遗物行下方，观战并固定展开。
+- `.14` 用 `LayoutRevision=14` 一次性迁移旧布局，随后保存的拖动、缩放、模式和图钉选择继续保留。顶部位置按实际可见状态栏控件与遗物计算；原版 TopBar 外层为全屏容器，不能用其底边。
+- `.14` 新独立 `tools/Test-NavigationLayout.ps1` / `tests/NavigationLayoutProbe`，后台运行，18 项检查和导航栏截图核对通过；未运行占卜、`.13` 或旧累积套件。证据 `F:/projectFile/RMPStable-development/evidence/navigation-layout-v14-20261011-025517`，细节见 `docs/multi-instance-v14-ui-test.md`。等待用户手动验收；通过后移出活动清单。
 
 - 占卜事件：按用户要求可见测试，原版三次/六次路线通过，未发现所测多次揭格、选牌不同步。六次最终独立自动化 26 项通过；初轮用户也手动点击，不作为纯自动化证据。细节见 `docs/crystal-sphere-focused-test.md`，独立入口 `tools/Test-CrystalSphere.ps1`。
 - `.13` 搜刮：奖励移除后，剩余行移到静止鼠标下，重新触发原版悬停；独立入口 `tools/Test-RewardHover.ps1`。
@@ -45,7 +49,7 @@ GitHub：<https://github.com/yyh2154064/RMPStable>。唯一工作目录 `C:/Proj
 | 历史证据 / 旧本地模拟包 | `evidence` / `package-liveSharing13` |
 | 原版 PCK（只读） | `F:/SteamLibrary/steamapps/common/Slay the Spire 2/SlayTheSpire2.pck` |
 
-当前 `.13` DLL SHA-256：`CE009FC8C121C2D1F7985204D9E0FAA857A6A50B97870DBF1B48FFA1BE3B2BB7`。四文件包交付位置仍为桌面 `RMPStable`；不含测试 harness，替换游戏 mods 后需重启加载。`.12` 已验收 DLL 历史 SHA：`F57AF11C85632C53F3843D0A4D217BEB7B837CF7F55BA6915E25DB4FB187B488`，不重新验收。专项日志和截图留在 F 盘 evidence，专项 profile 结束后清理。
+当前 `.14` DLL SHA-256：`9A4FB82D04905F8EA5A0E4F3559CD826C1569BDBAD0FCE6B6CA349BADE233249`。四文件包交付位置仍为桌面 `RMPStable`；不含测试 harness，替换游戏 mods 后需重启加载。`.12` 已验收 DLL 历史 SHA：`F57AF11C85632C53F3843D0A4D217BEB7B837CF7F55BA6915E25DB4FB187B488`，不重新验收。专项日志和截图留在 F 盘 evidence，专项 profile 结束后清理。
 
 ## 后续可能用到的架构与入口
 

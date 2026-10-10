@@ -73,12 +73,11 @@ internal sealed partial class SpectatorView
 		// Reserve at least 96 logical pixels for dragging even with three slots.
 		float buttonWidth = Math.Clamp((width - 96 - 24 * 2 - 8 * 4) / 3, 0, 150);
 		_sourcePrevious.Position = Vector2.Zero;
-		int count = Math.Clamp(_sourceOptions.Count - _sourcePageIndex * 3, 0, 3);
 		for (int i = 0; i < _sourceButtons.Count; i++)
 		{
 			var slot = _sourceButtons[i]; slot.Button.Position = new Vector2(32 + i * (buttonWidth + 8), 0); slot.Button.Size = new Vector2(buttonWidth, 26); slot.Label.Size = new Vector2(Math.Max(0, buttonWidth - 16), 26);
 		}
-		_sourceNext.Position = new Vector2(32 + count * (buttonWidth + 8), 0);
+		_sourceNext.Position = new Vector2(32 + 3 * (buttonWidth + 8), 0);
 	}
 	internal void UpdateSources(List<ParticipantSnapshot> sources, string currentId)
 	{
@@ -110,7 +109,8 @@ internal sealed partial class SpectatorView
 		_sourceNext.Disabled = (_sourcePageIndex + 1) * 3 >= _sourceOptions.Count;
 		void ArrowState(Button button, TextureRect image)
 		{
-			if (image.Material is ShaderMaterial material) { material.SetShaderParameter("s", button.Disabled ? 0f : 1f); material.SetShaderParameter("v", button.Disabled ? 0.55f : 0.9f); }
+			button.Visible = !button.Disabled;
+			if (image.Material is ShaderMaterial material) { material.SetShaderParameter("s", 1f); material.SetShaderParameter("v", 0.9f); }
 		}
 		ArrowState(_sourcePrevious, _sourcePreviousIcon); ArrowState(_sourceNext, _sourceNextIcon);
 		for (int i = 0; i < _sourceButtons.Count; i++)

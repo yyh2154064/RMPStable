@@ -98,8 +98,12 @@ internal static partial class LiveSharingController
         if (_mirror?.Error.Length > 0) { _mirror.Dispose(); _mirror = null; _openFailed = false; }
         EnsureMirror(state);
         _session = NRun.Instance.GetInstanceId(); _source ??= new LocalSpectatorSource();
-        var relicRow = LocalSpectatorSource.Descendants<MegaCrit.Sts2.Core.Nodes.Relics.NRelicInventoryHolder>(NRun.Instance.GlobalUi.RelicInventory).Where(n => n.IsVisibleInTree()).Select(n => n.GetGlobalRect()).OrderBy(r => r.Position.Y).FirstOrDefault();
-        SpectatorPreferences.DefaultTop = relicRow.Size.Y > 0 ? relicRow.Position.Y + relicRow.Size.Y * 3 / 5 : 116;
+        float relicBottom = LocalSpectatorSource.Descendants<MegaCrit.Sts2.Core.Nodes.Relics.NRelicInventoryHolder>(NRun.Instance.GlobalUi.RelicInventory)
+            .Where(n => n.IsVisibleInTree()).Select(n => n.GetGlobalRect().End.Y).DefaultIfEmpty(0).Max();
+        var topBar = NRun.Instance.GlobalUi.TopBar;
+        float statusBottom = new Control[] { topBar.Hp, topBar.Gold, topBar.Portrait, topBar.Deck, topBar.Map, topBar.Pause }
+            .Where(n => n.IsVisibleInTree()).Select(n => n.GetGlobalRect().End.Y).DefaultIfEmpty(80).Max();
+        SpectatorPreferences.DefaultTop = Math.Max(statusBottom, relicBottom) + 6;
         _view = new SpectatorView(Close, _mirror, enabled => _source?.SetControlMode(enabled) ?? 0);
         _captureTimer = 0; SpectatorPreferences.Current.Open = true; SpectatorPreferences.Save();
     }
