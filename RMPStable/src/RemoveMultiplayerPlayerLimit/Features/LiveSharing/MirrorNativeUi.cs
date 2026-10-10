@@ -120,7 +120,7 @@ internal static class MirrorNativeUi
     // Browsing does not make a game decision. Opening these screens is local
     // presentation, so their back buttons/cards/scrolls cannot enter the journal.
     internal static bool IsLocalPresentation(Node node) => Parent<NCardPileScreen>(node) != null || Parent<NDeckViewScreen>(node) != null ||
-        Parent<NPauseMenu>(node) != null || Under(node, NGame.Instance?.InspectCardScreen) || Under(node, NGame.Instance?.InspectRelicScreen) ||
+        Parent<NPauseMenu>(node) != null || Parent<NAbandonRunConfirmPopup>(node) != null || Under(node, NGame.Instance?.InspectCardScreen) || Under(node, NGame.Instance?.InspectRelicScreen) ||
         Under(node, RemoveMultiplayerPlayerLimit.Infrastructure.SceneMonitor.FindSettingsScreen()) ||
         node == NRun.Instance?.GlobalUi.TopBar.Deck || node == NRun.Instance?.GlobalUi.TopBar.Pause ||
         node.GetType().Name is "NDrawPileButton" or "NDiscardPileButton" or "NExhaustPileButton";

@@ -58,7 +58,6 @@ internal static partial class LiveSharingController
         SpectatorPreferences.LoadProfile(Suspend);
         var state = GameStateAccessor.GetRunState();
         if (SourceMenuOpen && !_sourceMenuStarting && (state == null || NCapstoneContainer.Instance?.CurrentCapstoneScreen == null && NModalContainer.Instance?.OpenModal == null)) SourceMenuOpen = false;
-        if (SourceMenuOpen && state?.IsGameOver == true) { Close(); SourceMenuOpen = false; }
         var service = RunManager.Instance.NetService;
         if (!RunManager.Instance.IsInProgress && SaveManager.Instance.IsProfileInitialized && NGame.Instance?.MainMenu?.IsNodeReady() == true &&
             service?.Type is not NetGameType.Host and not NetGameType.Client) EnsureMirror(1);
@@ -163,9 +162,11 @@ internal static partial class LiveSharingController
             return Reject("状态或控制权限已变化，请重新操作");
         if (message.Model == "menu")
         {
-            if (message.Value is not "GiveUp" and not "SaveAndQuit" and not "Compendium" and not "RmpQuickSl" and not "RmpQuickSlConfirmed" || SourceMenuOpen ||
+            if (message.Value is not "GiveUp" and not "GiveUpConfirmed" and not "SaveAndQuit" and not "Compendium" and not "RmpQuickSl" and not "RmpQuickSlConfirmed" || SourceMenuOpen ||
                 NModalContainer.Instance?.OpenModal != null || message.Value != "RmpQuickSlConfirmed" && NRun.Instance?.GlobalUi.TopBar.Pause.IsEnabled != true) return Reject("当前无法执行此操作");
-            if (message.Value == "RmpQuickSlConfirmed")
+            if (message.Value == "GiveUpConfirmed")
+            { if (state.IsGameOver) return Reject("对局已结束"); RunManager.Instance.Abandon(); }
+            else if (message.Value == "RmpQuickSlConfirmed")
             { if (!QuickSl.QuickSlController.ConfirmFromMirror()) return Reject("当前无法执行 SL"); }
             else if (message.Value == "RmpQuickSl") QuickSl.QuickSlController.RequestFromMirror();
             else

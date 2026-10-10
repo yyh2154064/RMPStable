@@ -22,6 +22,7 @@ internal static class MirrorState
     { var reader = new PacketReader(); reader.Reset(bytes); return reader.Read<T>(); }
     internal static string Hash(RunState state)
     {
+        if (MirrorJournal.EndHash(state) is { } ended) return ended;
         var saved = RunManager.Instance.ToSave(null);
         saved.SaveTime = saved.StartTime = saved.RunTime = saved.WinTime = 0;
         saved.NumReloads = 0; saved.MapDrawings = null;

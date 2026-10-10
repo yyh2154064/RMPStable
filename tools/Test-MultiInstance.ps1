@@ -1,5 +1,6 @@
 param(
     [ValidateSet('full','feedback','replay')][string]$Mode = 'feedback',
+    [switch]$EndingOnly,
     [string]$ResourceRoot = 'F:/projectFile/RMPStable-development',
     [string]$MainPack = 'F:/SteamLibrary/steamapps/common/Slay the Spire 2/SlayTheSpire2.pck'
 )
@@ -27,12 +28,13 @@ $env:APPDATA = Join-Path $profile 'Roaming'; $env:LOCALAPPDATA = Join-Path $prof
 $env:RMP_MULTI_TEST = '1'; $env:RMP_MULTI_FULL_TEST = if ($Mode -eq 'full') {'1'} else {'0'}
 $env:RMP_MULTI_FEEDBACK_TEST = if ($Mode -eq 'feedback') {'1'} else {'0'}
 $env:RMP_MULTI_REPLAY_TEST = if ($Mode -eq 'replay') {'1'} else {'0'}
+$env:RMP_MULTI_ENDING_TEST = if ($EndingOnly) {'1'} else {'0'}
 $env:RMP_MULTI_HEADLESS = '0'; $env:RMP_MULTI_MAIN_PACK = $MainPack
 Copy-Item -LiteralPath (Join-Path $root 'build/package/RMPStable') -Destination (Join-Path $runtime 'mods') -Recurse -Force
 Copy-Item -LiteralPath (Join-Path $root 'build/test/MultiInstanceSmoke.dll'), (Join-Path $repo 'tests/MultiInstanceSmoke/MultiInstanceSmoke.json') -Destination (Join-Path $runtime 'mods/MultiInstanceSmoke') -Force
-$log = Join-Path $evidence ("test-v11-$Mode.log")
-@{dll=(Get-FileHash -LiteralPath (Join-Path $runtime 'mods/RMPStable/RMPStable.dll')).Hash;test=(Get-FileHash -LiteralPath (Join-Path $runtime 'mods/MultiInstanceSmoke/MultiInstanceSmoke.dll')).Hash} |
-    ConvertTo-Json | Set-Content -LiteralPath (Join-Path $evidence "test-v11-$Mode-manifest.json") -Encoding utf8
+$log = Join-Path $evidence ("test-v12-$Mode.log")
+@{mode=$Mode;endingOnly=[bool]$EndingOnly;dll=(Get-FileHash -LiteralPath (Join-Path $runtime 'mods/RMPStable/RMPStable.dll')).Hash;test=(Get-FileHash -LiteralPath (Join-Path $runtime 'mods/MultiInstanceSmoke/MultiInstanceSmoke.dll')).Hash} |
+    ConvertTo-Json | Set-Content -LiteralPath (Join-Path $evidence "test-v12-$Mode-manifest.json") -Encoding utf8
 $arguments = '--main-pack "' + $MainPack + '" --force-steam off --rendering-method forward_plus --rendering-driver d3d12 --windowed --position -30000,-30000 --max-fps 120 --resolution 1280x720 --quit-after 36000 --log-file "' + $log + '"'
 $owned = Start-Process -FilePath (Join-Path $runtime 'SlayTheSpire2.exe') -WorkingDirectory $runtime -ArgumentList $arguments -WindowStyle Hidden -PassThru
 try {

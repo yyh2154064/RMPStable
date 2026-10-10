@@ -59,6 +59,14 @@ internal sealed partial class MirrorRenderer
             if (Diagnostic) GD.Print("[RMP:Mirror:Keyboard] key=" + key.Keycode + " control=" + _control + " waiting=" + _waitingForAuthority + " idle=" + NativeIdle + " cards=" + CanBufferCard + " handMode=" + NPlayerHand.Instance?.CurrentMode);
             bool Match(string action) => MatchesShortcut(key, action);
             bool confirm = key.Keycode == Key.Enter || Match("ui_confirm") || Match("ui_accept") || Match(MegaInput.select);
+            if (NModalContainer.Instance?.OpenModal is NAbandonRunConfirmPopup abandon)
+            {
+                string button = key.Keycode == Key.Escape || Match(MegaInput.cancel) ? "NoButton" : confirm ? "YesButton" : "";
+                if (button.Length > 0) LocalSpectatorSource.Descendants<NClickableControl>(abandon).FirstOrDefault(b => b.Name == button && b.IsEnabled)?.ForceClick();
+                continue;
+            }
+            if (NGame.Instance.InspectCardScreen?.IsVisibleInTree() == true || NGame.Instance.InspectRelicScreen?.IsVisibleInTree() == true)
+            { NGame.Instance.GetViewport().PushInput(key, true); continue; }
             if (QuickSl.QuickSlController.ConfirmationOpen)
             {
                 var popup = NModalContainer.Instance?.OpenModal as Node;
@@ -138,7 +146,8 @@ internal sealed partial class MirrorRenderer
             if (focused != null && confirm)
             {
                 if (NCapstoneContainer.Instance?.CurrentCapstoneScreen is Node pauseRoot &&
-                    LocalSpectatorSource.Descendants<NClickableControl>(pauseRoot).Any(b => b == focused && b.IsEnabled && b.Name.ToString() is "Settings" or "Resume"))
+                    LocalSpectatorSource.Descendants<NClickableControl>(pauseRoot).Any(b => b == focused && b.IsEnabled &&
+                        (b.Name.ToString() is "Settings" or "Resume" || b.Name == "GiveUp" && _control && NativeIdle && !_waitingForAuthority)))
                     ((NClickableControl)focused).ForceClick();
                 else SendShortcutAction(a => a.NativePath == MirrorNativeUi.Key(MirrorNativeUi.Parent<NCardHolder>(focused) ?? focused));
             }
@@ -162,12 +171,12 @@ internal sealed partial class MirrorRenderer
         if (!_control || !NativeIdle || _waitingForAuthority || _state == null) return false;
         var action = _commands.CaptureCommands(_state).Control.Actions.LastOrDefault(a => a.Enabled && predicate(a));
         if (action == null) return false;
-        SendIntent(action.Kind, action.NativeIndex, -1, MirrorState.Hash(_state), _events, action.NativePath); return true;
+        SendIntent(action.Kind, action.NativeIndex, -1, CurrentHash, _events, action.NativePath); return true;
     }
     private void RequestKeyboardSl()
     {
         if (!_control || !NativeIdle || _waitingForAuthority || _state == null) return;
         QuickSl.QuickSlController.ShowReplicaConfirmation(() =>
-        { if (_state != null) SendIntent("menu", -1, -1, MirrorState.Hash(_state), _events, value: "RmpQuickSlConfirmed"); });
+        { if (_state != null) SendIntent("menu", -1, -1, CurrentHash, _events, value: "RmpQuickSlConfirmed"); });
     }
 }

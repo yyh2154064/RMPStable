@@ -35,6 +35,7 @@ public static partial class Smoke
             var state=RunState.CreateForNewRun(new[]{player},ActModel.GetDefaultList().Select(a=>a.ToMutable()).ToList(),Array.Empty<ModifierModel>(),GameMode.Standard,0,"RMPFULLNATIVE");
             player.Gold=1000; // Isolated fixture: exercise purchases without farming.
             player.AddPotionInternal(ModelDb.Potion<MegaCrit.Sts2.Core.Models.Potions.FirePotion>().ToMutable(),0,true);
+            player.AddPotionInternal(ModelDb.Potion<MegaCrit.Sts2.Core.Models.Potions.FoulPotion>().ToMutable(),1,true);
             player.Deck.Clear(true);
             player.Deck.AddInternal(state.CreateCard<SculptingStrike>(player),silent:true);
             player.Deck.AddInternal(state.CreateCard<DefendIronclad>(player),silent:true);
@@ -49,6 +50,14 @@ public static partial class Smoke
             var mirror=Static("_mirror")!; var process=Field(mirror,"Process")!;
             var view=Static("_view")!; Call(view,"SetControlEnabled",true);
             var source=Static("_source")!;
+            if(Environment.GetEnvironmentVariable("RMP_MULTI_ENDING_TEST")=="1")
+            {
+                await RunManager.Instance.EnterMapCoord(state.Map.GetAllMapPoints().First(p=>p.PointType==MapPointType.Shop).coord);
+                await Until(()=>Verified,"isolated ending fixture merchant ready"); await Frames(60);
+                await TestAbandonAndResults();
+                Controller.GetMethod("Suspend",Any)!.Invoke(null,null);
+                GD.Print("[MultiInstanceSmoke] FULL PASSED"); ((SceneTree)Engine.GetMainLoop()).Quit(); return;
+            }
             object[] Actions()
             {
                 var snapshot=Call(source,"CaptureCommands",state)!;
@@ -200,12 +209,16 @@ public static partial class Smoke
             await SourceMouseChoice("transfigure",false);
             Check(player.PlayerCombatState!.Hand.Cards.OfType<Whirlwind>().Any(c=>c.BaseReplayCount==1),"transfigure original repeat modification reaches selected native card");
             await Click(a=>Node(a)?.GetType().Name=="NPotionHolder" && Node(a)?.GetType().GetProperty("Potion")?.GetValue(Node(a))!=null,"open original potion popup");
+            Send(0x201,.5f,.4f); await Frames(2); Send(0x202,.5f,.4f);
+            await Until(()=>Verified && !Descendants<MegaCrit.Sts2.Core.Nodes.Potions.NPotionPopup>(NRun.Instance).Any(p=>!p.IsMarkedForRemoval),"empty left click cancels native potion popup on both sides");
+            Check(player.Potions.Count()==2,"potion cancellation preserves both potions");
+            await Click(a=>Node(a)?.GetType().Name=="NPotionHolder" && Node(a)?.GetType().GetProperty("Potion")?.GetValue(Node(a))!=null,"reopen potion after cancellation");
             await Click(a=>Node(a) is Node n && n.Name.ToString()=="UseButton","use original targeted potion");
             var pileHit=Hits().Cast<object>().First(h=>(string)h.GetType().GetProperty("Kind")!.GetValue(h)! =="ui.discard");
             var pilePoint=Center(pileHit); Send(0x201,pilePoint.X,pilePoint.Y); await Frames(2); Send(0x202,pilePoint.X,pilePoint.Y); await Frames(30);
             Check(Verified && NTargetManager.Instance?.IsInSelection==true,"local pile click cannot cancel authoritative potion targeting");
             await Click(a=>Kind(a)=="target","choose original potion target");
-            await Until(()=>Verified && !player.Potions.Any(),"native targeted potion resolves in both processes");
+            await Until(()=>Verified && !player.Potions.OfType<MegaCrit.Sts2.Core.Models.Potions.FirePotion>().Any(),"native targeted potion resolves in both processes");
             for(int round=0;round<8 && CombatManager.Instance.IsInProgress;round++)
             {
                 await Until(()=>Verified,"full combat round consistent");
@@ -230,6 +243,7 @@ public static partial class Smoke
             Check(player.Gold>gold,"gold reward changes authoritative gold");
             int deckCount=player.Deck.Cards.Count;
             await Click(a=>RewardKind(a)=="CardReward","open original card reward selection");
+            await InspectThreeChoice();
             await Click(a=>Kind(a)=="select","choose original card reward");
             await Until(()=>Verified && player.Deck.Cards.Count>deckCount,"card reward reaches native deck in both processes");
             await Click(a=>Node(a)?.GetType().Name=="NProceedButton","leave original rewards");
@@ -252,6 +266,15 @@ public static partial class Smoke
             await Until(()=>Verified && player.Deck.Cards.Sum(c=>c.CurrentUpgradeLevel)>upgradeCount,"campfire upgrades native card");
             await Click(a=>Node(a)?.GetType().Name=="NProceedButton","leave original campfire");
             await Enter(MapPointType.Shop,"merchant");
+            await Click(a=>Node(a)?.GetType().Name=="NPotionHolder" && Node(a)?.GetType().GetProperty("Potion")?.GetValue(Node(a))!=null,"open foul potion at merchant");
+            await Click(a=>Node(a) is Node n && n.Name.ToString()=="UseButton","throw foul potion");
+            await Click(a=>Kind(a)=="target" && Node(a)?.GetType().Name=="NMerchantButton","foul potion targets original merchant");
+            await Until(()=>Verified && !player.Potions.OfType<MegaCrit.Sts2.Core.Models.Potions.FoulPotion>().Any(),"foul potion consumed and models agree");
+            // Original merchant may open from the release that also finished
+            // potion targeting. Exercise that direct native inventory path.
+            NMerchantRoom.Instance.OpenInventory();
+            await Until(()=>Verified && GapBool("MerchantOpen") && Actions().Any(a=>Enabled(a)&&Kind(a)=="buy"),"direct original merchant inventory opening reaches replica");
+            await Click(a=>Node(a)?.GetType().Name=="NBackButton","close post-potion original merchant inventory");
             await Click(a=>Node(a)?.GetType().Name=="NMerchantButton","open original merchant");
             int shopGold=player.Gold, shopDeckCount=player.Deck.Cards.Count;
             await Click(a=>Kind(a)=="buy" && Node(a)?.GetType().Name=="NMerchantCard","purchase original merchant card");
@@ -287,6 +310,7 @@ public static partial class Smoke
             int actIndex=state.CurrentActIndex;
             await RunManager.Instance.EnterNextAct();
             await Until(()=>Verified && state.CurrentActIndex==actIndex+1,"next act rebuilds original map and matches authority");
+            await TestAbandonAndResults();
             Controller.GetMethod("Suspend",Any)!.Invoke(null,null);
             GD.Print("[MultiInstanceSmoke] FULL PASSED"); ((SceneTree)Engine.GetMainLoop()).Quit();
         }

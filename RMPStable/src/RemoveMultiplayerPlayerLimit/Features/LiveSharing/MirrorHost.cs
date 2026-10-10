@@ -143,7 +143,7 @@ internal sealed class MirrorHost : IDisposable
         Verified = false; SourceHash = ""; Process.LastIdle = false; Process.LastHash = ""; Process.DisplayReady = false;
         Window?.Hide();
     }
-    internal static bool SourceIdle => MegaCrit.Sts2.Core.Nodes.NRun.Instance != null && (!CombatManager.Instance.IsInProgress || LocalSpectatorSource.PendingNativeChoice || !CombatManager.Instance.IsStarting &&
+    internal static bool SourceIdle => MegaCrit.Sts2.Core.Nodes.NRun.Instance != null && (RunManager.Instance.DebugOnlyGetState()?.IsGameOver == true || !CombatManager.Instance.IsInProgress || LocalSpectatorSource.PendingNativeChoice || !CombatManager.Instance.IsStarting &&
         !CombatManager.Instance.EndingPlayerTurnPhaseOne && !CombatManager.Instance.EndingPlayerTurnPhaseTwo &&
         RunManager.Instance.DebugOnlyGetState()?.Players[0].PlayerCombatState?.Phase == PlayerTurnPhase.Play &&
         !RunManager.Instance.ActionExecutor.IsRunning && !RunManager.Instance.ActionExecutor.IsPaused);

@@ -79,6 +79,7 @@ internal sealed partial class MirrorRenderer : IDisposable
     private string _error = "";
     private string _phase = "等待主进程战斗数据";
     private readonly Callable _drawCallback;
+    private readonly bool _startupOffscreen, _startupConsole;
     private long _drawFrames;
     private double _diagnosticTimer;
     internal static bool IsRenderer => Environment.GetEnvironmentVariable("RMP_MULTI_ROLE") == "renderer";
@@ -103,6 +104,11 @@ internal sealed partial class MirrorRenderer : IDisposable
         Engine.MaxFps = 120;
         if (DisplayServer.GetName() != "headless")
         {
+            MirrorWin32.GetWindowRect(MirrorWin32.OwnWindow, out var startupRect);
+            var rect = new Rect2I(startupRect.Left, startupRect.Top, startupRect.Right-startupRect.Left, startupRect.Bottom-startupRect.Top);
+            _startupOffscreen = !Enumerable.Range(0, DisplayServer.GetScreenCount()).Any(screen => rect.Intersects(new Rect2I(DisplayServer.ScreenGetPosition(screen), DisplayServer.ScreenGetSize(screen))));
+            _startupConsole = MirrorWin32.GetConsoleWindow() != 0;
+            GD.Print("[RMP:Mirror:Startup] offscreen=" + _startupOffscreen + " console=" + _startupConsole + " bounds=" + rect);
             DisplayServer.WindowSetVsyncMode(DisplayServer.VSyncMode.Disabled);
             _input = new MirrorWindowHook(MirrorWin32.OwnWindow,InterceptInput,noActivate: true);
             _drawCallback = Callable.From(OnFrameDrawn);
@@ -205,7 +211,7 @@ internal sealed partial class MirrorRenderer : IDisposable
             _statusTimer = .05; _lastIdle = idle;
             _ = _wire.Send(new MirrorMessage { Kind = "status", Generation = _generation, Events = _events, Idle = idle,
                 Epoch = _epoch, Control = _control,
-                Hash = idle && _replay != null ? MirrorState.Hash(_state!) : "", Hits = idle ? CaptureHits() : new(), Room = _error,
+                Hash = idle && _replay != null ? CurrentHash : "", Hits = idle ? CaptureHits() : new(), Room = _error,
                 DisplayReady = _sceneReady && _generation == _desiredGeneration && _state != null && NRun.Instance != null, Attached = _attached,
                 Phase = _phase, DrawFrames = _drawFrames,
                 WindowVisible = windowVisible,
@@ -239,7 +245,7 @@ internal sealed partial class MirrorRenderer : IDisposable
             " threshold=" + (transition.Material is ShaderMaterial material ? material.GetShaderParameter("threshold").AsSingle() : -1));
     }
     private float _presentationWheelScale = 1;
-    private bool NativeIdle => !_busy && _generation == _desiredGeneration && _error.Length == 0 && _state != null && _replay != null && MirrorHost.SourceIdle;
+    private bool NativeIdle => !_busy && _generation == _desiredGeneration && _error.Length == 0 && _state != null && _replay != null && (_finalSave != null || MirrorHost.SourceIdle);
     private bool InterceptInput(uint message, nuint key, nint data)
     {
         if (MirrorWin32.Keyboard(message))
@@ -316,6 +322,7 @@ internal sealed partial class MirrorRenderer : IDisposable
         {
             if (Diagnostic && input.Message == MirrorWin32.LeftDown) GD.Print("[RMP:Mirror:Input] down point=" + input.Point + " control=" + _control + " idle=" + NativeIdle + " waiting=" + _waitingForAuthority + " localUi=" + LocalUiAt(input.Point)?.GetType().Name + " generation=" + input.Generation + "/" + _desiredGeneration + " epoch=" + input.Epoch + "/" + _epoch);
             if (input.Generation != _desiredGeneration || input.Epoch != _epoch) continue;
+            if (input.Message == MirrorWin32.LeftDown && PotionPopup is { } outsidePopup && !Contains(outsidePopup, input.Point)) continue;
             if (_keyboardCard && _dragCard != null && input.Message is MirrorWin32.LeftDown or MirrorWin32.LeftUp)
             {
                 var position = ViewportPoint(input.Point);
@@ -333,11 +340,15 @@ internal sealed partial class MirrorRenderer : IDisposable
             }
             if (_mapGestureKey.Length > 0 && input.Message is MirrorWin32.LeftUp or 0x205 or 0x208)
             { FinishMapGesture(input.Point); continue; }
+            if (input.Message == 0x204 && TryInspectCard(input.Point)) continue;
+            if (input.Message == 0x204 && PotionPopup != null) continue;
+            if (input.Message is MirrorWin32.LeftUp or 0x205 && _pressedAction == null && _pressedUi == null &&
+                _dragCard == null && TryCancelPotionPopup(input.Point)) continue;
             if (input.Message is 0x204 or MirrorWin32.KeyDown)
             {
                 if (_dragCard != null) { CancelDrag(); continue; }
                 var cancel = _state == null ? null : _commands.CaptureCommands(_state).Control.Actions.LastOrDefault(a => a.Enabled && a.Kind == "cancel");
-                if (cancel != null) SendIntent("cancel", -1, -1, MirrorState.Hash(_state!), _events, cancel.NativePath);
+                if (cancel != null) SendIntent("cancel", -1, -1, CurrentHash, _events, cancel.NativePath);
                 continue;
             }
             if (input.Message == MirrorWin32.CaptureChanged)
@@ -368,9 +379,9 @@ internal sealed partial class MirrorRenderer : IDisposable
                     if (_control && NativeIdle && !_waitingForAuthority)
                     {
                         string menuName = menu.Name.ToString();
-                        NCapstoneContainer.Instance.Close();
-                        if (menuName == "RmpQuickSl") RequestKeyboardSl();
-                        else SendIntent("menu", -1, -1, MirrorState.Hash(_state!), _events, value: menuName);
+                        if (menuName == "GiveUp") menu.ForceClick();
+                        else if (menuName == "RmpQuickSl") { NCapstoneContainer.Instance.Close(); RequestKeyboardSl(); }
+                        else { NCapstoneContainer.Instance.Close(); SendIntent("menu", -1, -1, CurrentHash, _events, value: menuName); }
                     }
                 }
                 else if (GodotObject.IsInstanceValid(releasedUi) && Contains(releasedUi, input.Point) && releasedUi is NClickableControl clickable)
@@ -399,7 +410,7 @@ internal sealed partial class MirrorRenderer : IDisposable
                 if (scroll != null && input.Wheel != 0) QueueScroll(scroll.NativePath, WheelValue(input.Wheel * (NMapScreen.Instance?.IsOpen == true ? 3.25f : 1)));
                 continue;
             }
-            if (UiOnlyOpen || NCapstoneContainer.Instance?.CurrentCapstoneScreen is NPauseMenu) { CancelDrag(); continue; }
+            if (UiOnlyOpen || NGame.Instance?.InspectCardScreen?.IsVisibleInTree() == true || NCapstoneContainer.Instance?.CurrentCapstoneScreen is NPauseMenu) { CancelDrag(); continue; }
             if (!_control || (!NativeIdle || _waitingForAuthority) && !(CanBufferCard && input.Message is MirrorWin32.LeftDown or MirrorWin32.LeftUp)) { CancelDrag(); continue; }
             if (input.Message == MirrorWin32.LeftUp && _pressedAction != null)
             {
@@ -407,7 +418,7 @@ internal sealed partial class MirrorRenderer : IDisposable
                 var selectedNode = MirrorNativeUi.Resolve(selected.NativePath) as Control;
                 if (Diagnostic) GD.Print("[RMP:Mirror:Input] native release " + selected.NativePath + " point=" + input.Point + " rect=" + (selectedNode == null ? "missing" : InteractiveArea(selectedNode).GetGlobalRect().ToString()));
                 if (selectedNode != null && Contains(InteractiveArea(selectedNode), input.Point))
-                    SendIntent(selected.Kind, -1, -1, MirrorState.Hash(_state!), _events, selected.NativePath);
+                    SendIntent(selected.Kind, -1, -1, CurrentHash, _events, selected.NativePath);
                 continue;
             }
             if (input.Message == MirrorWin32.LeftDown)
@@ -420,7 +431,7 @@ internal sealed partial class MirrorRenderer : IDisposable
                 if (NMapScreen.Instance?.IsOpen == true)
                 { StartMapGesture(input.Point, NMapScreen.Instance.Drawings.GetLocalDrawingMode(false) == DrawingMode.None ? "pan" : "pen"); continue; }
                 if (!CanBufferCard) continue;
-                if (Hit("endTurn",input.Point) != null) { SendIntent("endTurn",-1,-1,MirrorState.Hash(_state!),_events); continue; }
+                if (Hit("endTurn",input.Point) != null) { SendIntent("endTurn",-1,-1,CurrentHash,_events); continue; }
                 var hit = Hit("play",input.Point);
                 var hand = _state!.Players[0].PlayerCombatState?.Hand.Cards;
                 if (hit == null || hand == null || hit.Index < 0 || hit.Index >= hand.Count) continue;
@@ -494,6 +505,8 @@ internal sealed partial class MirrorRenderer : IDisposable
         if (_state == null || _generation != _desiredGeneration) return null;
         if (QuickSl.QuickSlController.ConfirmationOpen && NModalContainer.Instance?.OpenModal is Node confirmation)
             return LocalSpectatorSource.Descendants<NClickableControl>(confirmation).LastOrDefault(n => n.IsEnabled && Contains(n, point));
+        if (NModalContainer.Instance?.OpenModal is NAbandonRunConfirmPopup abandon)
+            return LocalSpectatorSource.Descendants<NClickableControl>(abandon).LastOrDefault(n => n.IsEnabled && Contains(n, point));
         var inspector = NGame.Instance?.InspectCardScreen?.IsVisibleInTree() == true ? (Control)NGame.Instance.InspectCardScreen :
             NGame.Instance?.InspectRelicScreen?.IsVisibleInTree() == true ? NGame.Instance.InspectRelicScreen : null;
         if (inspector != null)
@@ -613,6 +626,7 @@ internal sealed partial class MirrorRenderer : IDisposable
         try
         {
             _generation = message.Generation; _wire.Identity.Generation = _generation; _events = 0; _error = ""; _waitingForAuthority = false; _drawFrames = 0;
+            _finalSave = null; _finalHash = "";
             _authorityReady = false; _pendingCards.Clear(); _submittedCard = null;
             Stage("重建原版对局");
             MirrorFastRestore.Replica = message.FastRestore;
@@ -653,6 +667,11 @@ internal sealed partial class MirrorRenderer : IDisposable
             manager.PlayerChoiceSynchronizer.FastForwardChoiceIds(replay.choiceIds);
             manager.RewardsSetSynchronizer.FastForwardRewardIds(replay.rewardIds);
             Stage("创建原版房间");
+            if (message.Operations.Any(o => o.Kind == "ended"))
+            {
+                await ReplayOperations(message.Operations);
+                _sceneReady = true; return;
+            }
             await manager.LoadIntoLatestMapCoord(AbstractRoom.FromSerializable(replay.serializableRun.PreFinishedRoom, _state));
             if (manager.MapDrawingsToLoad != null)
             {
@@ -703,11 +722,24 @@ internal sealed partial class MirrorRenderer : IDisposable
                 throw new InvalidDataException("Native operation prefix changed");
         _operations = operations;
         long generation = _generation;
+        int endingIndex = operations.FindLastIndex(o => o.Kind == "ended");
+        if (endingIndex >= _events)
+        {
+            // Source completion supersedes unfinished room presentation (boss
+            // travel, death animations or a pending abandoned card choice).
+            await PresentEnding(operations[endingIndex], generation);
+            _events = endingIndex + 1;
+        }
         while (_events < operations.Count)
         {
             CheckGeneration(generation);
             var operation = operations[_events];
-            if (operation.Kind == "game")
+            if (operation.Kind == "victoryRoom")
+            {
+                if (_state!.CurrentActIndex != _state.Acts.Count-1) throw new InvalidDataException("Victory room before final act");
+                if (_state.CurrentRoom?.IsVictoryRoom != true) await RunManager.Instance.EnterNextAct();
+            }
+            else if (operation.Kind == "game")
             {
                 var item = MirrorState.Unpack<CombatReplayEvent>(operation.Payload);
                 var action = item.action!.ToGameAction(_state!.GetPlayer(item.playerId!.Value));
@@ -742,7 +774,7 @@ internal sealed partial class MirrorRenderer : IDisposable
             {
                 var deadline = Stopwatch.StartNew();
                 Node? node;
-                while ((node = MirrorNativeUi.Resolve(operation.NodeKey, operation.Kind == "card")) == null || node is CanvasItem canvas && !canvas.IsVisibleInTree() || !LocalSpectatorSource.NativeReplayReady(node, operation.Value))
+                while ((node = MirrorNativeUi.Resolve(operation.NodeKey, operation.Kind == "card")) == null || operation.Kind != "shopOpen" && node is CanvasItem canvas && !canvas.IsVisibleInTree() || !LocalSpectatorSource.NativeReplayReady(node, operation.Value))
                 {
                     if (deadline.Elapsed.TotalSeconds > 20) throw new InvalidDataException("Native UI unavailable: " + operation.Kind + ":" + operation.NodeKey + " selection=" + operation.Value + " hand=" + NPlayerHand.Instance?.CurrentMode + " generation=" + generation + " operation=" + _events + "/" + operations.Count + " previous=" + string.Join(";", operations.Take(_events).TakeLast(4).Select(o => o.Kind + ":" + o.NodeKey + ":" + o.Value)));
                     await Frame(generation);
@@ -750,7 +782,7 @@ internal sealed partial class MirrorRenderer : IDisposable
                 // Map travel is rebased from the authoritative next-room
                 // checkpoint. Starting a second asynchronous room entry here
                 // would race that rebase and keep a freed map scene alive.
-                if (operation.Kind == "button" && node is NMapPoint point) ShowMapSelection(point);
+                    if (operation.Kind == "button" && node is NMapPoint point) ShowMapSelection(point);
                 else if (operation.Kind == "button" && node is NProceedButton && _state?.CurrentRoom?.RoomType == RoomType.Boss) { }
                 else if (operation.Kind == "button" && node is NClickableControl clickable) clickable.ForceClick();
                 else if (operation.Kind == "card" && node is NCardHolder holder) holder.EmitSignal(NCardHolder.SignalName.Pressed, holder);
@@ -761,6 +793,11 @@ internal sealed partial class MirrorRenderer : IDisposable
                 else if (operation.Kind == "scroll" && node is Control scroll) LocalSpectatorSource.ScrollNative(scroll, operation.Value);
                 else if (operation.Kind == "potion" && node is MegaCrit.Sts2.Core.Nodes.Potions.NPotionHolder potion) _ = TaskHelper.RunSafely(potion.UsePotion());
                 else if (operation.Kind == "popupCancel" && node is MegaCrit.Sts2.Core.Nodes.Potions.NPotionPopup popup) popup.Remove();
+                else if (operation.Kind == "shopOpen" && node is NMerchantInventory inventory)
+                {
+                    if (NMerchantRoom.Instance?.Inventory == inventory) NMerchantRoom.Instance.OpenInventory();
+                    else inventory.Open();
+                }
                 else if (node is NMapDrawings drawings && operation.Kind.StartsWith("draw", StringComparison.Ordinal)) ReplayDrawing(drawings, operation);
                 else if (operation.Kind is "target" or "cancelTarget")
                 {

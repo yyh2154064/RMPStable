@@ -33,6 +33,7 @@ internal sealed class MirrorProcess : IDisposable
     internal double Fps, ProcessMs;
     internal System.Collections.Generic.List<MirrorHit> LastHits = new();
     private bool _disposed;
+    private nint _startupParent;
     internal MirrorProcess(ulong source)
     {
         string executable = OS.GetExecutablePath();
@@ -89,7 +90,8 @@ internal sealed class MirrorProcess : IDisposable
                 if (File.Exists(original)) File.Copy(original, destination, overwrite: false);
             }
         }
-        var start = new ProcessStartInfo(executable) { UseShellExecute = false, CreateNoWindow = true, WindowStyle = ProcessWindowStyle.Hidden, WorkingDirectory = Path.GetDirectoryName(executable)! };
+        var start = new ProcessStartInfo(executable) { UseShellExecute = false, CreateNoWindow = true, WindowStyle = ProcessWindowStyle.Hidden,
+            RedirectStandardOutput = true, RedirectStandardError = true, WorkingDirectory = Path.GetDirectoryName(executable)! };
         foreach (string key in new System.Collections.Generic.List<string>(start.Environment.Keys))
             if (key.StartsWith("RMP_SMOKE", StringComparison.Ordinal) || key.StartsWith("RMP_MULTI", StringComparison.Ordinal)) start.Environment.Remove(key);
         start.Environment["APPDATA"] = Path.Combine(DirectoryPath, "Roaming"); start.Environment["LOCALAPPDATA"] = Path.Combine(DirectoryPath, "Local");
@@ -108,8 +110,22 @@ internal sealed class MirrorProcess : IDisposable
             start.ArgumentList.Add("--rendering-driver"); start.ArgumentList.Add(RenderingServer.GetCurrentRenderingDriverName());
         }
         if (Environment.GetEnvironmentVariable("RMP_MULTI_HEADLESS") == "1") start.ArgumentList.Add("--headless");
+        else if (DisplayServer.GetName() != "headless")
+        {
+            // The game's offscreen safeguard moves a new window to (8,48).
+            // Keep that native window under an invisible parent until the
+            // authenticated renderer detaches and exposes its owned popup.
+            _startupParent = MirrorWin32.Create(0x08000080, "STATIC", "RMP replica startup", (uint)MirrorWin32.Popup,
+                -30000, -30000, 1280, 720, 0, 0, 0, 0);
+            if (_startupParent == 0) { Wire.Dispose(); throw new System.ComponentModel.Win32Exception(); }
+            start.ArgumentList.Add("--wid"); start.ArgumentList.Add(_startupParent.ToString());
+        }
         try { Child = Process.Start(start) ?? throw new IOException("Renderer process did not start"); }
-        catch { Wire.Dispose(); throw; }
+        catch { if (_startupParent != 0) MirrorWin32.DestroyWindow(_startupParent); Wire.Dispose(); throw; }
+        // Drain redirected handles without retaining output in RAM. Godot's
+        // original --log-file remains the persistent diagnostic source.
+        Child.OutputDataReceived += (_, _) => { }; Child.ErrorDataReceived += (_, _) => { };
+        Child.BeginOutputReadLine(); Child.BeginErrorReadLine();
         // The renderer participates in interactive input. Artificially lowering
         // its scheduling priority causes avoidable latency under source load.
         try { Child.PriorityClass = ProcessPriorityClass.Normal; } catch { }
@@ -123,5 +139,6 @@ internal sealed class MirrorProcess : IDisposable
         Wire.Dispose();
         try { if (!Child.HasExited) Child.Kill(entireProcessTree: false); } catch { }
         Child.Dispose();
+        if (_startupParent != 0) { MirrorWin32.DestroyWindow(_startupParent); _startupParent = 0; }
     }
 }

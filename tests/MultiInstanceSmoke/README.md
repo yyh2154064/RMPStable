@@ -35,6 +35,9 @@ Additional parent-only options:
 - `RMP_MULTI_FULL_TEST=1`: run the original map/combat/selection/reward/rest/shop/treasure/event/next-act flow and exit with `FULL PASSED`.
 - `RMP_MULTI_ROOMS_TEST=1` together with full mode: skip combat and reward checks for focused room diagnostics.
 - `RMP_MULTI_TREASURE_TEST=1` together with full mode: focus on treasure diagnostics.
+- `RMP_MULTI_ENDING_TEST=1` together with full mode: focused abandon/results diagnostics; this is not a complete full-flow acceptance run.
+
+The .12 full suite also tests empty-area potion cancellation, native right-click card inspection and upgrade preview, merchant inventory opening after Foul Potion, replica abandon confirmation, and defeat result Continue/Main Menu. The feedback suite tests startup offscreen/no-console state, Toolbox inspection, the original final Architect room, victory results, and recovery while results are open. Result button clicks wait for their original entrance animation.
 
 Full mode uses a deterministic test deck and gold fixture in its disposable
 run. It compares original persistent state and drawing state across the two

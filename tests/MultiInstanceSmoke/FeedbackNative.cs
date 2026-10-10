@@ -33,10 +33,26 @@ public static partial class Smoke
     private static async Task RendererFeedback()
     {
         bool mapCircleSaved=false;
+        var endingVisuals=new System.Collections.Generic.HashSet<string>();
+        string endingLabel=""; double endingSince=0;
         while (true)
         {
             await ((SceneTree)Engine.GetMainLoop()).ToSignal(Engine.GetMainLoop(), SceneTree.SignalName.ProcessFrame);
             if (NGame.Instance == null || NRun.Instance == null) continue;
+            if(NOverlayStack.Instance?.Peek() is MegaCrit.Sts2.Core.Nodes.Screens.GameOverScreen.NGameOverScreen ending)
+            {
+                bool summary=Field(ending,"_continueButton") is NClickableControl next && !next.IsEnabled;
+                string label="ending-"+(RunManager.Instance.History?.Win==true?"win":"defeat")+(summary?"-summary":"");
+                if(label!=endingLabel) {endingLabel=label;endingSince=Time.GetTicksMsec();}
+                if(!endingVisuals.Contains(label) && Time.GetTicksMsec()-endingSince>1000 && Field(ending,"_uiNode") is Control ui && ui.Modulate.A>.95f &&
+                    (!summary || Field(ending,"_mainMenuButton") is NClickableControl main && main.IsEnabled))
+                {
+                    await NGame.Instance.ToSignal(RenderingServer.Singleton,RenderingServer.SignalName.FramePostDraw);
+                    using var pixels=NGame.Instance.GetViewport().GetTexture().GetImage();
+                    pixels.SavePng(Path.Combine(Environment.GetEnvironmentVariable("RMP_MULTI_PROFILE_ROOT")!,"visual-"+label+".png"));
+                    endingVisuals.Add(label);
+                }
+            }
             var settings = Type("LiveSharingController").Assembly.GetType("RemoveMultiplayerPlayerLimit.Infrastructure.SceneMonitor")!.GetMethod("FindSettingsScreen",Any)!.Invoke(null,null) as Control;
             var root = settings?.IsVisibleInTree()==true ? settings : NCapstoneContainer.Instance?.CurrentCapstoneScreen as Node ?? NOverlayStack.Instance?.Peek() as Node;
             var scroll = root == null ? null : Descendants<Control>(root).LastOrDefault(n => n is NCardGrid or NScrollableContainer && n.IsVisibleInTree());
@@ -47,6 +63,18 @@ public static partial class Smoke
             File.WriteAllText(feedbackPath+".tmp",
                 System.Text.Json.JsonSerializer.Serialize(new { Screen = root != null && Descendants<Node>(root).Any(n=>n.GetType().Name=="NPauseMenu" && n is Control c && c.IsVisibleInTree()) && settings?.IsVisibleInTree()!=true ? "NPauseMenu" : root?.GetType().Name ?? "", Instance = root?.GetInstanceId() ?? 0, Offset = offset,
                     QuickSlOpen = (bool)Type("LiveSharingController").Assembly.GetType("RemoveMultiplayerPlayerLimit.Features.QuickSl.QuickSlController")!.GetProperty("ConfirmationOpen",Any)!.GetValue(null)!,
+                    AbandonOpen = NModalContainer.Instance?.OpenModal is NAbandonRunConfirmPopup,
+                    ProgressScore = SaveManager.Instance.Progress.CurrentScore,
+                    ProgressUnlocks = SaveManager.Instance.Progress.TotalUnlocks,
+                    MerchantOpen = NRun.Instance.MerchantRoom?.Inventory.IsOpen == true,
+                    StartupOffscreen = renderer != null && (bool)Field(renderer,"_startupOffscreen")!,
+                    StartupConsole = renderer != null && (bool)Field(renderer,"_startupConsole")!,
+                    InspectOpen = NGame.Instance.InspectCardScreen?.IsVisibleInTree() == true,
+                    InspectUpgrade = NGame.Instance.InspectCardScreen != null && Field(NGame.Instance.InspectCardScreen,"_upgradeTickbox") is NTickbox tickbox && tickbox.IsTicked,
+                    LocalControls = new Node?[]{ NGame.Instance.InspectCardScreen?.IsVisibleInTree()==true ? NGame.Instance.InspectCardScreen : null, NModalContainer.Instance?.OpenModal as Node }
+                        .Where(n=>n!=null).SelectMany(n=>Descendants<MegaCrit.Sts2.Core.Nodes.GodotExtensions.NClickableControl>(n!)).Where(c=>c.IsEnabled && c.IsVisibleInTree())
+                        .Select(c=>new {Name=c.Name.ToString(),Type=c.GetType().Name,Rect=Normalized(c)}).ToArray(),
+                    FinalWin = NOverlayStack.Instance?.Peek()?.GetType().Name=="NGameOverScreen" && RunManager.Instance.History?.Win == true,
                     VolumeMaster = SaveManager.Instance.SettingsSave.VolumeMaster,
                     ShowRunTimer = SaveManager.Instance.PrefsSave.ShowRunTimer,
                     CardInputReady = renderer != null && (bool)renderer.GetType().GetProperty("CanBufferCard",Any)!.GetValue(renderer)! && (bool)renderer.GetType().GetProperty("NativeIdle",Any)!.GetValue(renderer)!,
@@ -131,6 +159,7 @@ public static partial class Smoke
                 using var json=System.Text.Json.JsonDocument.Parse(stream); return json.RootElement.Clone();
             }
             await Until(()=>File.Exists(Path.Combine(profile,"feedback-state.json")) && ChildStatus().GetProperty("TransitionClear").GetBoolean(),"initial replica has every native transition cleared before first source choice");
+            Check(ChildStatus().GetProperty("StartupOffscreen").GetBoolean() && !ChildStatus().GetProperty("StartupConsole").GetBoolean(),"replica startup stays offscreen and allocates no console window");
             System.Collections.IEnumerable Hits() => (System.Collections.IEnumerable)Field(process,"LastHits")!;
             void Send(uint message,float x,float y)
             {
@@ -180,7 +209,7 @@ public static partial class Smoke
             await NGame.Instance.ToSignal(RenderingServer.Singleton,RenderingServer.SignalName.FramePostDraw);
             using(var pixels=NGame.Instance.GetViewport().GetTexture().GetImage()) pixels.SavePng(Path.Combine(profile,"visual-rebuild-header.png"));
             refresh.EmitSignal(Control.SignalName.MouseExited);
-            await Frames(120); await Click("select");
+            await Frames(120); await InspectThreeChoice(); await Click("select");
             await Until(()=>NOverlayStack.Instance?.Peek()==null && player.PlayerCombatState?.Hand.Cards.Count>0 && Verified,"Toolbox native selection resolves and boss combat continues");
             await Frames(45);
             var sl=Controller.Assembly.GetType("RemoveMultiplayerPlayerLimit.Features.QuickSl.QuickSlController")!;
@@ -333,6 +362,7 @@ public static partial class Smoke
             Check(child.Id!=failedPid,"resync replaces only the failed owned child process");
             Check(ReferenceEquals(checkpoint,journal.GetProperty("Checkpoint",Any)!.GetValue(null)) && recoveryEvents==operations.Count &&
                 sourceHash==(string)Type("MirrorState").GetMethod("Hash",Any)!.Invoke(null,new object[]{recoveryState})!,"resync preserves source state, RNG, checkpoint and operation journal");
+            await TestVictoryResults();
             Controller.GetMethod("Suspend",Any)!.Invoke(null,null);
             GD.Print("[MultiInstanceSmoke] FEEDBACK PASSED"); ((SceneTree)Engine.GetMainLoop()).Quit();
         }

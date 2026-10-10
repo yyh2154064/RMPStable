@@ -21,6 +21,7 @@ internal static class MirrorWin32
     [DllImport("user32.dll", SetLastError = true)] internal static extern uint GetWindowThreadProcessId(nint window, out uint process);
     [DllImport("user32.dll")] internal static extern bool IsWindow(nint window);
     [DllImport("user32.dll")] internal static extern bool IsWindowVisible(nint window);
+    [DllImport("kernel32.dll")] internal static extern nint GetConsoleWindow();
     [DllImport("user32.dll")] internal static extern bool IsIconic(nint window);
     [DllImport("user32.dll")] internal static extern nint GetParent(nint window);
     [DllImport("user32.dll", SetLastError = true)] internal static extern nint SetParent(nint window, nint parent);
@@ -61,6 +62,12 @@ internal static class MirrorWin32
     internal static void AttachOwn(nint parent, int owner)
     {
         var window = OwnWindow; RequireOwned(window, System.Environment.ProcessId); RequireOwned(parent, owner);
+        ShowWindow(window, 0);
+        if (((long)GetLong(window, Style) & Child) != 0)
+        {
+            Marshal.SetLastPInvokeError(0);
+            if (SetParent(window, 0) == 0 && Marshal.GetLastPInvokeError() != 0) throw new Win32Exception(Marshal.GetLastPInvokeError());
+        }
         // Keep Godot's cached flag consistent with the Win32 style. Otherwise
         // later engine flag updates can restore borders and shrink the client.
         DisplayServer.WindowSetFlag(DisplayServer.WindowFlags.Borderless, true);
