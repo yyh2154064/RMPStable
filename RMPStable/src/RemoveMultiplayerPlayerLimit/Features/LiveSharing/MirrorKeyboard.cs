@@ -2,6 +2,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Linq;
 using System.Reflection;
+using MegaCrit.Sts2.Core.Nodes.Screens.Shops;
 using Godot;
 using MegaCrit.Sts2.Core.ControllerInput;
 using MegaCrit.Sts2.Core.Nodes;
@@ -136,6 +137,16 @@ internal sealed partial class MirrorRenderer
             if (!PresentationOpen && NPlayerHand.Instance?.CurrentMode == NPlayerHand.Mode.Play && Match("ui_end_turn"))
             { SendShortcutAction(a => a.Kind == "endTurn"); continue; }
             var focused = NGame.Instance.GetViewport().GuiGetFocusOwner();
+            if (focused is NMerchantSlot merchant && MirrorNativeUi.Parent<NMerchantInventory>(merchant)?.IsOpen == true)
+            {
+                // Match the original merchant's select-before-accept ordering.
+                if (Match(MegaInput.select)) { SendShortcutAction(a => a.Kind == "buy" && a.NativePath == MirrorNativeUi.Key(merchant)); continue; }
+#if STS2_0111
+                if (Match(MegaInput.confirm)) { TryPreviewMerchant(merchant); continue; }
+#else
+                if (Match(MegaInput.accept)) { TryPreviewMerchant(merchant); continue; }
+#endif
+            }
             if (key.Keycode is Key.Tab or Key.Left or Key.Right or Key.Up or Key.Down)
             {
                 if (focused == null && LocalSpectatorSource.ActiveNativeUi is { } root)

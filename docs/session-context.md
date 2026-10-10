@@ -1,6 +1,6 @@
 # RMPStable 新会话上下文：.12 基线 / .14 UI 待验收
 
-更新：2026-10-11。用户已手动验收通过 `0.3.9-multiInstance.12` 及此前单人功能。当前版本 `.14`，本轮只修改导航栏与默认布局，用户明确要求计入 `.14`，不升 `.15`。此前 `.13` 和占卜结果未收到整体验收声明，保留待验收，不重复测试。旧功能清单和累积回归不恢复。
+更新：2026-10-11。用户已手动验收通过 `0.3.9-multiInstance.12` 及此前单人功能。当前版本 `.14`，本轮修改导航栏、默认布局与用户新反馈的商店交互，用户明确要求计入 `.14`，不升 `.15`。此前 `.13` 和占卜结果未收到整体验收声明，保留待验收，不重复测试。旧功能清单和累积回归不恢复。
 
 ## 必须持续遵守
 
@@ -23,9 +23,11 @@
 
 本节专项脚本和详细结果文档位于 `multiInstanceTest`；`liveSharingTest` 只同步交接规则与状态，不合并另一方案的代码或测试。
 
-- `.14` 本轮四项 UI：不可用翻页箭头隐藏且位置固定；顺序观战/控制 → 重置 → 图钉 → 关闭，三个图标按钮统一 36×36 逻辑尺寸和反馈，模式按钮高 28、在高 40 的导航栏居中；默认整个窗口高为游戏视口 1/3、贴右、位于可见状态栏和遗物行下方，观战并固定展开。
-- `.14` 用 `LayoutRevision=14` 一次性迁移旧布局，随后保存的拖动、缩放、模式和图钉选择继续保留。顶部位置按实际可见状态栏控件与遗物计算；原版 TopBar 外层为全屏容器，不能用其底边。
-- `.14` 新独立 `tools/Test-NavigationLayout.ps1` / `tests/NavigationLayoutProbe`，后台运行，18 项检查和导航栏截图核对通过；未运行占卜、`.13` 或旧累积套件。证据 `F:/projectFile/RMPStable-development/evidence/navigation-layout-v14-20261011-025517`，细节见 `docs/multi-instance-v14-ui-test.md`。等待用户手动验收；通过后移出活动清单。
+- `.14` 本轮四项 UI：不可用翻页箭头隐藏且位置固定；顺序观战/控制 → 重置 → 图钉 → 关闭，三个图标按钮统一 36×36 逻辑尺寸和反馈，模式按钮高 28、在高 40 的导航栏居中；默认整个窗口高为游戏视口 1/2、贴右、位于可见状态栏和遗物行下方，观战并固定展开。
+- `.14` 用 `LayoutRevision=1402` 一次性迁移旧布局，随后保存的拖动、缩放、模式和图钉选择继续保留。顶部位置按实际可见状态栏控件与遗物计算；原版 TopBar 外层为全屏容器，不能用其底边。
+- `.14` 追加 UI：重置采用 512 像素 SVG 栅格纹理缩小至 24 逻辑像素，圆环加粗，36×36 按钮与图钉、关闭同中心；用户名框容纳 8 个中文字符并加圆角。单人包默认 7 个本机测试来源，使用 Steam 昵称加序号，全部复用同一个认证副本；切换只改变导航选择，保持权限、真实 SourceId 和进程身份。离线 Steam 未初始化时显示“本机玩家”，不显示会话 ID “1”。
+- `.14` 商店：无钱点击不再提前禁用，交由原版购买失败/商人台词/摇动处理；商店卡牌和遗物使用各自原版右键预览入口，卡牌升级浏览仅在副本展示，不修改真实卡牌。核对原版房间、货架、四类商品、购买/库存/容量/删牌、台词、详情、升级及版本间按键差异，细节见 `docs/multi-instance-v14-ui-refinement-test.md`。
+- 当前新独立入口 `tools/Test-Ui14Refinement.ps1` / `tests/Ui14RefinementProbe`，只验证本轮 UI、昵称和商店反馈/预览。Steam 禁用隔离环境用短暂平台策略替身验证账号路由，真实昵称待用户手动确认。首次 `.14` 的 1/3 布局和 18 项测试已成为历史参考，不再执行。本轮 23 项检查通过；证据 `F:/projectFile/RMPStable-development/evidence/ui14-refinement-v14-20261011-032332`。双版本构建无警告/错误；未运行旧套件。已更新桌面四文件包和上下文，仍等待用户手动验收。
 
 - 占卜事件：按用户要求可见测试，原版三次/六次路线通过，未发现所测多次揭格、选牌不同步。六次最终独立自动化 26 项通过；初轮用户也手动点击，不作为纯自动化证据。细节见 `docs/crystal-sphere-focused-test.md`，独立入口 `tools/Test-CrystalSphere.ps1`。
 - `.13` 搜刮：奖励移除后，剩余行移到静止鼠标下，重新触发原版悬停；独立入口 `tools/Test-RewardHover.ps1`。
@@ -49,7 +51,7 @@ GitHub：<https://github.com/yyh2154064/RMPStable>。唯一工作目录 `C:/Proj
 | 历史证据 / 旧本地模拟包 | `evidence` / `package-liveSharing13` |
 | 原版 PCK（只读） | `F:/SteamLibrary/steamapps/common/Slay the Spire 2/SlayTheSpire2.pck` |
 
-当前 `.14` DLL SHA-256：`9A4FB82D04905F8EA5A0E4F3559CD826C1569BDBAD0FCE6B6CA349BADE233249`。四文件包交付位置仍为桌面 `RMPStable`；不含测试 harness，替换游戏 mods 后需重启加载。`.12` 已验收 DLL 历史 SHA：`F57AF11C85632C53F3843D0A4D217BEB7B837CF7F55BA6915E25DB4FB187B488`，不重新验收。专项日志和截图留在 F 盘 evidence，专项 profile 结束后清理。
+当前 `.14` DLL SHA-256：`AEE5C5217562315C20F51016B3F1E2E8198BB65DF883C907DA54FBE349178992`。四文件包交付位置仍为桌面 `RMPStable`；不含测试 harness，替换游戏 mods 后需重启加载。`.12` 已验收 DLL 历史 SHA：`F57AF11C85632C53F3843D0A4D217BEB7B837CF7F55BA6915E25DB4FB187B488`，不重新验收。专项日志和截图留在 F 盘 evidence，专项 profile 结束后清理。
 
 ## 后续可能用到的架构与入口
 
@@ -63,4 +65,4 @@ GitHub：<https://github.com/yyh2154064/RMPStable>。唯一工作目录 `C:/Proj
 
 `tools/Build-MultiInstance.ps1` 复用 F 盘 references/build，生成内嵌双版本 payload 的 bootstrap。后续专项脚本复用已有 runtime，串行运行、屏幕外、静音、禁用 Steam，不移动系统鼠标；输出证据到 F 盘，结束后清理专项档案。旧 `tests/MultiInstanceSmoke`、`tools/Test-MultiInstance.ps1` 和 `.tools/maintenance` 的全量入口属于 `.12` 历史，不直接作为下一轮验收入口，阶段交付脚本亦有固定版本/哈希假设。
 
-多人、好友发现/远端传输、来源切换、断线恢复、完整本体呈现跟随尚未实现；仅在用户新提出时开展。呈现跟随讨论可查 `docs/native-mirror-presentation.md`，历史证据可查 `docs/multi-instance-test.md`。这些不是活动任务，也不恢复已验收需求清单。
+多人、好友发现/远端传输、真实远程来源切换、断线恢复、完整本体呈现跟随尚未实现；仅在用户新提出时开展。呈现跟随讨论可查 `docs/native-mirror-presentation.md`，历史证据可查 `docs/multi-instance-test.md`。这些不是活动任务，也不恢复已验收需求清单。

@@ -67,7 +67,7 @@ internal sealed partial class SpectatorView
 			var resize = new Control { Name = "SpectatorResize", Size = new Vector2(16, 16), MouseFilter = Control.MouseFilterEnum.Stop, MouseDefaultCursorShape = Control.CursorShape.Fdiagsize };
 			panel.AddChild(resize); Text(resize, "◢", new Rect2(0, 0, 16, 16), 14);
 			Vector2 Bounds() => root.GetVisibleRect().Size;
-			const float referenceWidth = 640;
+			const float referenceWidth = 1024;
 			void Layout(float width)
 			{
 				var bounds = Bounds();
@@ -90,7 +90,7 @@ internal sealed partial class SpectatorView
 				HintPosition();
 			}
 			var preferences = SpectatorPreferences.Current;
-			float defaultWidth = (Bounds().Y / 3 - inset + inset * 2 * 9 / 16) / (titleHeight / referenceWidth + 9f / 16);
+			float defaultWidth = (Bounds().Y / 2 - inset + inset * 2 * 9 / 16) / (titleHeight / referenceWidth + 9f / 16);
 			Layout(preferences.HasLayout ? preferences.Width : defaultWidth);
 			panel.Position = preferences.HasLayout ? new Vector2(preferences.X, preferences.Y) : new Vector2(Bounds().X - panel.Size.X, SpectatorPreferences.DefaultTop);
 			Layout(panel.Size.X);

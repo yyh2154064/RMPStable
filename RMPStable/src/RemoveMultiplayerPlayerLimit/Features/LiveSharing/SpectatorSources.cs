@@ -10,10 +10,27 @@ internal sealed partial class SpectatorView
 	private Control _sourceSelector = null!;
 	private Button _sourcePrevious = null!, _sourceNext = null!;
 	private TextureRect _sourcePreviousIcon = null!, _sourceNextIcon = null!;
-	private readonly List<(Button Button, TextureRect Background, Label Label)> _sourceButtons = new();
+	private readonly List<(Button Button, Panel Background, Label Label)> _sourceButtons = new();
 	private List<ParticipantSnapshot> _sourceOptions = new();
 	private string _selectedSourceId = "";
 	private int _sourcePageIndex;
+	private void UpdateLocalPreviewSources(SpectatorSnapshot snapshot)
+	{
+		// Seven UI test entries share the authenticated local process. Their IDs
+		// never replace the authoritative session SourceId or command identity.
+		string name = snapshot.Sources.Count > 0 ? snapshot.Sources[0].Name : T("本机玩家", "Local player");
+		var sources = new List<ParticipantSnapshot>();
+		for (int i = 1; i <= 7; i++) sources.Add(new ParticipantSnapshot { Id = "local-preview:" + i, Name = name + " · " + i, Simulated = true });
+		string selected = SpectatorPreferences.Current.PreviewSourceId;
+		if (!sources.Exists(p => p.Id == selected)) selected = "local-preview:1";
+		UpdateSources(sources, selected);
+	}
+	private void SelectLocalPreview(string id)
+	{
+		if (!_sourceOptions.Exists(p => p.Id == id && p.Simulated)) return;
+		SpectatorPreferences.Current.PreviewSourceId = id; SpectatorPreferences.Save();
+		_selectedSourceId = id; RefreshSources();
+	}
 
 	private ShaderMaterial? SourceMaterial(float saturation = 1, float value = 0.9f)
 	{
@@ -49,12 +66,9 @@ internal sealed partial class SpectatorView
 			int slot = i;
 			var button = new Button { Name = "SpectatorSource" + i, Flat = true, FocusMode = Control.FocusModeEnum.None, MouseFilter = Control.MouseFilterEnum.Stop, Visible = false };
 			_sourceSelector.AddChild(button);
-			// Native loot/gold reward frame, without its purchase/reward callbacks.
-			var background = new TextureRect { Name = "Background", Texture = Asset<Texture2D>("res://images/ui/reward_screen/reward_item_button.png"), SelfModulate = new Color(0.72f, 0.46f, 0.54f), ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize, StretchMode = TextureRect.StretchModeEnum.Scale, Material = SourceMaterial(), MouseFilter = Control.MouseFilterEnum.Ignore };
+			var background = new Panel { Name = "Background", MouseFilter = Control.MouseFilterEnum.Ignore };
+			background.AddThemeStyleboxOverride("panel", new StyleBoxFlat { BgColor = new Color("314952"), BorderColor = new Color("142a35"), BorderWidthLeft = 2, BorderWidthRight = 2, BorderWidthTop = 2, BorderWidthBottom = 2, CornerRadiusTopLeft = 6, CornerRadiusTopRight = 6, CornerRadiusBottomLeft = 6, CornerRadiusBottomRight = 6 });
 			button.AddChild(background); background.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
-			var border = new Panel { Name = "FrameBorder", MouseFilter = Control.MouseFilterEnum.Ignore };
-			border.AddThemeStyleboxOverride("panel", new StyleBoxFlat { DrawCenter = false, BorderColor = new Color("142a35"), BorderWidthLeft = 2, BorderWidthRight = 2, BorderWidthTop = 2, BorderWidthBottom = 2, CornerRadiusTopLeft = 4, CornerRadiusTopRight = 4, CornerRadiusBottomLeft = 4, CornerRadiusBottomRight = 4 });
-			button.AddChild(border); border.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
 			var label = Text(button, "", new Rect2(8, 0, 134, 26), 16, HorizontalAlignment.Center);
 			label.AddThemeColorOverride("font_color", Colors.White); label.AddThemeConstantOverride("outline_size", 2);
 			label.TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis;
@@ -65,13 +79,13 @@ internal sealed partial class SpectatorView
 		}
 		RefreshSources();
 	}
-	private static void SetSourceBrightness(TextureRect image, float value)
-	{ if (image.Material is ShaderMaterial material) material.SetShaderParameter("v", value); }
+	private static void SetSourceBrightness(CanvasItem image, float value)
+	{ image.Modulate = new Color(value, value, value); }
 	private void LayoutSources(float width)
 	{
 		_sourceSelector.Size = new Vector2(Math.Max(80, width), 26);
 		// Reserve at least 96 logical pixels for dragging even with three slots.
-		float buttonWidth = Math.Clamp((width - 96 - 24 * 2 - 8 * 4) / 3, 0, 150);
+		float buttonWidth = Math.Clamp((width - 96 - 24 * 2 - 8 * 4) / 3, 0, 184);
 		_sourcePrevious.Position = Vector2.Zero;
 		for (int i = 0; i < _sourceButtons.Count; i++)
 		{
@@ -98,7 +112,7 @@ internal sealed partial class SpectatorView
 	{
 		int index = _sourcePageIndex * 3 + slot;
 		if (index >= _sourceOptions.Count || _sourceOptions[index].Id == _selectedSourceId) return;
-		SetControlEnabled(false);
+		if (!_sourceOptions[index].Simulated) SetControlEnabled(false);
 		// A future transport/provider supplies the new source snapshot. Selection
 		// is confirmed by its SourceId, never by relabeling the previous picture.
 		_selectSource?.Invoke(_sourceOptions[index].Id);
@@ -121,9 +135,7 @@ internal sealed partial class SpectatorView
 			slot.Button.TooltipText = slot.Label.Text + "\nID: " + participant.Id;
 			if (participant.Simulated) slot.Button.TooltipText += "\n" + T("模拟来源 · 展示本机状态", "Preview source · displays local state");
 			bool selected = participant.Id == _selectedSourceId;
-			// The selected source uses the native loot/gold frame's blue unchanged.
-			// Other sources keep the darker HUD-blue tint and deeper outer border.
-			slot.Background.SelfModulate = selected ? Colors.White : new Color(0.72f, 0.46f, 0.54f);
+			((StyleBoxFlat)slot.Background.GetThemeStylebox("panel")).BgColor = new Color(selected ? "467b82" : "314952");
 			SetSourceBrightness(slot.Background, selected ? 1f : 0.95f);
 		}
 		LayoutSources(_sourceSelector.Size.X);

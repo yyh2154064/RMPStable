@@ -69,6 +69,7 @@ internal sealed partial class SpectatorView {
 		{
 			var color = tint(); icon.Modulate = pressed ? color.Darkened(.18f) : hovered ? color.Lightened(.12f) : color;
 			if (icon is Node2D drawing) drawing.Scale = Vector2.One * (pressed ? .95f : hovered ? 1.05f : 1);
+			if (icon is Control control) control.Scale = Vector2.One * (pressed ? .95f : hovered ? 1.05f : 1);
 		}
 		button.MouseEntered += () => { hovered = true; Refresh(); };
 		button.MouseExited += () => { hovered = false; pressed = false; Refresh(); };
@@ -79,9 +80,14 @@ internal sealed partial class SpectatorView {
 	private Button CreateRefreshButton()
 	{
 		var button = new Button { Name = "RebuildMirror" };
-		var icon = new Node2D { Name = "Icon", Position = new Vector2(18, 18) }; button.AddChild(icon);
-		icon.AddChild(new Line2D { Points = new[] { new Vector2(9,-5),new Vector2(5,-10),new Vector2(-3,-11),new Vector2(-9,-6),new Vector2(-11,2),new Vector2(-7,9),new Vector2(1,11),new Vector2(8,7),new Vector2(11,1) }, Width = 3, Antialiased = true });
-		icon.AddChild(new Polygon2D { Polygon = new[] { new Vector2(3,-4),new Vector2(11,-3),new Vector2(12,-11) } });
+		using var image = new Image();
+		var error = image.LoadSvgFromString("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"512\" height=\"512\" viewBox=\"0 0 24 24\"><path fill=\"none\" stroke=\"white\" stroke-width=\"3\" stroke-linecap=\"round\" stroke-linejoin=\"round\" d=\"M20 8 A8.5 8.5 0 1 0 20.3 14 M20 3 V8 H15\"/></svg>");
+		if (error != Error.Ok) throw new InvalidOperationException("Reset icon: " + error);
+		image.GenerateMipmaps();
+		var icon = new TextureRect { Name = "Icon", ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize, Texture = ImageTexture.CreateFromImage(image),
+			Position = new Vector2(6,6), Size = new Vector2(24,24), PivotOffset = new Vector2(12,12), StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered,
+			TextureFilter = CanvasItem.TextureFilterEnum.LinearWithMipmaps, MouseFilter = Control.MouseFilterEnum.Ignore };
+		button.AddChild(icon);
 		StyleToolbarButton(button, icon, () => new Color("b7c7ce"));
 		button.Pressed += LiveSharingController.RecoverMirror; return button;
 	}

@@ -20,6 +20,7 @@ internal sealed class SpectatorPreferences
 	public int LayoutRevision { get; set; }
 	public bool ControlMode { get; set; }
 	public string SourceId { get; set; } = "";
+	public string PreviewSourceId { get; set; } = "local-preview:1";
 	internal static SpectatorPreferences Current { get; private set; } = new();
 	internal static float DefaultTop { get; set; } = 116;
 	private static string _path = "";
@@ -35,9 +36,10 @@ internal sealed class SpectatorPreferences
 			if (File.Exists(path)) Current = JsonSerializer.Deserialize<SpectatorPreferences>(File.ReadAllText(path)) ?? new();
 			if (!float.IsFinite(Current.X) || !float.IsFinite(Current.Y) || !float.IsFinite(Current.Width) || Current.Width <= 0) Current.HasLayout = false;
 			Current.SourceId ??= "";
-			if (Current.LayoutRevision < 14)
+			Current.PreviewSourceId ??= "local-preview:1";
+			if (Current.LayoutRevision < 1402)
 			{
-				Current.LayoutRevision = 14; Current.HasLayout = false;
+				Current.LayoutRevision = 1402; Current.HasLayout = false;
 				Current.DockEdge = 2; Current.Pinned = true; Current.ControlMode = false;
 				Save();
 			}

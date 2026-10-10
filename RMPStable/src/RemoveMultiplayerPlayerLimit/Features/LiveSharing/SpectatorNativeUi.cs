@@ -152,7 +152,9 @@ internal sealed partial class LocalSpectatorSource
 			{
 				string cardId = slot.Entry is MerchantCardEntry entry && entry.CreationResult?.Card is { } card ? CardControlId(card) : "";
 				add(new() { Id = "buy:" + slot.GetInstanceId(), Kind = "buy", CardId = cardId, Rect = Rect(ClickRect(slot.Hitbox)), Label = T("购买", "Purchase") },
-					() => Active(slot) && inventory.IsOpen && slot.Hitbox.IsEnabled && slot.Entry.IsStocked && slot.Entry.EnoughGold && MerchantSelect != null,
+					// An unaffordable click is still an original purchase attempt:
+					// the native wrapper emits FailureGold, dialogue and the wiggle.
+					() => Active(slot) && inventory.IsOpen && slot.Hitbox.IsEnabled && slot.Entry.IsStocked && MerchantSelect != null,
 					_ => { if (MerchantSelect!.Invoke(slot, null) is not Task task) return false; TaskHelper.RunSafely(task); return true; });
 			}
 	}

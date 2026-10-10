@@ -24,7 +24,7 @@ internal sealed partial class SpectatorView : IDisposable
     internal long Epoch => _epoch;
     internal SpectatorView(Action close, MirrorHost mirror, Func<bool, long> setControl)
     {
-        _mirror = mirror; _setControl = setControl; _selectSource = _ => { };
+        _mirror = mirror; _setControl = setControl; _selectSource = SelectLocalPreview;
         (_overlay, _panel, _content) = CreatePanel(close);
         var input = new ControlInput { Name = "SpectatorLocalInput", Receive = ReceiveLocal };
         _overlay.AddChild(input); input.SetProcessInput(true);
@@ -44,7 +44,7 @@ internal sealed partial class SpectatorView : IDisposable
     }
     internal void Update(SpectatorSnapshot snapshot, bool verified, string error)
     {
-        _snapshot = snapshot; UpdateSources(snapshot.Sources, snapshot.SourceId);
+        _snapshot = snapshot; UpdateLocalPreviewSources(snapshot);
         _status.Text = error.Length > 0 ? T("独立游戏同步失败，控制已暂停：", "Independent game synchronization failed; control paused: ") + error :
             T("独立窗口：", "Independent window: ") + _mirror.Process.Phase;
     }

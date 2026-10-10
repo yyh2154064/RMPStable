@@ -70,7 +70,12 @@ internal sealed partial class LocalSpectatorSource : IDisposable
 		string sourceId = player.NetId.ToString();
 		if (_participant?.Id != sourceId || Time.GetTicksMsec() >= _participantExpires)
 		{
-			_participant = new ParticipantSnapshot { Id = sourceId, Name = PlatformUtil.GetPlayerNameRaw(RunManager.Instance.NetService.Platform, player.NetId) };
+			// Singleplayer NetId is a session ID (usually 1), not the Steam account.
+			var platform = PlatformUtil.PrimaryPlatform;
+			string name = platform == PlatformType.Steam
+				? PlatformUtil.GetPlayerNameRaw(platform, PlatformUtil.GetLocalPlayerId(platform))
+				: "本机玩家";
+			_participant = new ParticipantSnapshot { Id = sourceId, Name = string.IsNullOrWhiteSpace(name) ? "本机玩家" : name };
 			_participantExpires = Time.GetTicksMsec() + 5000;
 		}
 		var root = ActiveNativeUi;

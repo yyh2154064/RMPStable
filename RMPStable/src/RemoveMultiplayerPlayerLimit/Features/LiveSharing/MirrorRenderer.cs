@@ -437,7 +437,7 @@ internal sealed partial class MirrorRenderer : IDisposable
                 if (scroll != null && input.Wheel != 0) QueueScroll(scroll.NativePath, WheelValue(input.Wheel * (NMapScreen.Instance?.IsOpen == true ? 3.25f : 1)));
                 continue;
             }
-            if (UiOnlyOpen || NGame.Instance?.InspectCardScreen?.IsVisibleInTree() == true || NCapstoneContainer.Instance?.CurrentCapstoneScreen is NPauseMenu) { CancelDrag(); continue; }
+            if (UiOnlyOpen || NGame.Instance?.InspectCardScreen?.IsVisibleInTree() == true || NGame.Instance?.InspectRelicScreen?.IsVisibleInTree() == true || NCapstoneContainer.Instance?.CurrentCapstoneScreen is NPauseMenu) { CancelDrag(); continue; }
             if (!_control || (!NativeIdle || _waitingForAuthority) && !(CanBufferCard && input.Message is MirrorWin32.LeftDown or MirrorWin32.LeftUp)) { CancelDrag(); continue; }
             if (input.Message == MirrorWin32.LeftUp && _pressedAction != null)
             {
