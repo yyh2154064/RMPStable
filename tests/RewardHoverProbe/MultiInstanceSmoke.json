@@ -1,0 +1,1 @@
+{"id":"MultiInstanceSmoke","name":"Stationary reward hover focused probe","author":"RMP Stable Contributors","version":"0.1.0","description":"Independent reward hover test; no legacy suites.","has_dll":true,"has_pck":false,"affects_gameplay":true,"min_game_version":"0.111.0","dependencies":[{"id":"RMPStable"}]}

@@ -78,6 +78,7 @@ internal sealed partial class MirrorRenderer : IDisposable
     private Label? _notice;
     private string _error = "";
     private string _phase = "等待主进程战斗数据";
+    private string _timerText = "";
     private readonly Callable _drawCallback;
     private readonly bool _startupOffscreen, _startupConsole;
     private long _drawFrames;
@@ -160,6 +161,9 @@ internal sealed partial class MirrorRenderer : IDisposable
                     if (message.Generation == _desiredGeneration)
                     { _authorityReady = message.Idle; _authorityEvents = message.Events; _authorityHash = message.Hash; }
                     break;
+                case "clock":
+                    if (message.Generation == _desiredGeneration) _timerText = message.TimerText;
+                    break;
                 case "result":
                     if (Diagnostic) GD.Print("[RMP:Mirror:Input] result accepted=" + message.Accepted + " reason=" + message.Room);
                     if (message.Generation == _generation && message.Epoch == _epoch && message.Request == _request && (!message.Accepted || message.Model == "menu")) _waitingForAuthority = false;
@@ -167,13 +171,13 @@ internal sealed partial class MirrorRenderer : IDisposable
                     break;
                 case "reset":
                     if (message.Generation <= _desiredGeneration) break;
-                    _desiredGeneration = message.Generation; _sceneReady = false; _control = false; CancelDrag(); _pressedUi = null;
+                    _desiredGeneration = message.Generation; _sceneReady = false; _timerText = ""; _control = false; CancelDrag(); _pressedUi = null;
                     _waitingForAuthority = false; _stateMessages.Clear(); Stage("等待读档后的权威检查点");
                     _authorityReady = false; _pendingCards.Clear();
                     break;
                 case "load":
                     if (message.Generation <= _desiredGeneration) break;
-                    _desiredGeneration = message.Generation; _sceneReady = false; CancelDrag(); _pressedUi = null;
+                    _desiredGeneration = message.Generation; _sceneReady = false; _timerText = ""; CancelDrag(); _pressedUi = null;
                     _stateMessages.Clear(); _stateMessages.Enqueue(message); break;
                 case "events":
                     if (message.Generation != _desiredGeneration) break;
@@ -193,6 +197,9 @@ internal sealed partial class MirrorRenderer : IDisposable
         if (_waitingForAuthority && _events > _submittedEvents) _waitingForAuthority = false;
         ProcessLocalInput();
         ProcessBufferedCards();
+        RefreshRewardHover();
+        if (_timerText.Length > 0 && _generation == _desiredGeneration && MirrorClock.Label is { } timer)
+            timer.SetTextAutoSize(_timerText);
         bool idle = NativeIdle;
         bool windowVisible = DisplayServer.GetName() != "headless" && MirrorWin32.IsWindowVisible(MirrorWin32.OwnWindow);
         if (windowVisible != _lastWindowVisible)
@@ -235,6 +242,26 @@ internal sealed partial class MirrorRenderer : IDisposable
         UpdateNotice();
     }
     private int _presentFrames;
+    private NRewardsScreen? _hoverRewards;
+    private string _rewardLayout = "";
+    private void RefreshRewardHover()
+    {
+        // Gameplay clicks are replayed through the authority, so Godot never
+        // receives their mouse release. Re-evaluate native hover when the
+        // remaining reward rows move underneath a stationary pointer.
+        var screen = NOverlayStack.Instance?.Peek() as NRewardsScreen;
+        if (screen == null) { _hoverRewards = null; _rewardLayout = ""; return; }
+        string layout = string.Join(";", LocalSpectatorSource.Descendants<MegaCrit.Sts2.Core.Nodes.Rewards.NRewardButton>(screen)
+            .Where(b => b.IsVisibleInTree() && !b.IsQueuedForDeletion())
+            .Select(b => b.GetInstanceId() + ":" + b.GetGlobalRect()));
+        if (screen == _hoverRewards && layout == _rewardLayout) return;
+        _hoverRewards = screen; _rewardLayout = layout;
+        if (!_attached || _pointer.X < 0 || _pointer.Y < 0 || _pointer.X > 1 || _pointer.Y > 1 ||
+            !MirrorWin32.IsWindowVisible(MirrorWin32.OwnWindow) || _dragCard != null) return;
+        var position = NativePointer;
+        using var motion = new InputEventMouseMotion { Position = position, GlobalPosition = position, Relative = Vector2.Zero };
+        NGame.Instance.GetViewport().PushInput(motion, true);
+    }
     private double _inputWaitSeconds;
     private void LogPresentation(string reason)
     {

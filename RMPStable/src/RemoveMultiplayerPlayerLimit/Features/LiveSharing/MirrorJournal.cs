@@ -99,10 +99,12 @@ internal static partial class MirrorJournal
         Patch(typeof(NMapScreen).GetMethod("_GuiInput", Any)!, prefix: nameof(ReplicaDrawingInput));
         Patch(typeof(NMapScreen).GetMethod("ProcessMouseDrawingEvent", Any)!, prefix: nameof(ReplicaDrawingInput));
         Patch(typeof(CardReward).GetMethod("Populate", Any)!, prefix: nameof(RewardPopulating), postfix: nameof(RewardPopulated));
+        Patch(typeof(MegaCrit.Sts2.Core.Nodes.TopBar.NRunTimer).GetMethod("OnTimerTimeout", Any)!, prefix: nameof(ReplicaTimerTick));
         _installed = true;
     }
     private static void ReplicaServiceType(ref NetGameType __result)
     { if (MirrorRenderer.IsRenderer && ReplicaActive) __result = NetGameType.Singleplayer; }
+    private static bool ReplicaTimerTick() => !MirrorRenderer.IsRenderer;
     private static bool ReplicaCardPlay(NCardPlay __instance, Creature? target)
     {
         if (!MirrorRenderer.IsRenderer) return true;

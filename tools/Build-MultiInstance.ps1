@@ -1,7 +1,8 @@
 param(
     [Parameter(Mandatory=$true)][string]$GameReferences,
     [Parameter(Mandatory=$true)][string]$ModPck,
-    [string]$OutputRoot = 'F:/projectFile/RMPStable-development/build'
+    [string]$OutputRoot = 'F:/projectFile/RMPStable-development/build',
+    [switch]$BuildLegacyHarness
 )
 $ErrorActionPreference = 'Stop'
 $repo = (Resolve-Path "$PSScriptRoot/..").Path
@@ -13,8 +14,10 @@ foreach ($target in @(@('v0.107.1','stable','v0107'), @('v0.111.0','beta','v0111
 }
 & dotnet build "$repo/RMPStable-Bootstrap/RMPStable-Bootstrap.csproj" -c Release --configfile "$repo/RMPStable/src/NuGet.Config" "-p:GameManagedDir=$GameReferences/v0.107.1" "-p:StablePayloadPath=$root/payload-v0107/RMPStablePayload_v0107.dll" "-p:BetaPayloadPath=$root/payload-v0111/RMPStablePayload_v0111.dll" "-p:BaseIntermediateOutputPath=$root/obj-bootstrap/" -p:RestoreFallbackFolders= --output "$root/bootstrap"
 if ($LASTEXITCODE -ne 0) { throw 'Bootstrap build failed' }
-& dotnet build "$repo/tests/MultiInstanceSmoke/MultiInstanceSmoke.csproj" -c Release --configfile "$repo/RMPStable/src/NuGet.Config" "-p:GameManagedDir=$GameReferences/v0.111.0" -p:GameCompatibility=beta "-p:BaseIntermediateOutputPath=$root/obj-test/" -p:RestoreFallbackFolders= --output "$root/test"
-if ($LASTEXITCODE -ne 0) { throw 'Smoke harness build failed' }
+if ($BuildLegacyHarness) {
+    & dotnet build "$repo/tests/MultiInstanceSmoke/MultiInstanceSmoke.csproj" -c Release --configfile "$repo/RMPStable/src/NuGet.Config" "-p:GameManagedDir=$GameReferences/v0.111.0" -p:GameCompatibility=beta "-p:BaseIntermediateOutputPath=$root/obj-test/" -p:RestoreFallbackFolders= --output "$root/test"
+    if ($LASTEXITCODE -ne 0) { throw 'Historical harness build failed' }
+}
 # This script only builds. It never starts a game or deploys to its directory.
 $package = "$root/package/RMPStable"
 New-Item -ItemType Directory -Force $package | Out-Null

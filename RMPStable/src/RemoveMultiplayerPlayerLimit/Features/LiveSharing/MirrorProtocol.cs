@@ -35,6 +35,7 @@ internal sealed class MirrorMessage
     public bool WindowVisible { get; set; }
     public bool TargetArrowVisible { get; set; }
     public string Presentation { get; set; } = "";
+    public string TimerText { get; set; } = "";
     public long DrawFrames { get; set; }
     public string Phase { get; set; } = "";
     public int[] Clip { get; set; } = Array.Empty<int>();

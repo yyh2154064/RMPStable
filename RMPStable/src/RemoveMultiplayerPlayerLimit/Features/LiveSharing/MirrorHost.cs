@@ -29,6 +29,8 @@ internal sealed class MirrorHost : IDisposable
     private bool _publishedReady;
     private string _publishedHash = "";
     private int _publishedEvents = -1;
+    private string _timerText = "";
+    private long _timerGeneration = -1;
     internal void Tick(RunState? state, double delta)
     {
         Verified = false;
@@ -119,6 +121,14 @@ internal sealed class MirrorHost : IDisposable
         {
             _publishedReady = Verified; _publishedHash = Verified ? SourceHash : ""; _publishedEvents = Process.LastEvents;
             _ = Process.Wire.Send(new MirrorMessage { Kind = "ready", Generation = _generation, Idle = Verified, Hash = _publishedHash, Events = _publishedEvents });
+        }
+        // Copy the original displayed clock, including its update phase and
+        // frozen final value. Loading/replay time must not start a second clock.
+        if (MirrorClock.Label is { } timer && Process.Wire.Pending == 0 &&
+            (_timerText != timer.Text || _timerGeneration != _generation))
+        {
+            _timerText = timer.Text; _timerGeneration = _generation;
+            _ = Process.Wire.Send(new MirrorMessage { Kind = "clock", Generation = _generation, TimerText = _timerText });
         }
     }
     internal void PublishCheckpoint(CombatReplay replay, bool fastRestore = false)

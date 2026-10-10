@@ -24,6 +24,8 @@ internal static class MirrorWin32
     [DllImport("kernel32.dll")] internal static extern nint GetConsoleWindow();
     [DllImport("user32.dll")] internal static extern bool IsIconic(nint window);
     [DllImport("user32.dll")] internal static extern nint GetParent(nint window);
+    internal const uint PreviousWindow = 3;
+    [DllImport("user32.dll")] internal static extern nint GetWindow(nint window, uint relation);
     [DllImport("user32.dll", SetLastError = true)] internal static extern nint SetParent(nint window, nint parent);
     [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")] internal static extern nint GetLong(nint window, int index);
     [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW", SetLastError = true)] internal static extern nint SetLong(nint window, int index, nint value);
@@ -240,6 +242,23 @@ internal sealed class MirrorWindowHost : IDisposable
             if (!MirrorWin32.SetWindowPos(_child,0,bounds.Item1,bounds.Item2,bounds.Item3,bounds.Item4,0x0010 | 0x0004 | 0x4000 | 0x0200 | (show ? 0x0040u : 0x0080u))) throw new Win32Exception(Marshal.GetLastPInvokeError());
             if (!_positioned || _visible != show) GD.Print("[RMP:Mirror:Window] owned popup=" + (show ? "visible" : "hidden") + " screenBounds=" + bounds + " clientOrigin=" + a + " clientSize=" + client.Right + "x" + client.Bottom);
             _visible = show; _last = bounds; _positioned = true;
+        }
+        if (show) EnsureAboveOwner();
+    }
+    private void EnsureAboveOwner()
+    {
+        // Check actual native order after showing/repositioning the popup.
+        // Keep unrelated foreground windows in place and do not activate.
+        for (nint above = MirrorWin32.GetWindow(_child, MirrorWin32.PreviousWindow); above != 0;
+            above = MirrorWin32.GetWindow(above, MirrorWin32.PreviousWindow))
+        {
+            if (above != _parent) continue;
+            nint previous = MirrorWin32.GetWindow(_parent, MirrorWin32.PreviousWindow);
+            if (!MirrorWin32.SetWindowPos(_child, previous, 0, 0, 0, 0, 0x0010 | 0x0001 | 0x0002 | 0x0200))
+                throw new Win32Exception(Marshal.GetLastPInvokeError());
+            MirrorWin32.GetWindowRect(_child, out var actual);
+            GD.Print("[RMP:Mirror:Window] corrected native order; actual=" + actual.Left + "," + actual.Top + "," + actual.Right + "," + actual.Bottom);
+            break;
         }
     }
     public void Dispose()
