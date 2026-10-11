@@ -27,11 +27,24 @@ internal sealed class MirrorHost : IDisposable
     internal readonly bool Multiplayer;
     private readonly System.Collections.Generic.Queue<MultiplayerMirrorFrame> _multiFrames = new();
     private MultiplayerMirrorFrame? _multiLatest;
+    private MultiplayerMirrorFrame? _personalSent;
+    private string _waitingRoom = "";
+    private bool _roomDirty;
+    internal void WaitForMultiplayerRoom(string room)
+    {
+        if (string.IsNullOrEmpty(room)) room = "房间切换中";
+        Verified = false; Process.DisplayReady = false; Window?.Hide();
+        if (_waitingRoom == room) return;
+        _waitingRoom = room; _roomDirty = true; _multiLatest = null; _multiFrames.Clear();
+        Process.Phase = "当前房间：" + room + " · 等待原版战斗（多人非战斗页面尚未接通）";
+    }
     internal MirrorHost(ulong source, bool multiplayer = false) { Multiplayer = multiplayer; Process = new MirrorProcess(source); }
     internal void QueueMultiplayer(MultiplayerMirrorFrame frame)
     {
         if (!Multiplayer) throw new InvalidOperationException("Multiplayer frame on singleplayer mirror");
         _multiLatest = frame;
+        _waitingRoom = "";
+        _roomDirty = false;
         if (frame.Kind != "load" && frame.Delta.Count == 0) return;
         if (frame.Kind == "load") { _multiFrames.Clear(); Process.DisplayReady = false; Process.LastIdle = false; Verified = false; }
         if (_multiFrames.Count >= 128) throw new InvalidOperationException("Multiplayer replica backlog exceeded");
@@ -39,6 +52,15 @@ internal sealed class MirrorHost : IDisposable
     }
     private void TickMultiplayer()
     {
+        if (_waitingRoom.Length > 0)
+        {
+            Verified = false; SourceHash = ""; Process.DisplayReady = false; Process.LastIdle = false;
+            Process.Phase = "当前房间：" + _waitingRoom + " · 等待原版战斗（多人非战斗页面尚未接通）";
+            Window?.Hide();
+            if (_roomDirty && Process.Wire.Pending == 0)
+            { _roomDirty = false; _ = Process.Wire.Send(new MirrorMessage { Kind = "multiplayer-room", Generation = _generation, Room = Process.Phase }); }
+            return;
+        }
         if (Process.Wire.Pending == 0 && _multiFrames.TryDequeue(out var frame))
         {
             if (frame.Kind == "load") { _generation = frame.Generation; Process.Wire.Identity.Generation = _generation; }
@@ -47,6 +69,11 @@ internal sealed class MirrorHost : IDisposable
                 Operations = frame.Delta.ConvertAll(p => new MirrorOperation { Kind = "multiplayer", Payload = p }) });
         }
         var current = _multiLatest;
+        if (current != null && !ReferenceEquals(_personalSent, current) && current.Generation == _generation && Process.Wire.Pending == 0)
+        {
+            _personalSent = current;
+            _ = Process.Wire.Send(new MirrorMessage { Kind = "personal", Generation = current.Generation, Events = current.Events, Choice = current.Choice, TimerText = current.Timer });
+        }
         SourceHash = current?.Hash ?? "";
         Verified = current?.Settled == true && SourceHash.Length > 0 && Process.DisplayReady && Process.LastIdle && Process.LastEvents == current.Events && Process.LastHash == SourceHash;
     }

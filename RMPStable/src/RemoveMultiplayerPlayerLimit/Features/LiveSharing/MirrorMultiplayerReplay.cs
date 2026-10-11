@@ -20,11 +20,14 @@ internal sealed partial class MirrorRenderer
 {
     internal bool Multiplayer { get; private set; }
     internal ulong ViewSource => _wire.Identity.Source;
+    internal long MultiplayerGeneration => _generation;
+    private bool _multiplayerRoomWaiting;
     private async Task LoadMultiplayer(MirrorMessage message)
     {
         try
         {
             Multiplayer = true; _control = false;
+            MultiplayerPersonalUi.Reset();
             _generation = message.Generation; _wire.Identity.Generation = _generation; _events = 0; _error = "";
             _sceneReady = false; _finalSave = null; _finalHash = "";
             Stage("重建多人原版战斗"); CheckGeneration(_generation);
@@ -55,6 +58,8 @@ internal sealed partial class MirrorRenderer
             while (manager.ActionExecutor.IsPaused) await Frame(_generation);
             await ApplyMultiplayer(message);
             await NGame.Instance.Transition.FadeIn(.03f);
+            CheckGeneration(_generation);
+            if (_multiplayerRoomWaiting) return;
             _sceneReady = true; Stage("多人原版战斗已同步（只读）");
         }
         catch (OperationCanceledException) { Stage("旧多人检查点已撤销"); }

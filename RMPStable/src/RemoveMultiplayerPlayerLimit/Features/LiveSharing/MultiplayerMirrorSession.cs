@@ -12,6 +12,7 @@ using MegaCrit.Sts2.Core.Nodes.Combat;
 using MegaCrit.Sts2.Core.Nodes.Screens.Overlays;
 using MegaCrit.Sts2.Core.Nodes.Cards.Holders;
 using MegaCrit.Sts2.Core.Runs;
+using MegaCrit.Sts2.Core.Platform;
 using RemoveMultiplayerPlayerLimit.Network;
 namespace RemoveMultiplayerPlayerLimit.Features.LiveSharing;
 
@@ -32,6 +33,8 @@ internal sealed class MultiplayerMirrorFrame
     public string Screen { get; set; } = "";
     public string HandMode { get; set; } = "";
     public List<byte[]> Candidates { get; set; } = new();
+    public MultiplayerChoiceView? Choice { get; set; }
+    public string Timer { get; set; } = "";
 }
 
 // Phase one: real room subscriptions and passive native combat replication.
@@ -58,6 +61,13 @@ internal static class MultiplayerMirrorSession
     private static readonly Dictionary<(ulong, string), FragmentAssembly> Fragments = new();
     private static double _timer;
     internal static MirrorHost? Mirror { get; private set; }
+    internal static ulong Selected => _selected;
+    internal static List<ParticipantSnapshot> Sources() => _state?.Players.Where(p => Connected(p.NetId)).Select(p =>
+    {
+        string name = "";
+        try { if (_service?.Platform != PlatformType.None) name = PlatformUtil.GetPlayerNameRaw(_service!.Platform, p.NetId); } catch { }
+        return new ParticipantSnapshot { Id = p.NetId.ToString(), Name = string.IsNullOrWhiteSpace(name) ? "玩家 " + (_state!.GetPlayerSlotIndex(p) + 1) : name };
+    }).ToList() ?? new();
     internal static MultiplayerMirrorFrame? Latest { get; private set; }
     internal static string Error { get; private set; } = "";
     internal static int SentFrames { get; private set; }
@@ -82,7 +92,13 @@ internal static class MultiplayerMirrorSession
         Mirror?.Tick(null, delta); _timer -= delta; if (_timer > 0) return; _timer = .1;
         // Do not reset or mutate the source game's original replay writer.
         var replay = MirrorState.CurrentReplay;
-        if (replay == null || state.CurrentRoom is not MegaCrit.Sts2.Core.Rooms.CombatRoom) return;
+        if (replay == null || state.CurrentRoom is not MegaCrit.Sts2.Core.Rooms.CombatRoom || !CombatManager.Instance.IsInProgress && !CombatManager.Instance.IsStarting)
+        {
+            foreach (var pair in Subscribers.ToArray())
+                if (Connected(pair.Key)) { var frame = Capture("room"); frame.Generation = _generation; frame.Events = pair.Value.Events; Send(pair.Key, pair.Value.Token, frame); }
+                else Subscribers.Remove(pair.Key);
+            return;
+        }
         if (!ReferenceEquals(_checkpoint, replay))
         {
             _checkpoint = replay; _generation++;
@@ -137,7 +153,7 @@ internal static class MultiplayerMirrorSession
         var frame = new MultiplayerMirrorFrame { Kind = kind, Build = MirrorState.Build, Session = _session,
             Settled = Settled, Hash = Settled && _state != null ? MirrorState.MultiplayerHash(_state) : "",
             Room = _state?.CurrentRoom?.RoomType.ToString() ?? "", HandMode = NPlayerHand.Instance?.CurrentMode.ToString() ?? "",
-            Screen = NOverlayStack.Instance?.Peek()?.GetType().Name ?? "Room" };
+            Screen = NOverlayStack.Instance?.Peek()?.GetType().Name ?? "Room", Choice = MultiplayerPersonalUi.Capture(), Timer = MirrorClock.Label?.Text ?? "" };
         if (NOverlayStack.Instance?.Peek() is Node screen)
             frame.Candidates = LocalSpectatorSource.Descendants<NCardHolder>(screen).Where(c => c.CardModel != null)
                 .Select(c => MirrorState.Pack(c.CardModel!.ToSerializable())).ToList();
@@ -207,6 +223,7 @@ internal static class MultiplayerMirrorSession
         if (frame.Build != MirrorState.Build) { RejectedPackets++; return; }
         if (frame.Kind == "ack") { _remoteSession = frame.Session; return; }
         if (frame.Session != _remoteSession || frame.Generation < _receivedGeneration) { RejectedPackets++; return; }
+        if (frame.Kind == "room") { Latest = frame; Mirror?.WaitForMultiplayerRoom(frame.Room); return; }
         if (frame.Kind == "load")
         {
             if (frame.Generation <= _receivedGeneration || frame.Start != 0) { RejectedPackets++; return; }

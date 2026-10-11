@@ -63,7 +63,12 @@ internal static partial class LiveSharingController
         if (!RunManager.Instance.IsInProgress && SaveManager.Instance.IsProfileInitialized && NGame.Instance?.MainMenu?.IsNodeReady() == true &&
             service?.Type is not NetGameType.Host and not NetGameType.Client) EnsureMirror(1);
         bool local = RunManager.Instance.IsInProgress && state?.Players.Count == 1 && NRun.Instance?.IsNodeReady() == true && service != null && service.Type != NetGameType.Host && service.Type != NetGameType.Client;
-        if (service?.Type is NetGameType.Host or NetGameType.Client) { if (_mirror != null) Suspend(); return; }
+        if (service?.Type is NetGameType.Host or NetGameType.Client)
+        {
+            if (_mirror != null) Suspend();
+            ProcessMultiplayer(state, pressed); return;
+        }
+        if (_view != null && _viewMultiplayer) HideView();
         if (!local || _restoring)
         {
             if (_restoring && _restorePrepared) PublishRestoreCheckpoint();
@@ -110,6 +115,7 @@ internal static partial class LiveSharingController
     }
     internal static void RecoverMirror()
     {
+        if (_viewMultiplayer) { ShowMultiplayerSource(MultiplayerMirrorSession.Selected.ToString(), true); return; }
         var state = GameStateAccessor.GetRunState();
         if (MirrorRenderer.IsRenderer || _restoring || state?.Players.Count != 1 || RunManager.Instance.NetService?.Type != NetGameType.Singleplayer) return;
         // Reconstruct only our authenticated replica from the original journal.
@@ -217,7 +223,7 @@ internal static partial class LiveSharingController
     internal static void Close() { SpectatorPreferences.Current.Open = false; SpectatorPreferences.Save(); HideView(); }
     private static void HideView()
     {
-        _view?.Dispose(); _view = null; _mirror?.Window?.Hide(); RouteMapInput(false);
+        _view?.Dispose(); _view = null; _viewMultiplayer = false; _mirror?.Window?.Hide(); MultiplayerMirrorSession.Mirror?.Window?.Hide(); RouteMapInput(false);
     }
     internal static void Suspend()
     {

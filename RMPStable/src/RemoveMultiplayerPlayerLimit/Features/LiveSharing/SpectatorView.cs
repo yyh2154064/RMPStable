@@ -22,9 +22,9 @@ internal sealed partial class SpectatorView : IDisposable
     private readonly DisplayServer.VSyncMode _previousVsync;
     internal bool ControlEnabled => _controlEnabled;
     internal long Epoch => _epoch;
-    internal SpectatorView(Action close, MirrorHost mirror, Func<bool, long> setControl)
+    internal SpectatorView(Action close, MirrorHost mirror, Func<bool, long> setControl, Action<string>? selectSource = null)
     {
-        _mirror = mirror; _setControl = setControl; _selectSource = SelectLocalPreview;
+        _mirror = mirror; _setControl = setControl; _selectSource = selectSource ?? SelectLocalPreview;
         (_overlay, _panel, _content) = CreatePanel(close);
         var input = new ControlInput { Name = "SpectatorLocalInput", Receive = ReceiveLocal };
         _overlay.AddChild(input); input.SetProcessInput(true);
@@ -40,16 +40,20 @@ internal sealed partial class SpectatorView : IDisposable
         _content.AddChild(_retry); _retry.Pressed += LiveSharingController.RecoverMirror;
         _previousFps = Engine.MaxFps; _previousVsync = DisplayServer.WindowGetVsyncMode();
         if (DisplayServer.GetName() != "headless") { Engine.MaxFps = 120; DisplayServer.WindowSetVsyncMode(DisplayServer.VSyncMode.Disabled); }
-        SetControlEnabled(SpectatorPreferences.Current.ControlMode);
+        _controlToggle.Disabled = mirror.Multiplayer;
+        if (mirror.Multiplayer) _controlToggle.TooltipText = T("多人观战：操作仍由玩家本体决定", "Multiplayer watch: decisions remain with the player's game");
+        SetControlEnabled(!mirror.Multiplayer && SpectatorPreferences.Current.ControlMode);
     }
     internal void Update(SpectatorSnapshot snapshot, bool verified, string error)
     {
-        _snapshot = snapshot; UpdateLocalPreviewSources(snapshot);
+        _snapshot = snapshot;
+        if (_mirror.Multiplayer) UpdateSources(snapshot.Sources, snapshot.SourceId); else UpdateLocalPreviewSources(snapshot);
         _status.Text = error.Length > 0 ? T("独立游戏同步失败，控制已暂停：", "Independent game synchronization failed; control paused: ") + error :
             T("独立窗口：", "Independent window: ") + _mirror.Process.Phase;
     }
     private void SetControlEnabled(bool enabled)
     {
+        enabled &= !_mirror.Multiplayer;
         if (_controlEnabled != enabled || _epoch == 0 || _mirror.ControlEpoch != _epoch)
         {
             _controlEnabled = enabled; _epoch = _setControl(enabled); _mirror.Control(enabled,_epoch);
@@ -76,6 +80,7 @@ internal sealed partial class SpectatorView : IDisposable
         // so SL cannot briefly display the previous run as ready for input.
         host?.Layout(_content,combat && _mirror.Process.DisplayReady && host.Attached && SceneMonitor.FindSettingsScreen()?.IsVisibleInTree() != true && !QuickSl.QuickSlController.ConfirmationOpen && !LiveSharingController.SourceMenuOpen);
         _status.Visible = host?.Visible != true;
+        if (_mirror.Multiplayer && _mirror.Process.DisplayReady && DisplayServer.GetName() == "headless") _status.Visible = false;
         _retry.Visible = _mirror.Error.Length > 0;
         _retry.Position = new Vector2(_content.Size.X * .4f, _content.Size.Y * .91f);
         _retry.Size = new Vector2(_content.Size.X * .2f, Math.Max(24, _content.Size.Y * .07f));

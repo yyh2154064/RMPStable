@@ -102,7 +102,7 @@ internal sealed partial class MirrorRenderer : IDisposable
         _ = _wire.ConnectAsync();
         AudioServer.SetBusMute(0, true);
         if (DisplayServer.GetName() != "headless") DisplayServer.WindowSetFlag(DisplayServer.WindowFlags.NoFocus, true);
-        Engine.MaxFps = Environment.GetEnvironmentVariable("RMP_PHASE1_TEST") == "1" ? 30 : 120;
+        Engine.MaxFps = Environment.GetEnvironmentVariable("RMP_PHASE1_TEST") == "1" || Environment.GetEnvironmentVariable("RMP_PHASE2_TEST") == "1" ? 30 : 120;
         if (DisplayServer.GetName() != "headless")
         {
             MirrorWin32.GetWindowRect(MirrorWin32.OwnWindow, out var startupRect);
@@ -141,6 +141,13 @@ internal sealed partial class MirrorRenderer : IDisposable
         {
             switch (message.Kind)
             {
+                case "personal":
+                    if (message.Generation == _desiredGeneration) _personalMessage = message;
+                    break;
+                case "multiplayer-room":
+                    if (message.Generation != _desiredGeneration) break;
+                    _multiplayerRoomWaiting = true; _sceneReady = false; _personalMessage = null; _stateMessages.Clear(); MultiplayerPersonalUi.Reset(); Stage(message.Room);
+                    break;
                 case "attach":
                     if (_attached || message.Process != _parent) throw new InvalidDataException("Invalid native attachment");
                     MirrorWin32.AttachOwn((nint)message.Window,_parent); _attached = true;
@@ -177,6 +184,7 @@ internal sealed partial class MirrorRenderer : IDisposable
                     break;
                 case "load":
                     if (message.Generation <= _desiredGeneration) break;
+                    _multiplayerRoomWaiting = false; _personalMessage = null;
                     _desiredGeneration = message.Generation; _sceneReady = false; _timerText = ""; CancelDrag(); _pressedUi = null;
                     _stateMessages.Clear(); _stateMessages.Enqueue(message); break;
                 case "events":
@@ -196,6 +204,12 @@ internal sealed partial class MirrorRenderer : IDisposable
             }
         if (_waitingForAuthority && _events > _submittedEvents) _waitingForAuthority = false;
         if (!Multiplayer) { ProcessLocalInput(); ProcessBufferedCards(); }
+        else
+        {
+            while (_buttons.TryDequeue(out _)) { } while (_keyboard.TryDequeue(out _)) { }
+            if (_personalMessage is { } personal && personal.Generation == _generation && _generation == _desiredGeneration && _events >= personal.Events)
+            { MultiplayerPersonalUi.Apply(personal.Choice); _timerText = personal.TimerText; }
+        }
         RefreshRewardHover();
         if (_timerText.Length > 0 && _generation == _desiredGeneration && MirrorClock.Label is { } timer)
             timer.SetTextAutoSize(_timerText);
@@ -218,7 +232,7 @@ internal sealed partial class MirrorRenderer : IDisposable
             _ = _wire.Send(new MirrorMessage { Kind = "status", Generation = _generation, Events = _events, Idle = idle,
                 Epoch = _epoch, Control = _control,
                 Hash = idle && _replay != null ? CurrentHash : "", Hits = idle && !Multiplayer ? CaptureHits() : new(), Room = _error,
-                DisplayReady = _sceneReady && _generation == _desiredGeneration && _state != null && NRun.Instance != null, Attached = _attached,
+                DisplayReady = !_multiplayerRoomWaiting && _sceneReady && _generation == _desiredGeneration && _state != null && NRun.Instance != null, Attached = _attached,
                 Phase = _phase, DrawFrames = _drawFrames,
                 WindowVisible = windowVisible,
                 TargetArrowVisible = _dragCard != null && TargetingArrow?.IsVisibleInTree() == true,
@@ -241,6 +255,7 @@ internal sealed partial class MirrorRenderer : IDisposable
         UpdateNotice();
     }
     private int _presentFrames;
+    private MirrorMessage? _personalMessage;
     private NRewardsScreen? _hoverRewards;
     private string _rewardLayout = "";
     private void RefreshRewardHover()
@@ -271,7 +286,7 @@ internal sealed partial class MirrorRenderer : IDisposable
             " threshold=" + (transition.Material is ShaderMaterial material ? material.GetShaderParameter("threshold").AsSingle() : -1));
     }
     private float _presentationWheelScale = 1;
-    private bool NativeIdle => !_busy && _generation == _desiredGeneration && _error.Length == 0 && _state != null && _replay != null && (_finalSave != null || (Multiplayer ? MultiplayerMirrorSession.Settled : MirrorHost.SourceIdle));
+    private bool NativeIdle => !_multiplayerRoomWaiting && !_busy && _generation == _desiredGeneration && _error.Length == 0 && _state != null && _replay != null && (_finalSave != null || (Multiplayer ? MultiplayerMirrorSession.Settled : MirrorHost.SourceIdle));
     private bool InterceptInput(uint message, nuint key, nint data)
     {
         if (MirrorWin32.Keyboard(message))

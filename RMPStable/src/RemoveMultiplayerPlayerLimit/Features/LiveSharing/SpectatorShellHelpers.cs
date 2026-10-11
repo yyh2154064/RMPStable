@@ -54,6 +54,7 @@ internal sealed partial class SpectatorView {
 	}
 	private void SetPreferredControl(bool enabled)
 	{
+        if (_mirror.Multiplayer) { SetControlEnabled(false); return; }
 		SpectatorPreferences.Current.ControlMode = enabled; SpectatorPreferences.Save(); SetControlEnabled(enabled);
 	}
 

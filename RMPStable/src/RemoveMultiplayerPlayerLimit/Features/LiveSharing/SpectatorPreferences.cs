@@ -20,6 +20,7 @@ internal sealed class SpectatorPreferences
 	public int LayoutRevision { get; set; }
 	public bool ControlMode { get; set; }
 	public string SourceId { get; set; } = "";
+	public string MultiplayerSourceId { get; set; } = "";
 	public string PreviewSourceId { get; set; } = "local-preview:1";
 	internal static SpectatorPreferences Current { get; private set; } = new();
 	internal static float DefaultTop { get; set; } = 116;

@@ -1,0 +1,1 @@
+{"id":"MultiInstanceSmoke","name":"Multiplayer phase two native UI probe","author":"RMP Stable Contributors","version":"0.2.0","description":"Phase two navigation and personal selectors over original ENet.","has_dll":true,"has_pck":false,"affects_gameplay":true,"min_game_version":"0.111.0","dependencies":[{"id":"RMPStable"}]}

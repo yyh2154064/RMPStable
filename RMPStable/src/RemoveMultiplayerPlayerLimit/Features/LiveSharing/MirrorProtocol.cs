@@ -29,6 +29,7 @@ internal sealed class MirrorMessage
     public int TargetIndex { get; set; } = -1;
     public bool Control { get; set; }
     public bool Multiplayer { get; set; }
+    public MultiplayerChoiceView? Choice { get; set; }
     public bool FastRestore { get; set; }
     public bool Accepted { get; set; }
     public bool DisplayReady { get; set; }
