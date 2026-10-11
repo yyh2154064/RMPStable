@@ -3,7 +3,7 @@
   "name": "RMP Stable - Native Multi-instance Exploration",
   "version": "0.3.9-multiInstance.17",
   "author": "灰灰神教！",
-  "description": "Native independent-process singleplayer window plus phase-one multiplayer room routing and passive native combat replay. Multiplayer navigation, personal selection UI and remote control remain pending. State and original decisions only; no pixel transport.",
+  "description": "Native independent-process window with source-authorized multiplayer battle control and native personal selection UI. Original room host orders actions; state and requests only, no pixel transport. Multiplayer noncombat views remain pending.",
   "dependencies": [],
   "has_pck": true,
   "has_dll": true,
