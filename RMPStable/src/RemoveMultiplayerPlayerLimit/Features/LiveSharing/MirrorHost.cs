@@ -30,6 +30,17 @@ internal sealed class MirrorHost : IDisposable
     private MultiplayerMirrorFrame? _personalSent;
     private string _waitingRoom = "";
     private bool _roomDirty;
+    internal MultiplayerControlView? MultiplayerAuthority { get; private set; }
+    internal void ApplyMultiplayerPermission(MultiplayerControlView? view)
+    {
+        bool enabled = view?.Granted == true;
+        long epoch = view?.Epoch > 0 ? view.Epoch : _controlEpoch;
+        MultiplayerAuthority = view;
+        if (_control == enabled && _controlEpoch == epoch) return;
+        _control = enabled; _controlEpoch = epoch;
+        if (!Process.Authenticated) { _controlDirty = true; return; }
+        _ = Process.Wire.Send(new MirrorMessage { Kind = "control", Multiplayer = true, Generation = _generation, Epoch = epoch, Control = enabled });
+    }
     internal void WaitForMultiplayerRoom(string room)
     {
         if (string.IsNullOrEmpty(room)) room = "房间切换中";
@@ -52,6 +63,11 @@ internal sealed class MirrorHost : IDisposable
     }
     private void TickMultiplayer()
     {
+        if (_controlDirty && Process.Wire.Pending == 0)
+        {
+            _controlDirty = false;
+            _ = Process.Wire.Send(new MirrorMessage { Kind = "control", Multiplayer = true, Generation = _generation, Epoch = _controlEpoch, Control = _control });
+        }
         if (_waitingRoom.Length > 0)
         {
             Verified = false; SourceHash = ""; Process.DisplayReady = false; Process.LastIdle = false;
@@ -72,7 +88,8 @@ internal sealed class MirrorHost : IDisposable
         if (current != null && !ReferenceEquals(_personalSent, current) && current.Generation == _generation && Process.Wire.Pending == 0)
         {
             _personalSent = current;
-            _ = Process.Wire.Send(new MirrorMessage { Kind = "personal", Generation = current.Generation, Events = current.Events, Choice = current.Choice, TimerText = current.Timer });
+            ApplyMultiplayerPermission(current.Authority);
+            _ = Process.Wire.Send(new MirrorMessage { Kind = "personal", Generation = current.Generation, Events = current.Events, Choice = current.Choice, Authority = current.Authority, TimerText = current.Timer });
         }
         SourceHash = current?.Hash ?? "";
         Verified = current?.Settled == true && SourceHash.Length > 0 && Process.DisplayReady && Process.LastIdle && Process.LastEvents == current.Events && Process.LastHash == SourceHash;
@@ -214,7 +231,7 @@ internal sealed class MirrorHost : IDisposable
     internal bool AuthorizeIntent(RunState state, MirrorMessage message) => Process.Wire.Identity.Current(message) && _control && message.Epoch == _controlEpoch && message.Events == Process.LastEvents && message.Hash == Process.LastHash && Authorize(state);
     internal void Control(bool enabled, long epoch)
     {
-        if (Multiplayer && enabled) throw new InvalidOperationException("Multiplayer phase one is read-only");
+        if (Multiplayer && enabled) throw new InvalidOperationException("Multiplayer control requires source-owned permission");
         _control = enabled; _controlEpoch = epoch; _controlDirty = true;
         if (Process.Authenticated && !_resetDirty && Process.Wire.Pending == 0)
         {

@@ -1,0 +1,1 @@
+{"id":"MultiInstanceSmoke","name":"Multiplayer phase three battle control probe","author":"RMP Stable Contributors","version":"0.3.0","description":"Phase three permission and battle control over original ENet.","has_dll":true,"has_pck":false,"affects_gameplay":true,"min_game_version":"0.111.0","dependencies":[{"id":"RMPStable"}]}

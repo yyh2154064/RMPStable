@@ -35,11 +35,14 @@ internal sealed class MultiplayerMirrorFrame
     public List<byte[]> Candidates { get; set; } = new();
     public MultiplayerChoiceView? Choice { get; set; }
     public string Timer { get; set; } = "";
+    public MultiplayerControlView? Authority { get; set; }
+    public MultiplayerControlRequest? Request { get; set; }
+    public bool Accepted { get; set; }
+    public string Reason { get; set; } = "";
 }
 
-// Phase one: real room subscriptions and passive native combat replication.
-// Navigation and remote control are deliberately left to later phases.
-internal static class MultiplayerMirrorSession
+// Native room subscriptions, passive replay and source-owned battle control.
+internal static partial class MultiplayerMirrorSession
 {
     private sealed class Subscription { internal string Token = ""; internal long Generation; internal int Events; }
     private sealed class FragmentAssembly
@@ -89,18 +92,21 @@ internal static class MultiplayerMirrorSession
         if (_selected != 0 && !Connected(_selected)) { Error = "多人来源已离线"; Stop(); }
         foreach (var key in Fragments.Where(p => Time.GetTicksMsec() - p.Value.Began > 15000).Select(p => p.Key).ToArray())
         { Fragments[key].Buffer.Dispose(); Fragments.Remove(key); }
-        Mirror?.Tick(null, delta); _timer -= delta; if (_timer > 0) return; _timer = .1;
+        TickControl(); Mirror?.Tick(null, delta); _timer -= delta; if (_timer > 0) return; _timer = .1;
         // Do not reset or mutate the source game's original replay writer.
         var replay = MirrorState.CurrentReplay;
         if (replay == null || state.CurrentRoom is not MegaCrit.Sts2.Core.Rooms.CombatRoom || !CombatManager.Instance.IsInProgress && !CombatManager.Instance.IsStarting)
         {
+            RevokeControl();
             foreach (var pair in Subscribers.ToArray())
-                if (Connected(pair.Key)) { var frame = Capture("room"); frame.Generation = _generation; frame.Events = pair.Value.Events; Send(pair.Key, pair.Value.Token, frame); }
+                if (Connected(pair.Key)) { var frame = Capture("room"); frame.Generation = _generation; frame.Events = pair.Value.Events; frame.Authority = ControlFor(pair.Key, pair.Value.Token); Send(pair.Key, pair.Value.Token, frame); }
                 else Subscribers.Remove(pair.Key);
             return;
         }
         if (!ReferenceEquals(_checkpoint, replay))
         {
+            RevokeControl();
+            ControlIds.Clear();
             _checkpoint = replay; _generation++;
             var copy = MirrorState.Unpack<CombatReplay>(MirrorState.Pack(replay));
             copy.events.Clear(); copy.checksumData.Clear(); _base = MirrorState.Pack(copy);
@@ -111,6 +117,7 @@ internal static class MultiplayerMirrorSession
             var sub = pair.Value; bool load = sub.Generation != _generation; int start = load ? 0 : sub.Events;
             if (start > replay.events.Count) { Error = "Native replay prefix shortened"; continue; }
             var frame = Capture(load ? "load" : "delta");
+            frame.Authority = ControlFor(pair.Key, sub.Token);
             frame.Generation = _generation; frame.Start = start; frame.Events = replay.events.Count;
             if (load) frame.Checkpoint = _base;
             frame.Delta = replay.events.Skip(start).Select(e => MirrorState.Pack(e)).ToList();
@@ -122,17 +129,20 @@ internal static class MultiplayerMirrorSession
         if (_service == null || _state?.GetPlayer(source) == null || !Connected(source)) throw new InvalidOperationException("Source is not in this room");
         Stop(); _selected = source; _token = Guid.NewGuid().ToString("N"); Error = "";
         Mirror = new MirrorHost(source, multiplayer: true);
+        Mirror.Intent = ForwardControlIntent;
         Send(source, _token, new MultiplayerMirrorFrame { Kind = "subscribe", Build = MirrorState.Build });
     }
     internal static void Stop()
     {
         if (_selected != 0 && _service?.IsConnected == true) Send(_selected, _token, new MultiplayerMirrorFrame { Kind = "unsubscribe" });
-        Mirror?.Dispose(); Mirror = null; Latest = null; _selected = 0; _token = _remoteSession = "";
+        Mirror?.Dispose(); Mirror = null; Latest = null; _selected = 0; _token = _remoteSession = ""; ControlRequested = false;
         _receivedEvents = 0; _receivedGeneration = 0;
     }
     private static void Reset()
     {
         if (_service == null) return;
+        RevokeControl();
+        ControlIds.Clear();
         Stop(); _service.UnregisterMessageHandler<RmpMirrorPacket>(Receive); _service = null; _state = null;
         Subscribers.Clear(); foreach (var part in Fragments.Values) part.Buffer.Dispose(); Fragments.Clear();
         _checkpoint = null; _base = Array.Empty<byte>(); _generation = 0;
@@ -213,17 +223,21 @@ internal static class MultiplayerMirrorSession
         if (frame.Kind == "subscribe")
         {
             if (frame.Build != MirrorState.Build) { RejectedPackets++; Send(packet.Origin, packet.Token, new() { Kind = "reject", Build = MirrorState.Build }); return; }
+            if (Subscribers.TryGetValue(packet.Origin, out var existing)) ReleaseControl(packet.Origin, existing.Token);
             Subscribers[packet.Origin] = new Subscription { Token = packet.Token };
             Send(packet.Origin, packet.Token, new() { Kind = "ack", Session = _session, Build = MirrorState.Build }); return;
         }
         if (frame.Kind == "unsubscribe")
-        { if (Subscribers.TryGetValue(packet.Origin, out var sub) && sub.Token == packet.Token) Subscribers.Remove(packet.Origin); return; }
+        { if (Subscribers.TryGetValue(packet.Origin, out var sub) && sub.Token == packet.Token) { Subscribers.Remove(packet.Origin); ReleaseControl(packet.Origin, packet.Token); } return; }
+        if (frame.Kind is "control-request" or "control-release" or "control-intent" or "control-heartbeat")
+        { ReceiveControl(packet.Origin, packet.Token, frame); return; }
         if (packet.Origin != _selected || packet.Token != _token) { RejectedPackets++; return; }
         if (frame.Kind == "reject") { Error = "多人来源游戏或 Mod 版本不一致"; return; }
         if (frame.Build != MirrorState.Build) { RejectedPackets++; return; }
         if (frame.Kind == "ack") { _remoteSession = frame.Session; return; }
         if (frame.Session != _remoteSession || frame.Generation < _receivedGeneration) { RejectedPackets++; return; }
-        if (frame.Kind == "room") { Latest = frame; Mirror?.WaitForMultiplayerRoom(frame.Room); return; }
+        if (frame.Kind == "control-result") { ReceiveControlResult(frame); return; }
+        if (frame.Kind == "room") { ControlRequested = false; Latest = frame; Mirror?.WaitForMultiplayerRoom(frame.Room); Mirror?.ApplyMultiplayerPermission(frame.Authority); return; }
         if (frame.Kind == "load")
         {
             if (frame.Generation <= _receivedGeneration || frame.Start != 0) { RejectedPackets++; return; }
@@ -231,6 +245,7 @@ internal static class MultiplayerMirrorSession
         }
         else if (frame.Kind != "delta" || frame.Generation != _receivedGeneration) { RejectedPackets++; return; }
         if (frame.Start != _receivedEvents || frame.Events != frame.Start + frame.Delta.Count) throw new InvalidDataException("Multiplayer event sequence gap");
+        if (Mirror?.MultiplayerAuthority?.Granted == true && frame.Authority?.Granted != true) ControlRequested = false;
         _receivedEvents = frame.Events; Latest = frame; ReceivedFrames++; Mirror?.QueueMultiplayer(frame);
     }
 }

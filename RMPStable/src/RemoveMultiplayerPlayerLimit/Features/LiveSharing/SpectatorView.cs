@@ -40,8 +40,8 @@ internal sealed partial class SpectatorView : IDisposable
         _content.AddChild(_retry); _retry.Pressed += LiveSharingController.RecoverMirror;
         _previousFps = Engine.MaxFps; _previousVsync = DisplayServer.WindowGetVsyncMode();
         if (DisplayServer.GetName() != "headless") { Engine.MaxFps = 120; DisplayServer.WindowSetVsyncMode(DisplayServer.VSyncMode.Disabled); }
-        _controlToggle.Disabled = mirror.Multiplayer;
-        if (mirror.Multiplayer) _controlToggle.TooltipText = T("多人观战：操作仍由玩家本体决定", "Multiplayer watch: decisions remain with the player's game");
+        _controlToggle.Disabled = false;
+        if (mirror.Multiplayer) _controlToggle.TooltipText = T("申请战斗控制，须由所选玩家授权", "Request battle control; the selected player must approve");
         SetControlEnabled(!mirror.Multiplayer && SpectatorPreferences.Current.ControlMode);
     }
     internal void Update(SpectatorSnapshot snapshot, bool verified, string error)
@@ -53,7 +53,12 @@ internal sealed partial class SpectatorView : IDisposable
     }
     private void SetControlEnabled(bool enabled)
     {
-        enabled &= !_mirror.Multiplayer;
+        if (_mirror.Multiplayer)
+        {
+            MultiplayerMirrorSession.RequestControl(enabled);
+            _controlToggle.SetPressedNoSignal(enabled);
+            return;
+        }
         if (_controlEnabled != enabled || _epoch == 0 || _mirror.ControlEpoch != _epoch)
         {
             _controlEnabled = enabled; _epoch = _setControl(enabled); _mirror.Control(enabled,_epoch);
@@ -75,7 +80,16 @@ internal sealed partial class SpectatorView : IDisposable
         bool sourceDialog = QuickSl.QuickSlController.ConfirmationOpen || LiveSharingController.SourceMenuOpen;
         _overlay.Visible = !sourceDialog;
         bool combat = _snapshot != null && _mirror.Error.Length == 0;
-        if (combat && _mirror.ControlEpoch != _epoch) SetControlEnabled(_controlEnabled);
+        if (_mirror.Multiplayer)
+        {
+            bool granted = _mirror.MultiplayerAuthority?.Granted == true;
+            _controlEnabled = granted; _epoch = _mirror.ControlEpoch;
+            _modeThumb.Position = new Vector2(granted ? 58 : 2, 2);
+            _controlToggle.SetPressedNoSignal(granted || MultiplayerMirrorSession.ControlRequested);
+            _controlToggle.Disabled = !_mirror.Process.DisplayReady;
+            _controlToggle.TooltipText = _mirror.MultiplayerAuthority?.Reason ?? "战斗控制须由所选玩家授权";
+        }
+        else if (combat && _mirror.ControlEpoch != _epoch) SetControlEnabled(_controlEnabled);
         // Scene construction runs while hidden; expose only the current scene
         // so SL cannot briefly display the previous run as ready for input.
         host?.Layout(_content,combat && _mirror.Process.DisplayReady && host.Attached && SceneMonitor.FindSettingsScreen()?.IsVisibleInTree() != true && !QuickSl.QuickSlController.ConfirmationOpen && !LiveSharingController.SourceMenuOpen);

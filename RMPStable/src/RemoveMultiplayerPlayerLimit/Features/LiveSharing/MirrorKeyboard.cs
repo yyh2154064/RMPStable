@@ -57,7 +57,7 @@ internal sealed partial class MirrorRenderer
                 continue;
             }
             if (!pressed || key.Echo) continue;
-            if (Diagnostic) GD.Print("[RMP:Mirror:Keyboard] key=" + key.Keycode + " control=" + _control + " waiting=" + _waitingForAuthority + " idle=" + NativeIdle + " cards=" + CanBufferCard + " handMode=" + NPlayerHand.Instance?.CurrentMode);
+            if (Diagnostic) GD.Print("[RMP:Mirror:Keyboard] key=" + key.Keycode + " control=" + _control + " waiting=" + _waitingForAuthority + " idle=" + InputIdle + " cards=" + CanBufferCard + " handMode=" + NPlayerHand.Instance?.CurrentMode);
             bool Match(string action) => MatchesShortcut(key, action);
             bool confirm = key.Keycode == Key.Enter || Match("ui_confirm") || Match("ui_accept") || Match(MegaInput.select);
             if (NModalContainer.Instance?.OpenModal is NAbandonRunConfirmPopup abandon)
@@ -84,7 +84,8 @@ internal sealed partial class MirrorRenderer
                 else if (PresentationScrollRoot is { } browse)
                     LocalSpectatorSource.Descendants<NBackButton>(browse).FirstOrDefault(b => b.IsEnabled)?.ForceClick();
                 else if (NCapstoneContainer.Instance?.CurrentCapstoneScreen != null) NCapstoneContainer.Instance.Close();
-                else if (NTargetManager.Instance?.IsInSelection == true) SendShortcutAction(a => a.Kind == "cancel");
+                else if (NTargetManager.Instance?.IsInSelection == true)
+                { if (Multiplayer) NTargetManager.Instance.CancelTargeting(); else SendShortcutAction(a => a.Kind == "cancel"); }
                 else if (LocalSpectatorSource.PendingNativeChoice) SendShortcutAction(a => a.Kind == "cancel" || MirrorNativeUi.Resolve(a.NativePath) is Control node && HasShortcut(node,key));
                 else if (!SendShortcutAction(a => a.Kind == "cancel")) NRun.Instance?.GlobalUi.TopBar.Pause.ForceClick();
                 continue;
@@ -98,7 +99,7 @@ internal sealed partial class MirrorRenderer
                 if (Match("mega_release_card")) { CancelDrag(); continue; }
                 if (key.Keycode is Key.Left or Key.Right or Key.Up or Key.Down)
                 {
-                    var hits = CaptureHits().Where(h => h.Kind == "target" && _state!.Players[0].Creature.CombatState is { } combat &&
+                    var hits = CaptureHits().Where(h => h.Kind == "target" && ViewPlayer!.Creature.CombatState is { } combat &&
                         h.Index >= 0 && h.Index < combat.Creatures.Count && _dragCard.CanPlayTargeting(combat.Creatures[h.Index])).ToArray();
                     if (hits.Length > 0)
                     {
@@ -122,9 +123,9 @@ internal sealed partial class MirrorRenderer
                 var holder = NPlayerHand.Instance?.ActiveHolders.ElementAtOrDefault(index);
                 if (Diagnostic) GD.Print("[RMP:Mirror:Keyboard] select=" + index + " holder=" + holder?.CardModel?.Id + " playable=" + holder?.CardModel?.CanPlayTargeting(null));
                 if (holder == null || !_control) break;
-                if (NPlayerHand.Instance!.CurrentMode == NPlayerHand.Mode.Play && CanBufferCard && NativeIdle && !_waitingForAuthority)
+                if (NPlayerHand.Instance!.CurrentMode == NPlayerHand.Mode.Play && CanBufferCard && InputIdle && !_waitingForAuthority)
                 {
-                    CancelDrag(); _dragCard = holder.CardModel; _dragGeneration = _generation; _dragTurn = _state!.Players[0].PlayerCombatState!.TurnNumber;
+                    CancelDrag(); _dragCard = holder.CardModel; _dragGeneration = _generation; _dragTurn = ViewPlayer!.PlayerCombatState!.TurnNumber;
                     _pointer = _dragStart = new Vector2(.5f,.35f); _dragReleased = true; _keyboardCard = true;
                     typeof(NPlayerHand).GetMethod("StartCardPlay", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(NPlayerHand.Instance, new object[]{holder,true});
                     if (_dragCard != null) _nativePlay = typeof(NPlayerHand).GetField("_currentCardPlay", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(NPlayerHand.Instance) as NCardPlay;
@@ -158,7 +159,7 @@ internal sealed partial class MirrorRenderer
             {
                 if (NCapstoneContainer.Instance?.CurrentCapstoneScreen is Node pauseRoot &&
                     LocalSpectatorSource.Descendants<NClickableControl>(pauseRoot).Any(b => b == focused && b.IsEnabled &&
-                        (b.Name.ToString() is "Settings" or "Resume" || b.Name == "GiveUp" && _control && NativeIdle && !_waitingForAuthority)))
+                        (b.Name.ToString() is "Settings" or "Resume" || b.Name == "GiveUp" && _control && InputIdle && !_waitingForAuthority)))
                     ((NClickableControl)focused).ForceClick();
                 else SendShortcutAction(a => a.NativePath == MirrorNativeUi.Key(MirrorNativeUi.Parent<NCardHolder>(focused) ?? focused));
             }
@@ -179,14 +180,14 @@ internal sealed partial class MirrorRenderer
     private static bool HasShortcut(Control node, InputEventKey key) => node.GetType().GetProperty("Hotkeys", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(node) is string[] shortcuts && shortcuts.Any(s => MatchesShortcut(key,s));
     private bool SendShortcutAction(Func<ControlActionSnapshot,bool> predicate)
     {
-        if (!_control || !NativeIdle || _waitingForAuthority || _state == null) return false;
-        var action = _commands.CaptureCommands(_state).Control.Actions.LastOrDefault(a => a.Enabled && predicate(a));
+        if (!_control || !InputIdle || _waitingForAuthority || _state == null) return false;
+        var action = InputActions().LastOrDefault(a => a.Enabled && predicate(a));
         if (action == null) return false;
         SendIntent(action.Kind, action.NativeIndex, -1, CurrentHash, _events, action.NativePath); return true;
     }
     private void RequestKeyboardSl()
     {
-        if (!_control || !NativeIdle || _waitingForAuthority || _state == null) return;
+        if (!_control || !InputIdle || _waitingForAuthority || _state == null) return;
         QuickSl.QuickSlController.ShowReplicaConfirmation(() =>
         { if (_state != null) SendIntent("menu", -1, -1, CurrentHash, _events, value: "RmpQuickSlConfirmed"); });
     }
