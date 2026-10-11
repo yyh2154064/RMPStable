@@ -41,7 +41,7 @@ internal static class MirrorState
         }
         // The engine keeps the last combat's phase/energy/RNG objects after
         // leaving it. A fresh noncombat checkpoint has no such transient state.
-        var combat = state.CurrentRoom is MegaCrit.Sts2.Core.Rooms.CombatRoom ? Pack(NetFullCombatState.FromRun(state, null)) : Array.Empty<byte>();
+        var combat = state.CurrentRoom is MegaCrit.Sts2.Core.Rooms.CombatRoom && (!multiplayer || MegaCrit.Sts2.Core.Combat.CombatManager.Instance.IsInProgress || MegaCrit.Sts2.Core.Combat.CombatManager.Instance.IsStarting) ? Pack(NetFullCombatState.FromRun(state, null)) : Array.Empty<byte>();
         var run = Pack(saved);
         var bytes = new byte[combat.Length + run.Length];
         combat.CopyTo(bytes, 0); run.CopyTo(bytes, combat.Length);

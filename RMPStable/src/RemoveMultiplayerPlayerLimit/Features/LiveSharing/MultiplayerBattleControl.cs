@@ -74,7 +74,10 @@ internal static partial class MultiplayerMirrorSession
     { if (!MirrorRenderer.IsRenderer && _controlViewer != 0 && _service?.NetId == __0.OwnerId) _controlRevision++; }
     private static string ControlId(object model)
     { if (!ControlIds.TryGetValue(model, out var id)) ControlIds[model] = id = "battle:" + ++_controlId; return id; }
-    private static bool InBattle => _state?.CurrentRoom is CombatRoom && CombatManager.Instance.IsInProgress && _checkpoint != null && ReferenceEquals(_checkpoint, MirrorState.CurrentReplay);
+    private static bool InBattle => _state != null && _checkpoint != null &&
+        (_state.CurrentRoom is CombatRoom && ReferenceEquals(_checkpoint, MirrorState.CurrentReplay) ||
+         ReferenceEquals(_state.CurrentRoom, MultiplayerNoncombat.SourceRoom) && ReferenceEquals(_checkpoint, MultiplayerNoncombat.Checkpoint));
+    private static bool _permissionCombat;
     internal static void RequestControl(bool enabled)
     {
         ControlRequested = enabled;
@@ -100,7 +103,7 @@ internal static partial class MultiplayerMirrorSession
         _pendingViewer = 0; _pendingToken = "";
         if (allow && InBattle && Connected(viewer) && Subscribers.TryGetValue(viewer, out var sub) && sub.Token == token && _controlViewer == 0)
         { _controlViewer = viewer; _controlToken = token; _permissionEpoch++; _controlRevision++; _permissionDeadline = Time.GetTicksMsec() + 15000; ControlResults.Clear(); _lastControlRequest = 0; }
-        else SendControlResult(viewer, token, null, false, "玩家未授权战斗控制");
+        else SendControlResult(viewer, token, null, false, "玩家未授权房间控制");
     }
     private static void TickControl()
     {
@@ -109,10 +112,12 @@ internal static partial class MultiplayerMirrorSession
             _nextControlHeartbeat = Time.GetTicksMsec() + 1000;
             Send(_selected, _token, new() { Kind = "control-heartbeat", Build = MirrorState.Build, Session = _remoteSession, Generation = _receivedGeneration, Request = new() { Epoch = mirror.ControlEpoch } });
         }
+        bool combat = CombatManager.Instance.IsInProgress || CombatManager.Instance.IsStarting;
+        if (_permissionCombat != combat) { _permissionCombat = combat; RevokeControl(); }
         if (_controlViewer != 0 && (!InBattle || !Connected(_controlViewer) || Time.GetTicksMsec() > _permissionDeadline || !Subscribers.TryGetValue(_controlViewer, out var sub) || sub.Token != _controlToken)) RevokeControl();
         if (_pendingViewer != 0 && (!InBattle || !Connected(_pendingViewer) || Time.GetTicksMsec() > _permissionDeadline))
         {
-            if (Connected(_pendingViewer)) SendControlResult(_pendingViewer, _pendingToken, null, false, "战斗控制申请已过期，请重新申请");
+            if (Connected(_pendingViewer)) SendControlResult(_pendingViewer, _pendingToken, null, false, "房间控制申请已过期，请重新申请");
             _pendingViewer = 0; _pendingToken = "";
         }
         if (_pendingViewer == 0 && _controlViewer == 0) { if (_permissionUi != null && GodotObject.IsInstanceValid(_permissionUi)) _permissionUi.Hide(); return; }
@@ -123,12 +128,12 @@ internal static partial class MultiplayerMirrorSession
             var row = new VBoxContainer(); box.AddChild(row);
             _permissionLabel = new Label { AutowrapMode = TextServer.AutowrapMode.WordSmart, CustomMinimumSize = new Vector2(390, 0) }; row.AddChild(_permissionLabel);
             var buttons = new HBoxContainer(); row.AddChild(buttons);
-            _allowButton = new Button { Name = "AllowBattleControl", Text = "允许本场战斗" }; buttons.AddChild(_allowButton); _allowButton.Pressed += () => DecideControl(true);
+            _allowButton = new Button { Name = "AllowBattleControl", Text = "允许本房间" }; buttons.AddChild(_allowButton); _allowButton.Pressed += () => DecideControl(true);
             _denyButton = new Button { Name = "RevokeBattleControl", Text = "拒绝" }; buttons.AddChild(_denyButton); _denyButton.Pressed += () => { if (_controlViewer != 0) RevokeControl(); else DecideControl(false); };
         }
         ulong id = _controlViewer != 0 ? _controlViewer : _pendingViewer;
         string name = Sources().FirstOrDefault(p => p.Id == id.ToString())?.Name ?? id.ToString();
-        _permissionLabel!.Text = name + (_controlViewer != 0 ? " 已获战斗控制权。你仍可操作，随时可撤销。" : " 请求控制你的战斗窗口。是否允许？");
+        _permissionLabel!.Text = name + (_controlViewer != 0 ? " 已获房间控制权。你仍可操作，随时可撤销。" : " 请求控制你的窗口。是否允许？");
         _allowButton!.Visible = _controlViewer == 0; _denyButton!.Text = _controlViewer != 0 ? "撤销控制" : "拒绝"; _permissionUi.Show();
     }
     private static MultiplayerControlView ControlFor(ulong viewer, string token)
@@ -136,7 +141,7 @@ internal static partial class MultiplayerMirrorSession
         bool granted = InBattle && viewer == _controlViewer && token == _controlToken;
         var view = granted ? CaptureBattleControl() : new MultiplayerControlView();
         view.Granted = granted; view.Epoch = _permissionEpoch;
-        view.Reason = granted ? "已获玩家授权 · 本场战斗" : viewer == _pendingViewer ? "等待玩家本体授权" : "观战 · 控制须由玩家授权";
+        view.Reason = granted ? "已获玩家授权 · 本房间" : viewer == _pendingViewer ? "等待玩家本体授权" : "观战 · 控制须由玩家授权";
         return view;
     }
     private static void ReceiveControl(ulong viewer, string token, MultiplayerMirrorFrame frame)
@@ -151,14 +156,14 @@ internal static partial class MultiplayerMirrorSession
         if (frame.Kind == "control-request")
         {
             if (!InBattle || frame.Generation != _generation || _controlViewer != 0 || _pendingViewer != 0)
-            { SendControlResult(viewer, token, null, false, "当前无法申请战斗控制"); return; }
+            { SendControlResult(viewer, token, null, false, "当前无法申请房间控制"); return; }
             _pendingViewer = viewer; _pendingToken = token; _permissionDeadline = Time.GetTicksMsec() + 15000;
             if (viewer == _service!.NetId) DecideControl(true);
             return;
         }
         var request = frame.Request;
         if (request == null) { RejectedPackets++; return; }
-        bool accepted = false; string reason = "战斗控制授权已失效";
+        bool accepted = false; string reason = "房间控制授权已失效";
         if (InBattle && viewer == _controlViewer && token == _controlToken && request.Epoch == _permissionEpoch && request.Generation == _generation)
         {
             if (ControlResults.TryGetValue(request.Id, out var prior)) { SendControlResult(viewer, token, request, prior.Accepted, prior.Reason); return; }
@@ -167,7 +172,7 @@ internal static partial class MultiplayerMirrorSession
                 _lastControlRequest = request.Id;
                 var control = CaptureBattleControl();
                 reason = "玩家状态或选择已变化，请等待刷新";
-                if (request.Context == control.Context && request.Events >= 0 && request.Events <= _checkpoint!.events.Count)
+                if (request.Context == control.Context && request.Events >= 0 && request.Events <= _checkpoint!.events.Count + MultiplayerNoncombat.Operations.Count)
                 {
                     var action = control.Actions.FirstOrDefault(a => a.Id == request.Action && a.Enabled);
                     if (action != null && (!action.RequiresTarget || action.TargetIds.Contains(request.Target)))
@@ -202,6 +207,7 @@ internal static partial class MultiplayerMirrorSession
     }
     private static MultiplayerControlView CaptureBattleControl()
     {
+        if (!CombatManager.Instance.IsInProgress && !CombatManager.Instance.IsStarting) return CaptureRoomControl();
         var view = new MultiplayerControlView { Epoch = _permissionEpoch }; var player = LocalContext.GetMe(_state); var state = player?.PlayerCombatState;
         if (player == null || state == null) return view;
         var choice = MultiplayerPersonalUi.Capture();
@@ -251,6 +257,17 @@ internal static partial class MultiplayerMirrorSession
     }
     private static bool ExecuteBattleAction(ControlActionSnapshot action, string targetId, MultiplayerControlView view)
     {
+        if (action.Kind is "native" or "buy") return ExecuteRoomAction(action);
+        if (action.Kind == "select")
+        {
+            if (MirrorNativeUi.Resolve(action.NativePath, true) is not NCardHolder selected || !LocalSpectatorSource.NativeReplayReady(selected, LocalSpectatorSource.HandSelectionContext(selected))) return false;
+            selected.EmitSignal(NCardHolder.SignalName.Pressed, selected); return true;
+        }
+        if (action.Kind == "choice")
+        {
+            if (MirrorNativeUi.Resolve(action.NativePath) is not NClickableControl choiceButton || !choiceButton.IsEnabled) return false;
+            choiceButton.ForceClick(); return true;
+        }
         var player = LocalContext.GetMe(_state)!; var state = player.PlayerCombatState!;
         var target = view.Targets.FirstOrDefault(t => t.Id == targetId);
         var creature = target == null ? null : player.Creature.CombatState.Creatures.ElementAtOrDefault(target.NativeIndex);
@@ -261,12 +278,6 @@ internal static partial class MultiplayerMirrorSession
                 var potion = player.Potions.ElementAt(action.NativeIndex); if (potion.TargetType == TargetType.Self) creature = player.Creature;
                 if (!potion.IsValidTarget(creature)) return false; potion.EnqueueManualUse(creature); return true;
             case "endTurn": RunManager.Instance.ActionQueueSynchronizer.RequestEnqueue(new EndPlayerTurnAction(player, state.TurnNumber)); return true;
-            case "select":
-                if (MirrorNativeUi.Resolve(action.NativePath, true) is not NCardHolder holder || !LocalSpectatorSource.NativeReplayReady(holder, LocalSpectatorSource.HandSelectionContext(holder))) return false;
-                holder.EmitSignal(NCardHolder.SignalName.Pressed, holder); return true;
-            case "choice":
-                if (MirrorNativeUi.Resolve(action.NativePath) is not NClickableControl button || !button.IsEnabled) return false;
-                button.ForceClick(); return true;
             default: return false;
         }
     }

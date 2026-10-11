@@ -168,7 +168,7 @@ internal sealed partial class MirrorRenderer : IDisposable
                     {
                         _potionPressed = null; _pendingPotion = null; _pendingChoice = null; _pressedAction = null; PotionPopup?.Remove();
                         if (NTargetManager.Instance?.IsInSelection == true) NTargetManager.Instance.CancelTargeting();
-                        if (_sceneReady) _phase = _control ? "多人战斗控制已授权" : "多人原版战斗已同步（观战）";
+                        if (_sceneReady) _phase = _control ? "多人房间控制已授权" : "多人原版房间已同步（观战）";
                     }
                     _pendingCards.Clear(); _submittedCard = null; _waitingForAuthority = false; break;
                 case "ready":
@@ -179,6 +179,8 @@ internal sealed partial class MirrorRenderer : IDisposable
                     if (message.Generation == _desiredGeneration) _timerText = message.TimerText;
                     break;
                 case "result":
+                    if (Multiplayer && message.Generation == _generation && message.Epoch == _epoch && message.Request == _request)
+                    { LastMultiplayerResult = message.Request; LastMultiplayerAccepted = message.Accepted; }
                     if (Diagnostic) GD.Print("[RMP:Mirror:Input] result accepted=" + message.Accepted + " reason=" + message.Room);
                     if (message.Generation == _generation && message.Epoch == _epoch && message.Request == _request && (Multiplayer || !message.Accepted || message.Model == "menu")) _waitingForAuthority = false;
                     if (message.Generation == _generation && message.Epoch == _epoch && message.Request == _request && !message.Accepted) _submittedCard = null;
@@ -216,7 +218,7 @@ internal sealed partial class MirrorRenderer : IDisposable
         else
         {
             if (_personalMessage is { } personal && personal.Generation == _generation && _generation == _desiredGeneration && _events >= personal.Events)
-            { MultiplayerPersonalUi.Apply(personal.Choice); ApplyBattleAuthority(personal); _timerText = personal.TimerText; }
+            { MultiplayerPersonalUi.Apply(personal.Choice); ApplyBattleAuthority(personal); ApplyNoncombatPresentation(personal); _timerText = personal.TimerText; }
             if (_sceneReady && !_multiplayerRoomWaiting) { ProcessLocalInput(); ProcessBufferedCards(); ProcessPendingPotion(); ProcessPendingChoice(); }
             else { while (_buttons.TryDequeue(out _)) { } while (_keyboard.TryDequeue(out _)) { } }
         }

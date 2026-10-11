@@ -17,6 +17,8 @@ namespace RemoveMultiplayerPlayerLimit.Features.LiveSharing;
 internal sealed partial class MirrorRenderer
 {
     private MultiplayerControlView? _battleAuthority;
+    internal long LastMultiplayerResult { get; private set; }
+    internal bool LastMultiplayerAccepted { get; private set; }
     private sealed record PendingPotion(PotionModel Potion, Creature? Target, long Generation, long Epoch, int Turn, ulong Created);
     private PendingPotion? _pendingPotion;
     private sealed record PendingChoice(ControlActionSnapshot Action, long Generation, long Epoch, uint Choice, ulong Created);

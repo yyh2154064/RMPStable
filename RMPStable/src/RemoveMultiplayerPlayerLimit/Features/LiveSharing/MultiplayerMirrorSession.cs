@@ -26,6 +26,10 @@ internal sealed class MultiplayerMirrorFrame
     public int Start { get; set; }
     public int Events { get; set; }
     public byte[] Checkpoint { get; set; } = Array.Empty<byte>();
+    public byte[] NoncombatRoom { get; set; } = Array.Empty<byte>();
+    public bool MapOpen { get; set; }
+    public bool MapTravelEnabled { get; set; }
+    public bool ShopOpen { get; set; }
     public List<byte[]> Delta { get; set; } = new();
     public string Hash { get; set; } = "";
     public bool Settled { get; set; }
@@ -94,8 +98,9 @@ internal static partial class MultiplayerMirrorSession
         { Fragments[key].Buffer.Dispose(); Fragments.Remove(key); }
         TickControl(); Mirror?.Tick(null, delta); _timer -= delta; if (_timer > 0) return; _timer = .1;
         // Do not reset or mutate the source game's original replay writer.
-        var replay = MirrorState.CurrentReplay;
-        if (replay == null || state.CurrentRoom is not MegaCrit.Sts2.Core.Rooms.CombatRoom || !CombatManager.Instance.IsInProgress && !CombatManager.Instance.IsStarting)
+        bool noncombat = ReferenceEquals(MultiplayerNoncombat.State, state) && ReferenceEquals(MultiplayerNoncombat.SourceRoom, state.CurrentRoom) && MultiplayerNoncombat.Checkpoint != null;
+        var replay = noncombat ? MultiplayerNoncombat.Checkpoint : MirrorState.CurrentReplay;
+        if (replay == null || !noncombat && state.CurrentRoom is not MegaCrit.Sts2.Core.Rooms.CombatRoom)
         {
             RevokeControl();
             foreach (var pair in Subscribers.ToArray())
@@ -115,12 +120,13 @@ internal static partial class MultiplayerMirrorSession
         {
             if (!Connected(pair.Key)) { Subscribers.Remove(pair.Key); continue; }
             var sub = pair.Value; bool load = sub.Generation != _generation; int start = load ? 0 : sub.Events;
-            if (start > replay.events.Count) { Error = "Native replay prefix shortened"; continue; }
+            var operations = replay.events.Select(e => new MirrorOperation { Kind = "multiplayer", Payload = MirrorState.Pack(e) }).Concat(MultiplayerNoncombat.Operations).ToList();
+            if (start > operations.Count) { Error = "Native replay prefix shortened"; continue; }
             var frame = Capture(load ? "load" : "delta");
             frame.Authority = ControlFor(pair.Key, sub.Token);
-            frame.Generation = _generation; frame.Start = start; frame.Events = replay.events.Count;
-            if (load) frame.Checkpoint = _base;
-            frame.Delta = replay.events.Skip(start).Select(e => MirrorState.Pack(e)).ToList();
+            frame.Generation = _generation; frame.Start = start; frame.Events = operations.Count;
+            if (load) { frame.Checkpoint = _base; if (noncombat) frame.NoncombatRoom = MultiplayerNoncombat.Room; }
+            frame.Delta = operations.Skip(start).Select(e => JsonSerializer.SerializeToUtf8Bytes(e)).ToList();
             Send(pair.Key, sub.Token, frame); sub.Generation = _generation; sub.Events = frame.Events;
         }
     }
@@ -163,7 +169,10 @@ internal static partial class MultiplayerMirrorSession
         var frame = new MultiplayerMirrorFrame { Kind = kind, Build = MirrorState.Build, Session = _session,
             Settled = Settled, Hash = Settled && _state != null ? MirrorState.MultiplayerHash(_state) : "",
             Room = _state?.CurrentRoom?.RoomType.ToString() ?? "", HandMode = NPlayerHand.Instance?.CurrentMode.ToString() ?? "",
-            Screen = NOverlayStack.Instance?.Peek()?.GetType().Name ?? "Room", Choice = MultiplayerPersonalUi.Capture(), Timer = MirrorClock.Label?.Text ?? "" };
+            Screen = NOverlayStack.Instance?.Peek()?.GetType().Name ?? "Room", Choice = MultiplayerPersonalUi.Capture(), Timer = MirrorClock.Label?.Text ?? "",
+            MapOpen = MegaCrit.Sts2.Core.Nodes.Screens.Map.NMapScreen.Instance?.IsOpen == true,
+            MapTravelEnabled = MegaCrit.Sts2.Core.Nodes.Screens.Map.NMapScreen.Instance?.IsTravelEnabled == true,
+            ShopOpen = MegaCrit.Sts2.Core.Nodes.NRun.Instance?.MerchantRoom is { } shop && LocalSpectatorSource.Descendants<MegaCrit.Sts2.Core.Nodes.Screens.Shops.NMerchantInventory>(shop).Any(i => i.IsOpen) };
         if (NOverlayStack.Instance?.Peek() is Node screen)
             frame.Candidates = LocalSpectatorSource.Descendants<NCardHolder>(screen).Where(c => c.CardModel != null)
                 .Select(c => MirrorState.Pack(c.CardModel!.ToSerializable())).ToList();

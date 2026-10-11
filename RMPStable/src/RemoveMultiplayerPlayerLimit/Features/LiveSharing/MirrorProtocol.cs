@@ -29,6 +29,9 @@ internal sealed class MirrorMessage
     public int TargetIndex { get; set; } = -1;
     public bool Control { get; set; }
     public bool Multiplayer { get; set; }
+    public byte[] NoncombatRoom { get; set; } = Array.Empty<byte>();
+    public bool ShopOpen { get; set; }
+    public bool MapTravelEnabled { get; set; }
     public MultiplayerChoiceView? Choice { get; set; }
     public MultiplayerControlView? Authority { get; set; }
     public string TargetKey { get; set; } = "";

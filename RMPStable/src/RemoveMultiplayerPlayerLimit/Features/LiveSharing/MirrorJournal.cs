@@ -68,6 +68,7 @@ internal static partial class MirrorJournal
         MultiplayerPersonalUi.Initialize();
         MirrorRenderer.InstallMultiplayerPotionGate();
         MultiplayerMirrorSession.InstallBattleInputTracking();
+        MultiplayerNoncombat.Initialize();
         var harmony = new Harmony("RMPStable.NativeMirrorJournal");
         void Patch(MethodBase method, string? prefix = null, string? postfix = null, string? finalizer = null) => harmony.Patch(method,
             prefix == null ? null : new HarmonyMethod(typeof(MirrorJournal).GetMethod(prefix, Any)),

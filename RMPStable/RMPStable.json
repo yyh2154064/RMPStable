@@ -1,9 +1,9 @@
 {
   "id": "RMPStable",
   "name": "RMP Stable - Native Multi-instance Exploration",
-  "version": "0.3.9-multiInstance.17",
+  "version": "0.3.9-multiInstance.18",
   "author": "灰灰神教！",
-  "description": "Native independent-process window with source-authorized multiplayer battle control and native personal selection UI. Original room host orders actions; state and requests only, no pixel transport. Multiplayer noncombat views remain pending.",
+  "description": "Native independent-process multiplayer window with source-authorized battle and noncombat controls, original personal pages, rewards and room votes. The original game resolves decisions; state and requests only, no pixel transport.",
   "dependencies": [],
   "has_pck": true,
   "has_dll": true,

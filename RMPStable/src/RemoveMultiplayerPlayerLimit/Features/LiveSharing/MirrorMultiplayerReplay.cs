@@ -28,9 +28,10 @@ internal sealed partial class MirrorRenderer
         {
             Multiplayer = true; _control = false;
             MultiplayerPersonalUi.Reset();
+            MirrorJournal.ResetReplicaRewards();
             _generation = message.Generation; _wire.Identity.Generation = _generation; _events = 0; _error = "";
             _sceneReady = false; _finalSave = null; _finalHash = "";
-            Stage("重建多人原版战斗"); CheckGeneration(_generation);
+            Stage("重建多人原版房间"); CheckGeneration(_generation);
             RunManager.Instance.CleanUp(); _state = null; _replay = null;
             MirrorJournal.ReplicaActive = true;
             var replay = MirrorState.Unpack<CombatReplay>(message.Payload);
@@ -54,13 +55,14 @@ internal sealed partial class MirrorRenderer
             manager.ChecksumTracker.LoadReplayChecksums(null!, replay.nextChecksumId);
             manager.PlayerChoiceSynchronizer.FastForwardChoiceIds(replay.choiceIds);
             manager.RewardsSetSynchronizer.FastForwardRewardIds(replay.rewardIds);
-            await manager.LoadIntoLatestMapCoord(AbstractRoom.FromSerializable(replay.serializableRun.PreFinishedRoom, _state));
+            if (message.NoncombatRoom.Length > 0) await manager.EnterRoom(MultiplayerNoncombat.RestoreRoom(message.NoncombatRoom, _state));
+            else await manager.LoadIntoLatestMapCoord(AbstractRoom.FromSerializable(replay.serializableRun.PreFinishedRoom, _state));
             while (manager.ActionExecutor.IsPaused) await Frame(_generation);
             await ApplyMultiplayer(message);
             await NGame.Instance.Transition.FadeIn(.03f);
             CheckGeneration(_generation);
             if (_multiplayerRoomWaiting) return;
-            _sceneReady = true; Stage("多人原版战斗已同步（只读）");
+            _sceneReady = true; Stage("多人原版房间已同步（只读）");
         }
         catch (OperationCanceledException) { Stage("旧多人检查点已撤销"); }
         catch (Exception e) { _error = e.ToString(); GD.PrintErr("[RMP:MultiplayerReplay] " + e); }
@@ -73,7 +75,14 @@ internal sealed partial class MirrorRenderer
         foreach (var operation in message.Operations)
         {
             CheckGeneration(_generation);
-            if (operation.Kind != "multiplayer") throw new InvalidDataException("Unexpected multiplayer operation");
+            if (operation.Kind != "multiplayer")
+            {
+                var task = MultiplayerNoncombat.Apply(operation, _state!);
+                // Some native room decisions await another player's choice.
+                // Continue consuming the authoritative stream that resolves it.
+                if (task != null) TrackNoncombatTask(task, _generation);
+                _events++; await Frame(_generation); continue;
+            }
             var item = MirrorState.Unpack<CombatReplayEvent>(operation.Payload); var manager = RunManager.Instance;
             switch (item.eventType)
             {
@@ -94,5 +103,16 @@ internal sealed partial class MirrorRenderer
             }
             _events++; await Frame(_generation);
         }
+    }
+    private async void TrackNoncombatTask(Task task, long generation)
+    { try { await task; } catch (Exception e) { if (_generation == generation) { _error = e.ToString(); GD.PrintErr("[RMP:NoncombatReplay] " + e); } } }
+    private void ApplyNoncombatPresentation(MirrorMessage message)
+    {
+        var map = MegaCrit.Sts2.Core.Nodes.Screens.Map.NMapScreen.Instance;
+        if (map != null && map.IsTravelEnabled != message.MapTravelEnabled) map.SetTravelEnabled(message.MapTravelEnabled);
+        if (map != null && map.IsOpen != message.MapOpen) { if (message.MapOpen) map.Open(); else map.Close(false); }
+        if (NRun.Instance?.MerchantRoom is { } shop)
+            foreach (var inventory in LocalSpectatorSource.Descendants<MegaCrit.Sts2.Core.Nodes.Screens.Shops.NMerchantInventory>(shop))
+                if (inventory.IsOpen != message.ShopOpen) { if (message.ShopOpen) inventory.Open(); else MultiplayerNoncombat.Invoke(inventory, "Close"); }
     }
 }
