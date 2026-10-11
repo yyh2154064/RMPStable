@@ -1,11 +1,11 @@
-# RMPStable 新会话上下文：.12 基线 / .14 UI 待验收
+# RMPStable 新会话上下文：.14 开发基线 / .15 多人第一阶段待验收
 
-更新：2026-10-11。用户已手动验收通过 `0.3.9-multiInstance.12` 及此前单人功能。当前版本 `.14`，本轮修改导航栏、默认布局与用户新反馈的商店交互，用户明确要求计入 `.14`，不升 `.15`。此前 `.13` 和占卜结果未收到整体验收声明，保留待验收，不重复测试。旧功能清单和累积回归不恢复。
+更新：2026-10-11。用户指定 `.14` 为多人开发基线，并授权第一阶段开发与测试；当前候选版本 `0.3.9-multiInstance.15`，只完成内部多人通路和原版只读战斗副本，未开放多人窗口导航与操控。用户要求测试保持静默，不影响其游戏和电脑使用。`.12` 及此前功能已验收；`.13`、占卜和 `.14` 原待验收状态继续保留，不据“单人基本实现”推断整体验收、不重复旧测试。此前不升 `.15` 的要求属于上一轮 `.14` UI 修复。
 
 ## 必须持续遵守
 
 - 本机和 GitHub 只能有 `main`、`liveSharingTest`、`multiInstanceTest`，同名分支提交一致。不得另建分支/工作树，不以 detached HEAD 开发；`main` 不改名、不开发、不合并、不发布，除非用户特别授权。
-- `liveSharingTest` 保留本地模拟方案 `0.3.9-liveSharing.13`；`multiInstanceTest` 是当前原生多实例方案 `.14`。两个方案不能混合或自行互相合并。
+- `liveSharingTest` 保留本地模拟方案 `0.3.9-liveSharing.13`；`multiInstanceTest` 是当前原生多实例方案 `.15`，以 `.14` 开发。两个方案不能混合或自行互相合并。
 - 在现有测试分支正常提交和推送，不强推、不改写历史。开始先核对分支、工作树、工作区和资源，保留用户未提交改动。
 - 不额外占用 C 盘开发空间；复用唯一主仓库及 F 盘资源，不新增克隆、运行副本、重复引用、缓存和包备份。构建、测试档案及大文件输出放 F 盘。清理先核对精确目标和证据，不触及真实游戏、真实存档、主仓库或其他项目。
 - 用户允许在既定 F 盘范围内后台构建、运行、隔离测试和必要清理，不逐次询问。保持长时间静默开发、尽量少打断；已审核事项不重复审核。只在修改既定范围外、从未批准的内容时请求审批；系统权限边界仍须遵守。后台启动隐藏窗口。
@@ -22,6 +22,10 @@
 ## 本轮结果与待验收
 
 本节专项脚本和详细结果文档位于 `multiInstanceTest`；`liveSharingTest` 只同步交接规则与状态，不合并另一方案的代码或测试。
+
+- `.15` 多人第一阶段：真正的原版房主/客户端同房间可靠路由、订阅身份和版本校验、32 KiB 分片、不可变战斗检查点和四类原生事件增量；本机认证管道接入独立原版 Replay 副本，不加入房间、不保存、不操控。副本身份为所选角色，本体身份不变，保留原队伍槽位及同步编号；原版立绘位置与绘制顺序已检查。
+- 本轮唯一活动入口 `tools/Test-MultiplayerPhase1.ps1` / `tests/MultiplayerPhase1Probe`，最终 41 项通过（房主 21、客户端 20），证据 `F:/projectFile/RMPStable-development/evidence/multiplayer-enet-v1-20261011-140837`。`.111` 两玩家 localhost 原版 ENet，双来源各带原版副本；测试 Gambling Chip 的 Hook、双方出牌/选择/恢复、敌方与下一回合、状态 hash、身份、立绘及消息拒绝。双版本编译零警告/错误。所有进程 headless、静音、低优先级，无系统鼠标/焦点操作；专项进程退出、档案清理。未运行旧套件，后续不自动复测。
+- `.15` 尚待用户确认；多人 F8 入口、个人选择器、非战斗多人场景和远程操控未开放。Steam 跨电脑、三人以上、客户端间路由及可见 UI 未运行验证。数据可用性与缺口见 `docs/multiplayer-phase1.md`。`.15` 四文件候选包放 F 盘 `build/package/RMPStable`，桌面 `.14` 及当前游戏未替换，便于继续使用基线。
 
 - `.14` 本轮四项 UI：不可用翻页箭头隐藏且位置固定；顺序观战/控制 → 重置 → 图钉 → 关闭，三个图标按钮统一 36×36 逻辑尺寸和反馈，模式按钮高 28、在高 40 的导航栏居中；默认整个窗口高为游戏视口 1/2、贴右、位于可见状态栏和遗物行下方，观战并固定展开。
 - `.14` 用 `LayoutRevision=1402` 一次性迁移旧布局，随后保存的拖动、缩放、模式和图钉选择继续保留。顶部位置按实际可见状态栏控件与遗物计算；原版 TopBar 外层为全屏容器，不能用其底边。
@@ -51,15 +55,16 @@ GitHub：<https://github.com/yyh2154064/RMPStable>。唯一工作目录 `C:/Proj
 | 历史证据 / 旧本地模拟包 | `evidence` / `package-liveSharing13` |
 | 原版 PCK（只读） | `F:/SteamLibrary/steamapps/common/Slay the Spire 2/SlayTheSpire2.pck` |
 
-当前 `.14` DLL SHA-256：`AEE5C5217562315C20F51016B3F1E2E8198BB65DF883C907DA54FBE349178992`。四文件包交付位置仍为桌面 `RMPStable`；不含测试 harness，替换游戏 mods 后需重启加载。`.12` 已验收 DLL 历史 SHA：`F57AF11C85632C53F3843D0A4D217BEB7B837CF7F55BA6915E25DB4FB187B488`，不重新验收。专项日志和截图留在 F 盘 evidence，专项 profile 结束后清理。
+当前 `.15` 候选 DLL SHA-256：`68AE147A39315C7AEF1AC71BAC216889BDDF7077BACC3A261C332DA67BA3E758`，四文件包位于 F 盘 `build/package/RMPStable`，不含测试 harness。桌面 `RMPStable` 仍是 `.14`，DLL SHA-256：`AEE5C5217562315C20F51016B3F1E2E8198BB65DF883C907DA54FBE349178992`；桌面历史交接文档本轮未覆盖，当前状态以仓库本文为准。当前游戏未替换，替换 mods 后需重启加载。`.12` 已验收 DLL 历史 SHA：`F57AF11C85632C53F3843D0A4D217BEB7B837CF7F55BA6915E25DB4FB187B488`，不重新验收。专项日志和状态留在 F 盘 evidence，专项 profile 结束后清理。
 
 ## 后续可能用到的架构与入口
 
-多实例当前仅支持本机单人：本体是唯一权威，副本为独立 OS 进程中的原版界面；只传检查点、状态和原生操作。不要回退像素传输或手绘界面，也不能在同一进程建立第二个依赖原版单例的 `NRun`。操作保留权限、generation/epoch、事件数、hash、身份及合法性校验，副本不预测对局结果。独立 APPDATA/LOCALAPPDATA，测试只操作认证自有进程和隔离档案。
+公开窗口当前仍仅支持本机单人；多人第一阶段在内部实现只读原版战斗复制。多人对局仍由原版房主排序并判定，本机来源只提供原版状态和结果；副本为独立 OS 进程中的原版界面。不要回退像素传输或手绘界面，也不能在同一进程建立第二个依赖原版单例的 `NRun`。操作保留权限、generation/epoch、事件数、hash、身份及合法性校验，副本不预测对局结果。独立 APPDATA/LOCALAPPDATA，测试只操作认证自有进程和隔离档案。
 
 源码主要位于 `RMPStable/src/RemoveMultiplayerPlayerLimit/Features/LiveSharing`：
 
 - `MirrorHost` / `MirrorJournal` / `MirrorState`：权威、检查点、操作与校验；`MirrorEnding`：原版最终结算。
+- `MultiplayerMirrorSession` / `Network/RmpMirrorPacket`：多人订阅、房主路由、分片与来源元数据；`MirrorMultiplayerReplay`：多人原版 Replay 身份和四类事件消费。个人 UI、非战斗房间和操控留待后续阶段。
 - `MirrorRenderer` / `MirrorCardInput` / `MirrorKeyboard` / `MirrorPresentation` / `MirrorNativeUi`：输入和本地展示；`SpectatorCommands` / `SpectatorNativeUi`：本体执行与原版选择器。
 - `MirrorProcess` / `MirrorProtocol` / `MirrorNativeWindow`：进程、通信、窗口；`LiveSharingController` / `SpectatorView`：生命周期及外壳；`Features/QuickSl`：SL。
 
