@@ -24,7 +24,32 @@ internal sealed class MirrorHost : IDisposable
     internal bool Verified { get; private set; }
     internal Action<MirrorMessage>? Intent;
     internal MirrorWindowHost? Window { get; private set; }
-    internal MirrorHost(ulong source) => Process = new MirrorProcess(source);
+    internal readonly bool Multiplayer;
+    private readonly System.Collections.Generic.Queue<MultiplayerMirrorFrame> _multiFrames = new();
+    private MultiplayerMirrorFrame? _multiLatest;
+    internal MirrorHost(ulong source, bool multiplayer = false) { Multiplayer = multiplayer; Process = new MirrorProcess(source); }
+    internal void QueueMultiplayer(MultiplayerMirrorFrame frame)
+    {
+        if (!Multiplayer) throw new InvalidOperationException("Multiplayer frame on singleplayer mirror");
+        _multiLatest = frame;
+        if (frame.Kind != "load" && frame.Delta.Count == 0) return;
+        if (frame.Kind == "load") { _multiFrames.Clear(); Process.DisplayReady = false; Process.LastIdle = false; Verified = false; }
+        if (_multiFrames.Count >= 128) throw new InvalidOperationException("Multiplayer replica backlog exceeded");
+        _multiFrames.Enqueue(frame);
+    }
+    private void TickMultiplayer()
+    {
+        if (Process.Wire.Pending == 0 && _multiFrames.TryDequeue(out var frame))
+        {
+            if (frame.Kind == "load") { _generation = frame.Generation; Process.Wire.Identity.Generation = _generation; }
+            _ = Process.Wire.Send(new MirrorMessage { Kind = frame.Kind == "load" ? "load" : "events", Multiplayer = true,
+                Generation = frame.Generation, Index = frame.Start, Events = frame.Events, Payload = frame.Checkpoint,
+                Operations = frame.Delta.ConvertAll(p => new MirrorOperation { Kind = "multiplayer", Payload = p }) });
+        }
+        var current = _multiLatest;
+        SourceHash = current?.Hash ?? "";
+        Verified = current?.Settled == true && SourceHash.Length > 0 && Process.DisplayReady && Process.LastIdle && Process.LastEvents == current.Events && Process.LastHash == SourceHash;
+    }
     private bool _resetDirty;
     private bool _publishedReady;
     private string _publishedHash = "";
@@ -79,6 +104,7 @@ internal sealed class MirrorHost : IDisposable
             else { Error = "独立进程返回了不支持的消息"; Process.Dispose(); return; }
         }
         if (Error.Length > 0 || !Process.Authenticated) return;
+        if (Multiplayer) { TickMultiplayer(); return; }
         if (_resetDirty)
         {
             _resetDirty = false;
@@ -161,6 +187,7 @@ internal sealed class MirrorHost : IDisposable
     internal bool AuthorizeIntent(RunState state, MirrorMessage message) => Process.Wire.Identity.Current(message) && _control && message.Epoch == _controlEpoch && message.Events == Process.LastEvents && message.Hash == Process.LastHash && Authorize(state);
     internal void Control(bool enabled, long epoch)
     {
+        if (Multiplayer && enabled) throw new InvalidOperationException("Multiplayer phase one is read-only");
         _control = enabled; _controlEpoch = epoch; _controlDirty = true;
         if (Process.Authenticated && !_resetDirty && Process.Wire.Pending == 0)
         {

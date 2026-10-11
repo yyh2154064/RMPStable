@@ -102,7 +102,7 @@ internal sealed partial class MirrorRenderer : IDisposable
         _ = _wire.ConnectAsync();
         AudioServer.SetBusMute(0, true);
         if (DisplayServer.GetName() != "headless") DisplayServer.WindowSetFlag(DisplayServer.WindowFlags.NoFocus, true);
-        Engine.MaxFps = 120;
+        Engine.MaxFps = Environment.GetEnvironmentVariable("RMP_PHASE1_TEST") == "1" ? 30 : 120;
         if (DisplayServer.GetName() != "headless")
         {
             MirrorWin32.GetWindowRect(MirrorWin32.OwnWindow, out var startupRect);
@@ -155,7 +155,7 @@ internal sealed partial class MirrorRenderer : IDisposable
                     _presentationWheelScale = float.IsFinite(message.WheelScale) ? Math.Clamp(message.WheelScale, 1, 8) : 1; break;
                 case "control":
                     if (message.Epoch <= _epoch) break;
-                    _control = message.Control; _epoch = message.Epoch; _statusTimer = 0; CancelDrag(); _pressedUi = null;
+                    _control = message.Control && !Multiplayer; _epoch = message.Epoch; _statusTimer = 0; CancelDrag(); _pressedUi = null;
                     _pendingCards.Clear(); _submittedCard = null; _waitingForAuthority = false; break;
                 case "ready":
                     if (message.Generation == _desiredGeneration)
@@ -195,8 +195,7 @@ internal sealed partial class MirrorRenderer : IDisposable
                 if (stateMessage.Kind == "events") { _busy = true; TaskHelper.RunSafely(Apply(stateMessage)); break; }
             }
         if (_waitingForAuthority && _events > _submittedEvents) _waitingForAuthority = false;
-        ProcessLocalInput();
-        ProcessBufferedCards();
+        if (!Multiplayer) { ProcessLocalInput(); ProcessBufferedCards(); }
         RefreshRewardHover();
         if (_timerText.Length > 0 && _generation == _desiredGeneration && MirrorClock.Label is { } timer)
             timer.SetTextAutoSize(_timerText);
@@ -218,7 +217,7 @@ internal sealed partial class MirrorRenderer : IDisposable
             _statusTimer = .05; _lastIdle = idle;
             _ = _wire.Send(new MirrorMessage { Kind = "status", Generation = _generation, Events = _events, Idle = idle,
                 Epoch = _epoch, Control = _control,
-                Hash = idle && _replay != null ? CurrentHash : "", Hits = idle ? CaptureHits() : new(), Room = _error,
+                Hash = idle && _replay != null ? CurrentHash : "", Hits = idle && !Multiplayer ? CaptureHits() : new(), Room = _error,
                 DisplayReady = _sceneReady && _generation == _desiredGeneration && _state != null && NRun.Instance != null, Attached = _attached,
                 Phase = _phase, DrawFrames = _drawFrames,
                 WindowVisible = windowVisible,
@@ -272,7 +271,7 @@ internal sealed partial class MirrorRenderer : IDisposable
             " threshold=" + (transition.Material is ShaderMaterial material ? material.GetShaderParameter("threshold").AsSingle() : -1));
     }
     private float _presentationWheelScale = 1;
-    private bool NativeIdle => !_busy && _generation == _desiredGeneration && _error.Length == 0 && _state != null && _replay != null && (_finalSave != null || MirrorHost.SourceIdle);
+    private bool NativeIdle => !_busy && _generation == _desiredGeneration && _error.Length == 0 && _state != null && _replay != null && (_finalSave != null || (Multiplayer ? MultiplayerMirrorSession.Settled : MirrorHost.SourceIdle));
     private bool InterceptInput(uint message, nuint key, nint data)
     {
         if (MirrorWin32.Keyboard(message))
@@ -650,6 +649,8 @@ internal sealed partial class MirrorRenderer : IDisposable
     }
     private async Task Load(MirrorMessage message)
     {
+        if (message.Multiplayer) { await LoadMultiplayer(message); return; }
+        Multiplayer = false;
         try
         {
             _generation = message.Generation; _wire.Identity.Generation = _generation; _events = 0; _error = ""; _waitingForAuthority = false; _drawFrames = 0;
@@ -731,7 +732,8 @@ internal sealed partial class MirrorRenderer : IDisposable
         try
         {
             if (_state == null || _replay == null || _error.Length > 0) return;
-            await ReplayOperations(message.Operations);
+            if (Multiplayer) await ApplyMultiplayer(message);
+            else await ReplayOperations(message.Operations);
         }
         catch (OperationCanceledException) { Stage("旧回放任务已撤销"); }
         catch (Exception e) { _error = e.ToString(); GD.PrintErr("[RMP:Mirror] " + _error); }

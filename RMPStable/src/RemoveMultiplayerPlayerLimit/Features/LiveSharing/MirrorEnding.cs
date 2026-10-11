@@ -52,7 +52,7 @@ internal sealed partial class MirrorRenderer
 {
     private SerializableRun? _finalSave;
     private string _finalHash = "";
-    private string CurrentHash => _finalSave != null ? _finalHash : MirrorState.Hash(_state!);
+    private string CurrentHash => _finalSave != null ? _finalHash : Multiplayer ? MirrorState.MultiplayerHash(_state!) : MirrorState.Hash(_state!);
     private async Task PresentEnding(MirrorOperation ending, long generation)
     {
         CheckGeneration(generation);

@@ -39,6 +39,7 @@ internal static class PayloadMessageRegistration
 		MessageTypes.TypeToId<RmpExtendedReadyStateMessage>();
 		MessageTypes.TypeToId<RmpExtendedBeginRunMessage>();
 		MessageTypes.TypeToId<RmpSyncRequestMessage>();
+		MessageTypes.TypeToId<RmpMirrorPacket>();
 		MessageTypes.TypeToId<RmpQuickSlRequestMessage>();
 		MessageTypes.TypeToId<RmpQuickSlDecisionMessage>();
 		MessageTypes.TypeToId<RmpQuickSlBeginMessage>();

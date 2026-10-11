@@ -21,11 +21,17 @@ internal static class MirrorState
     internal static T Unpack<T>(byte[] bytes) where T : IPacketSerializable, new()
     { var reader = new PacketReader(); reader.Reset(bytes); return reader.Read<T>(); }
     internal static string Hash(RunState state)
+        => HashCore(state, false);
+    internal static string MultiplayerHash(RunState state)
+        => HashCore(state, true);
+    private static string HashCore(RunState state, bool multiplayer)
     {
         if (MirrorJournal.EndHash(state) is { } ended) return ended;
         var saved = RunManager.Instance.ToSave(null);
         saved.SaveTime = saved.StartTime = saved.RunTime = saved.WinTime = 0;
         saved.NumReloads = 0; saved.MapDrawings = null;
+        // Replay never connects to Steam. Transport identity is not game state.
+        if (multiplayer) saved.PlatformType = MegaCrit.Sts2.Core.Platform.PlatformType.None;
         // Hover tips mark models as seen in each isolated profile. Those
         // presentation discoveries can differ without changing the run.
         foreach (var player in saved.Players)

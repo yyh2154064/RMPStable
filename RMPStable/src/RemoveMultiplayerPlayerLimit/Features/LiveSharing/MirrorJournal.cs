@@ -77,6 +77,8 @@ internal static partial class MirrorJournal
         Patch(typeof(GodotObject).GetMethod("EmitSignal", new[] { typeof(StringName), typeof(Variant[]) })!, nameof(SignalEmitted), finalizer: nameof(EndUi));
         Patch(typeof(NMerchantSlot).GetMethod("OnSelected", Any)!, nameof(MerchantSelected), finalizer: nameof(EndUi));
         Patch(typeof(NetReplayGameService).GetProperty("Type")!.GetMethod!, postfix: nameof(ReplicaServiceType));
+        Patch(typeof(NetReplayGameService).GetConstructor(new[] { typeof(ulong) })!, prefix: nameof(ReplicaSource));
+        Patch(typeof(RunManager).GetProperty("ShouldSave")!.GetMethod!, postfix: nameof(ReplicaShouldSave));
         Patch(typeof(NCardPlay).GetMethod("TryPlayCard", Any)!, prefix: nameof(ReplicaCardPlay));
         Patch(typeof(Viewport).GetMethod("GetMousePosition")!, postfix: nameof(ReplicaMousePosition));
         Patch(typeof(NTargetManager).GetMethod("FinishTargeting", Any)!, prefix: nameof(TargetFinished), finalizer: nameof(EndUi));
@@ -103,8 +105,12 @@ internal static partial class MirrorJournal
         _installed = true;
     }
     private static void ReplicaServiceType(ref NetGameType __result)
-    { if (MirrorRenderer.IsRenderer && ReplicaActive) __result = NetGameType.Singleplayer; }
+    { if (MirrorRenderer.IsRenderer && ReplicaActive && MirrorRenderer.Active?.Multiplayer != true) __result = NetGameType.Singleplayer; }
     private static bool ReplicaTimerTick() => !MirrorRenderer.IsRenderer;
+    private static void ReplicaSource(ref ulong netId)
+    { if (MirrorRenderer.Active?.Multiplayer == true) netId = MirrorRenderer.Active.ViewSource; }
+    private static void ReplicaShouldSave(ref bool __result)
+    { if (MirrorRenderer.Active?.Multiplayer == true) __result = false; }
     private static bool ReplicaCardPlay(NCardPlay __instance, Creature? target)
     {
         if (!MirrorRenderer.IsRenderer) return true;

@@ -59,6 +59,7 @@ internal static partial class LiveSharingController
         var state = GameStateAccessor.GetRunState();
         if (SourceMenuOpen && !_sourceMenuStarting && (state == null || NCapstoneContainer.Instance?.CurrentCapstoneScreen == null && NModalContainer.Instance?.OpenModal == null)) SourceMenuOpen = false;
         var service = RunManager.Instance.NetService;
+        MultiplayerMirrorSession.Tick(delta);
         if (!RunManager.Instance.IsInProgress && SaveManager.Instance.IsProfileInitialized && NGame.Instance?.MainMenu?.IsNodeReady() == true &&
             service?.Type is not NetGameType.Host and not NetGameType.Client) EnsureMirror(1);
         bool local = RunManager.Instance.IsInProgress && state?.Players.Count == 1 && NRun.Instance?.IsNodeReady() == true && service != null && service.Type != NetGameType.Host && service.Type != NetGameType.Client;

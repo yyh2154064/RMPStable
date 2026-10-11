@@ -128,7 +128,7 @@ internal sealed class MirrorProcess : IDisposable
         Child.BeginOutputReadLine(); Child.BeginErrorReadLine();
         // The renderer participates in interactive input. Artificially lowering
         // its scheduling priority causes avoidable latency under source load.
-        try { Child.PriorityClass = ProcessPriorityClass.Normal; } catch { }
+        try { Child.PriorityClass = Environment.GetEnvironmentVariable("RMP_PHASE1_TEST") == "1" ? ProcessPriorityClass.BelowNormal : ProcessPriorityClass.Normal; } catch { }
         _ = Wire.ConnectAsync();
     }
     public void Dispose()
