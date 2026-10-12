@@ -74,9 +74,9 @@ internal static partial class MultiplayerMirrorSession
     { if (!MirrorRenderer.IsRenderer && _controlViewer != 0 && _service?.NetId == __0.OwnerId) _controlRevision++; }
     private static string ControlId(object model)
     { if (!ControlIds.TryGetValue(model, out var id)) ControlIds[model] = id = "battle:" + ++_controlId; return id; }
-    private static bool InBattle => _state != null && _checkpoint != null &&
+    private static bool InBattle => InFinal || _state != null && _checkpoint != null &&
         (_state.CurrentRoom is CombatRoom && ReferenceEquals(_checkpoint, MirrorState.CurrentReplay) ||
-         ReferenceEquals(_state.CurrentRoom, MultiplayerNoncombat.SourceRoom) && ReferenceEquals(_checkpoint, MultiplayerNoncombat.Checkpoint));
+         MultiplayerNoncombat.IsCurrent(_state) && ReferenceEquals(_checkpoint, MultiplayerNoncombat.Checkpoint));
     private static bool _permissionCombat;
     internal static void RequestControl(bool enabled)
     {
@@ -172,7 +172,7 @@ internal static partial class MultiplayerMirrorSession
                 _lastControlRequest = request.Id;
                 var control = CaptureBattleControl();
                 reason = "玩家状态或选择已变化，请等待刷新";
-                if (request.Context == control.Context && request.Events >= 0 && request.Events <= _checkpoint!.events.Count + MultiplayerNoncombat.Operations.Count)
+                if (request.Context == control.Context && request.Events >= 0 && request.Events <= (_checkpoint?.events.Count ?? 0) + MultiplayerNoncombat.Operations.Count + (InFinal ? FinalOperations.Count : 0))
                 {
                     var action = control.Actions.FirstOrDefault(a => a.Id == request.Action && a.Enabled);
                     if (action != null && (!action.RequiresTarget || action.TargetIds.Contains(request.Target)))
@@ -193,9 +193,9 @@ internal static partial class MultiplayerMirrorSession
         => Send(viewer, token, new() { Kind = "control-result", Build = MirrorState.Build, Session = _session, Generation = _generation, Request = request, Accepted = accepted, Reason = reason });
     private static void ForwardControlIntent(MirrorMessage message)
     {
-        if (_selected == 0) return;
-        Send(_selected, _token, new() { Kind = "control-intent", Build = MirrorState.Build, Session = _remoteSession, Generation = message.Generation,
-            Request = new() { Epoch = message.Epoch, Id = message.Request, Generation = message.Generation, Events = message.Events, Context = message.Value, Action = message.NodeKey, Target = message.TargetKey } });
+        if (_selected == 0 || Mirror is not { } mirror || message.Generation != mirror.LocalGeneration || mirror.SourceGeneration != _receivedGeneration || _receivedGeneration == 0) return;
+        Send(_selected, _token, new() { Kind = "control-intent", Build = MirrorState.Build, Session = _remoteSession, Generation = _receivedGeneration,
+            Request = new() { Epoch = message.Epoch, Id = message.Request, Generation = _receivedGeneration, Events = message.Events, Context = message.Value, Action = message.NodeKey, Target = message.TargetKey } });
     }
     private static void ReceiveControlResult(MultiplayerMirrorFrame frame)
     {
@@ -203,10 +203,12 @@ internal static partial class MultiplayerMirrorSession
         if (frame.Request == null) { ControlRequested = false; return; }
         if (Mirror is not { } mirror) return;
         var request = frame.Request;
-        _ = mirror.Process.Wire.Send(new MirrorMessage { Kind = "result", Generation = request.Generation, Epoch = request.Epoch, Request = request.Id, Accepted = frame.Accepted, Room = frame.Reason });
+        if (request.Generation != mirror.SourceGeneration) return;
+        _ = mirror.Process.Wire.Send(new MirrorMessage { Kind = "result", Generation = mirror.LocalGeneration, Epoch = request.Epoch, Request = request.Id, Accepted = frame.Accepted, Room = frame.Reason });
     }
     private static MultiplayerControlView CaptureBattleControl()
     {
+        if (InFinal) return CaptureFinalControl();
         if (!CombatManager.Instance.IsInProgress && !CombatManager.Instance.IsStarting) return CaptureRoomControl();
         var view = new MultiplayerControlView { Epoch = _permissionEpoch }; var player = LocalContext.GetMe(_state); var state = player?.PlayerCombatState;
         if (player == null || state == null) return view;
@@ -245,7 +247,7 @@ internal static partial class MultiplayerMirrorSession
 #else
         bool canUsePotions = player.CanRemovePotions;
 #endif
-        foreach (var potion in player.Potions.Where(p => !p.IsQueued && canUsePotions))
+        foreach (var potion in player.Potions.Where(p => !p.IsQueued && canUsePotions && p.PassesCustomUsabilityCheck))
         {
             bool targeted = potion.TargetType is TargetType.AnyEnemy or TargetType.AnyAlly or TargetType.AnyPlayer;
             var targets = creatures.Where(c => potion.IsValidTarget(c)).Select(ControlId).ToList();
@@ -257,6 +259,7 @@ internal static partial class MultiplayerMirrorSession
     }
     private static bool ExecuteBattleAction(ControlActionSnapshot action, string targetId, MultiplayerControlView view)
     {
+        if (action.Kind == "ending") return ExecuteFinalAction(action);
         if (action.Kind is "native" or "buy") return ExecuteRoomAction(action);
         if (action.Kind == "select")
         {
@@ -270,7 +273,7 @@ internal static partial class MultiplayerMirrorSession
         }
         var player = LocalContext.GetMe(_state)!; var state = player.PlayerCombatState!;
         var target = view.Targets.FirstOrDefault(t => t.Id == targetId);
-        var creature = target == null ? null : player.Creature.CombatState.Creatures.ElementAtOrDefault(target.NativeIndex);
+        var creature = target == null ? null : (CombatManager.Instance.IsInProgress ? player.Creature.CombatState.Creatures.ToList() : _state!.Players.Select(p => p.Creature).ToList()).ElementAtOrDefault(target.NativeIndex);
         switch (action.Kind)
         {
             case "play": return state.Hand.Cards[action.NativeIndex].TryManualPlay(creature);

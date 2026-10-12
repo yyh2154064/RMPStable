@@ -37,7 +37,7 @@ internal static partial class LiveSharingController
     internal static bool MapInputInPanel => _source?.MapInputInPanel == true || _mirror?.Window?.PointerInside == true;
     internal static void ProcessFrame(double delta)
     {
-        try { Process(delta); }
+        try { Process(delta); if (!MirrorRenderer.IsRenderer) MirrorResident.TickUnleased(_mirror, delta); }
         catch (Exception e)
         {
             if (_lastError != e.Message) Log.Warn("[RMP:Mirror] " + e);
@@ -60,7 +60,7 @@ internal static partial class LiveSharingController
         if (SourceMenuOpen && !_sourceMenuStarting && (state == null || NCapstoneContainer.Instance?.CurrentCapstoneScreen == null && NModalContainer.Instance?.OpenModal == null)) SourceMenuOpen = false;
         var service = RunManager.Instance.NetService;
         MultiplayerMirrorSession.Tick(delta);
-        if (!RunManager.Instance.IsInProgress && SaveManager.Instance.IsProfileInitialized && NGame.Instance?.MainMenu?.IsNodeReady() == true &&
+        if (!MultiplayerMirrorSession.IsRestoring && !RunManager.Instance.IsInProgress && SaveManager.Instance.IsProfileInitialized && NGame.Instance?.MainMenu?.IsNodeReady() == true &&
             service?.Type is not NetGameType.Host and not NetGameType.Client) EnsureMirror(1);
         bool local = RunManager.Instance.IsInProgress && state?.Players.Count == 1 && NRun.Instance?.IsNodeReady() == true && service != null && service.Type != NetGameType.Host && service.Type != NetGameType.Client;
         if (service?.Type is NetGameType.Host or NetGameType.Client)
@@ -101,7 +101,7 @@ internal static partial class LiveSharingController
     internal static void Open(RunState state)
     {
         if (_view != null) return;
-        if (_mirror?.Error.Length > 0) { _mirror.Dispose(); _mirror = null; _openFailed = false; }
+        if (_mirror?.Error.Length > 0) { MirrorResident.Release(_mirror); _mirror = null; _openFailed = false; }
         EnsureMirror(state);
         _session = NRun.Instance.GetInstanceId(); _source ??= new LocalSpectatorSource();
         float relicBottom = LocalSpectatorSource.Descendants<MegaCrit.Sts2.Core.Nodes.Relics.NRelicInventoryHolder>(NRun.Instance.GlobalUi.RelicInventory)
@@ -118,9 +118,8 @@ internal static partial class LiveSharingController
         if (_viewMultiplayer) { ShowMultiplayerSource(MultiplayerMirrorSession.Selected.ToString(), true); return; }
         var state = GameStateAccessor.GetRunState();
         if (MirrorRenderer.IsRenderer || _restoring || state?.Players.Count != 1 || RunManager.Instance.NetService?.Type != NetGameType.Singleplayer) return;
-        // Reconstruct only our authenticated replica from the original journal.
-        // The source run, save, RNG and combat checkpoint are never reloaded.
-        HideView(); _mirror?.Dispose(); _mirror = null; _openFailed = false;
+        // Reconstruct the native scene in the same authenticated process.
+        HideView(); MirrorResident.Release(_mirror); _mirror = null; _openFailed = false;
         GD.Print("[RMP:Mirror:Recovery] rebuilding replica from checkpoint and " + MirrorJournal.Operations.Count + " operations");
         Open(state);
     }
@@ -129,10 +128,10 @@ internal static partial class LiveSharingController
     private static void EnsureMirror(ulong source)
     {
         if (_openFailed) return;
-        if (_mirror != null && _mirror.Process.Wire.Identity.Source != source) Suspend();
+        if (_mirror != null && (_mirror.ViewSource != source || _mirror.Multiplayer)) Suspend();
         if (_mirror != null) return;
         // Prewarm when a singleplayer run is ready, before the first F8.
-        _mirror = new MirrorHost(source);
+        _mirror = MirrorResident.Acquire(source, multiplayer: false);
         _mirror.Intent = message =>
         {
             var current = GameStateAccessor.GetRunState();
@@ -152,7 +151,7 @@ internal static partial class LiveSharingController
         if (!MirrorRenderer.IsRenderer && _restoring && _restorePrepared)
         {
             if (GameStateAccessor.GetRunState() is { } state) MirrorJournal.EnsureCheckpoint(state);
-            if (MirrorJournal.Checkpoint is { } replay && !ReferenceEquals(replay, _restoreOldCheckpoint)) _mirror?.PublishCheckpoint(replay, true);
+            if (MirrorJournal.Checkpoint is { } replay && !ReferenceEquals(replay, _restoreOldCheckpoint)) _mirror?.PublishCheckpoint(replay, true, normalOpening: true);
         }
     }
     private static SpectatorCommandResult Execute(RunState state, SpectatorCommand command)
@@ -228,6 +227,6 @@ internal static partial class LiveSharingController
     internal static void Suspend()
     {
         SourceMenuOpen = _sourceMenuStarting = false;
-        HideView(); _mirror?.Dispose(); _mirror = null; _source?.Dispose(); _source = null; _session = 0;
+        HideView(); MirrorResident.Release(_mirror); _mirror = null; _source?.Dispose(); _source = null; _session = 0;
     }
 }

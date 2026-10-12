@@ -18,7 +18,7 @@ $repository = 'yyh2154064/RMPStable'
 $modId = 'RMPStable'
 $modDirectory = Split-Path -Parent $env:RMP_UPDATE_SELF
 $tempRoot = $null
-$userAgent = 'RMPStable-Updater/0.3.9'
+$userAgent = 'RMPStable-Updater/0.4.0'
 
 function Write-Step([string]$message) {
     Write-Host "`n==> $message" -ForegroundColor Cyan
@@ -233,6 +233,10 @@ try {
     $newManifest = Read-ModManifest (Join-Path $downloadedModDirectory 'RMPStable.json')
     if ($newManifest.id -ne $modId -or [string]::IsNullOrWhiteSpace([string]$newManifest.version)) {
         throw 'The release package contains an invalid RMPStable.json.'
+    }
+    $packageComparison = Compare-NumericVersions ([string]$newManifest.version) $releaseVersion
+    if ($null -eq $packageComparison -or $packageComparison -ne 0) {
+        throw "Release tag $releaseTag does not match package version $($newManifest.version). Local files were not changed."
     }
 
     Write-Step 'Installing DLL, PCK, and manifest'

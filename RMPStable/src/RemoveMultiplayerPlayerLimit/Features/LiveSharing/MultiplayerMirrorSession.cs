@@ -59,6 +59,7 @@ internal static partial class MultiplayerMirrorSession
     private static RunState? _state;
     private static string _session = "", _token = "", _remoteSession = "";
     private static ulong _selected;
+    private static ulong _nextSubscribe;
     private static int _transfer;
     private static long _generation, _receivedGeneration;
     private static int _receivedEvents;
@@ -80,13 +81,14 @@ internal static partial class MultiplayerMirrorSession
     internal static int SentFrames { get; private set; }
     internal static int ReceivedFrames { get; private set; }
     internal static int RejectedPackets { get; private set; }
-    internal static bool Settled => NRun.Instance != null && !CombatManager.Instance.IsStarting &&
+    internal static bool Settled => NRun.Instance != null && (RunManager.Instance.DebugOnlyGetState()?.IsGameOver == true || !CombatManager.Instance.IsStarting &&
         !CombatManager.Instance.EndingPlayerTurnPhaseOne && !CombatManager.Instance.EndingPlayerTurnPhaseTwo &&
-        !RunManager.Instance.ActionExecutor.IsRunning && !RunManager.Instance.ActionExecutor.IsPaused;
+        !RunManager.Instance.ActionExecutor.IsRunning && !RunManager.Instance.ActionExecutor.IsPaused);
     internal static void Tick(double delta)
     {
         if (MirrorRenderer.IsRenderer) return;
         var service = RunManager.Instance.NetService; var state = RunManager.Instance.DebugOnlyGetState();
+        if (ProcessQuickSlRestore(service, state, delta)) return;
         if (service?.Type is not NetGameType.Host and not NetGameType.Client || state == null || !service.IsConnected) { Reset(); return; }
         if (!ReferenceEquals(_service, service) || !ReferenceEquals(_state, state))
         {
@@ -94,11 +96,21 @@ internal static partial class MultiplayerMirrorSession
             service.RegisterMessageHandler<RmpMirrorPacket>(Receive);
         }
         if (_selected != 0 && !Connected(_selected)) { Error = "多人来源已离线"; Stop(); }
+        // Quick SL peers finish native room loading at different times. A
+        // reliable packet received before the peer installs this handler has
+        // no subscriber yet; retry the same authenticated token until its ack.
+        if (_selected != 0 && _remoteSession.Length == 0 && Time.GetTicksMsec() >= _nextSubscribe)
+        {
+            _nextSubscribe = Time.GetTicksMsec() + 1000;
+            Send(_selected, _token, new MultiplayerMirrorFrame { Kind = "subscribe", Build = MirrorState.Build });
+        }
         foreach (var key in Fragments.Where(p => Time.GetTicksMsec() - p.Value.Began > 15000).Select(p => p.Key).ToArray())
         { Fragments[key].Buffer.Dispose(); Fragments.Remove(key); }
         TickControl(); Mirror?.Tick(null, delta); _timer -= delta; if (_timer > 0) return; _timer = .1;
         // Do not reset or mutate the source game's original replay writer.
-        bool noncombat = ReferenceEquals(MultiplayerNoncombat.State, state) && ReferenceEquals(MultiplayerNoncombat.SourceRoom, state.CurrentRoom) && MultiplayerNoncombat.Checkpoint != null;
+        // An event-owned fight is reconstructed from its original event and
+        // ordered decisions/actions. Its unfinished CombatRoom cannot be saved.
+        bool noncombat = MultiplayerNoncombat.IsCurrent(state);
         var replay = noncombat ? MultiplayerNoncombat.Checkpoint : MirrorState.CurrentReplay;
         if (replay == null || !noncombat && state.CurrentRoom is not MegaCrit.Sts2.Core.Rooms.CombatRoom)
         {
@@ -120,7 +132,7 @@ internal static partial class MultiplayerMirrorSession
         {
             if (!Connected(pair.Key)) { Subscribers.Remove(pair.Key); continue; }
             var sub = pair.Value; bool load = sub.Generation != _generation; int start = load ? 0 : sub.Events;
-            var operations = replay.events.Select(e => new MirrorOperation { Kind = "multiplayer", Payload = MirrorState.Pack(e) }).Concat(MultiplayerNoncombat.Operations).ToList();
+            var operations = replay.events.Select(e => new MirrorOperation { Kind = "multiplayer", Payload = MirrorState.Pack(e) }).Concat(MultiplayerNoncombat.Operations).Concat(InFinal ? FinalOperations : Enumerable.Empty<MirrorOperation>()).ToList();
             if (start > operations.Count) { Error = "Native replay prefix shortened"; continue; }
             var frame = Capture(load ? "load" : "delta");
             frame.Authority = ControlFor(pair.Key, sub.Token);
@@ -133,15 +145,25 @@ internal static partial class MultiplayerMirrorSession
     internal static void Select(ulong source)
     {
         if (_service == null || _state?.GetPlayer(source) == null || !Connected(source)) throw new InvalidOperationException("Source is not in this room");
-        Stop(); _selected = source; _token = Guid.NewGuid().ToString("N"); Error = "";
-        Mirror = new MirrorHost(source, multiplayer: true);
+        bool reuse = Mirror?.CanReuse == true;
+        if (reuse) { Unsubscribe(); Mirror!.SwitchMultiplayerSource(source); }
+        else Stop();
+        _selected = source; _token = Guid.NewGuid().ToString("N"); Error = "";
+        if (!reuse) Mirror = MirrorResident.Acquire(source, multiplayer: true);
         Mirror.Intent = ForwardControlIntent;
+        _nextSubscribe = Time.GetTicksMsec() + 1000;
         Send(source, _token, new MultiplayerMirrorFrame { Kind = "subscribe", Build = MirrorState.Build });
     }
+    internal static void Reload(ulong source) { Stop(); Select(source); }
     internal static void Stop()
     {
+        IsRestoring = false; _restoreState = null; _restorePlayers = Array.Empty<ulong>();
+        Unsubscribe(); MirrorResident.Release(Mirror); Mirror = null;
+    }
+    private static void Unsubscribe()
+    {
         if (_selected != 0 && _service?.IsConnected == true) Send(_selected, _token, new MultiplayerMirrorFrame { Kind = "unsubscribe" });
-        Mirror?.Dispose(); Mirror = null; Latest = null; _selected = 0; _token = _remoteSession = ""; ControlRequested = false;
+        Latest = null; _selected = 0; _token = _remoteSession = ""; ControlRequested = false;
         _receivedEvents = 0; _receivedGeneration = 0;
     }
     private static void Reset()
@@ -152,6 +174,7 @@ internal static partial class MultiplayerMirrorSession
         Stop(); _service.UnregisterMessageHandler<RmpMirrorPacket>(Receive); _service = null; _state = null;
         Subscribers.Clear(); foreach (var part in Fragments.Values) part.Buffer.Dispose(); Fragments.Clear();
         _checkpoint = null; _base = Array.Empty<byte>(); _generation = 0;
+        _finalState = null; FinalOperations.Clear();
     }
     private static bool Connected(ulong id)
     {

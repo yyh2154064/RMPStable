@@ -13,6 +13,13 @@ namespace RemoveMultiplayerPlayerLimit.Features.LiveSharing;
 
 internal sealed partial class MirrorRenderer
 {
+    private bool? _localMapOpen;
+    private void ClickPresentation(MegaCrit.Sts2.Core.Nodes.GodotExtensions.NClickableControl button)
+    {
+        button.ForceClick();
+        if (button == NRun.Instance?.GlobalUi.TopBar.Map)
+            _localMapOpen = MegaCrit.Sts2.Core.Nodes.Screens.Map.NMapScreen.Instance?.IsOpen;
+    }
     private NPotionPopup? PotionPopup => NRun.Instance == null ? null : LocalSpectatorSource.Descendants<NPotionPopup>(NRun.Instance)
         .LastOrDefault(p => !p.IsMarkedForRemoval && p.IsVisibleInTree());
     private bool TryCancelPotionPopup(Vector2 point)

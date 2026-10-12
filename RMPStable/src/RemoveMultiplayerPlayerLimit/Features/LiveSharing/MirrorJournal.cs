@@ -65,6 +65,7 @@ internal static partial class MirrorJournal
     {
         if (_installed) return;
         MirrorFastRestore.Initialize();
+        MirrorCursor.Initialize();
         MultiplayerPersonalUi.Initialize();
         MirrorRenderer.InstallMultiplayerPotionGate();
         MultiplayerMirrorSession.InstallBattleInputTracking();
@@ -112,7 +113,7 @@ internal static partial class MirrorJournal
     { if (MirrorRenderer.IsRenderer && ReplicaActive && MirrorRenderer.Active?.Multiplayer != true) __result = NetGameType.Singleplayer; }
     private static bool ReplicaTimerTick() => !MirrorRenderer.IsRenderer;
     private static void ReplicaSource(ref ulong netId)
-    { if (MirrorRenderer.Active?.Multiplayer == true) netId = MirrorRenderer.Active.ViewSource; }
+    { if (MirrorRenderer.IsRenderer && MirrorRenderer.Active is { } renderer) netId = renderer.ViewSource; }
     private static void ReplicaShouldSave(ref bool __result)
     { if (MirrorRenderer.Active?.Multiplayer == true) __result = false; }
     private static bool ReplicaCardPlay(NCardPlay __instance, Creature? target)
@@ -165,11 +166,13 @@ internal static partial class MirrorJournal
     private static void ForcedButton(NClickableControl __instance, out bool __state)
     {
         __state = false;
+        MultiplayerMirrorSession.RecordFinalButton(__instance);
         if (__instance.IsEnabled && !MirrorNativeUi.IgnoreButton(__instance)) BeginUi(__instance, "button", out __state);
     }
     private static void ReleasedButton(NClickableControl __instance, out bool __state)
     {
         __state = false;
+        if ((bool)typeof(NClickableControl).GetField("_isPressed", Any)!.GetValue(__instance)!) MultiplayerMirrorSession.RecordFinalButton(__instance);
         if ((bool)typeof(NClickableControl).GetField("_isPressed", Any)!.GetValue(__instance)! && !MirrorNativeUi.IgnoreButton(__instance)) BeginUi(__instance, "button", out __state);
     }
     private static void SignalEmitted(GodotObject __instance, StringName signal, out bool __state)

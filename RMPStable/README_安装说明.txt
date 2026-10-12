@@ -1,4 +1,4 @@
-RMP Stable v0.3.9
+RMP Stable v0.4.0
 =================
 
 适用游戏版本：Slay the Spire 2 v0.107.1、v0.111.0 Public Beta
@@ -15,10 +15,19 @@ RMP Stable v0.3.9
    模组会在启动时自动识别 v0.107.1 或 v0.111.0，无需切换 DLL。
 4. 建议房主重新加载存档后再让其他玩家加入；首次验证建议新开一局。
 5. 后续更新可在关闭游戏后双击模组目录内的 update.cmd；脚本会从 GitHub 最新正式版
-   中下载并替换 DLL、PCK、JSON。0.3.7 的原更新脚本也可直接安装 0.3.9。
-   发布时必须创建标签 v0.3.9 的 GitHub Release，将 RMPStable-v0.3.9.zip
+   中下载并替换 DLL、PCK、JSON。0.3.7 的原更新脚本也可直接安装 0.4.0。
+   发布时必须创建标签 v0.4.0 的 GitHub Release，将 RMPStable-v0.4.0.zip
    作为附件上传，并将该 Release 设为 Latest；仅上传到仓库文件列表无法被更新脚本找到。
 
+本次 v0.4.0 更新：
+- F8 单人/多人原生观战及授权操控窗口；所选角色位于全队立绘最前。
+- 支持战斗、队友药水、地图投票、事件、商店、火堆、宝箱、奖励和胜败结算继续。
+- 切换来源、快速SL、重置和同进程再开局复用同一副本，正常操作不销毁进程。
+- 修复地图按钮、玩家信息、遗物放大/光标缩放、返回按钮、药水取消、无钱商店反馈及死亡/结算绘图。
+- 补齐占卜、灯火钥匙及洁净回放同步；单人/多人SL后的注能和连锁出牌按原版速度播放。
+- 普通多人SL进入游戏后的完整窗口就绪实测0.54～1.51秒；长历史切换3.06～3.68秒，三秒目标仍未全部达成。
+- 多人窗口已做三名不同角色本机原版ENet专项；跨电脑Steam与更多人数窗口待验证，用户手动验收待反馈。
+- 详细使用说明与限制见 README-multiInstance.md；合并main不代表已经发布GitHub Release。
 内置功能：
 - 将多人联机人数上限提高到 16 人。
 - 扩展大厅协议、玩家槽位及多人场景布局。
@@ -51,9 +60,9 @@ DLL 中的本地化路径也已改为 res://RMPStable/localization/。
 触发“多人游戏数据不同步”。本模组不会注册该重复奖励处理器。
 
 启动日志应出现：
-[RMP Stable] Initializing standalone v0.3.9 for STS2 v0.107.1...
+[RMP Stable] Initializing native multi-instance v0.4.0 for STS2 v0.107.1...
 或
-[RMP Stable] Initializing standalone v0.3.9 for STS2 v0.111.0 Public Beta...
+[RMP Stable] Initializing native multi-instance v0.4.0 for STS2 v0.111.0 Public Beta...
 
 验证建议：
 使用 5～6 人新局，经过至少一个宝箱房后连续切换若干楼层。如果仍然发生不同步，

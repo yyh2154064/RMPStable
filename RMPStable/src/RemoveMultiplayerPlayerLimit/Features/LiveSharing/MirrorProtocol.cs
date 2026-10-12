@@ -18,6 +18,9 @@ internal sealed class MirrorMessage
     public string Session { get; set; } = "";
     public string Secret { get; set; } = "";
     public ulong Source { get; set; }
+    // The authenticated pipe keeps its original process identity. Only a
+    // source-owned load may change the player observed by that process.
+    public ulong ViewSource { get; set; }
     public long Sequence { get; set; }
     public long Generation { get; set; }
     public string Kind { get; set; } = "";
@@ -36,6 +39,7 @@ internal sealed class MirrorMessage
     public MultiplayerControlView? Authority { get; set; }
     public string TargetKey { get; set; } = "";
     public bool FastRestore { get; set; }
+    public bool NormalOpening { get; set; }
     public bool Accepted { get; set; }
     public bool DisplayReady { get; set; }
     public bool Attached { get; set; }

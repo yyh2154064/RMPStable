@@ -400,9 +400,8 @@ internal static class QuickSlController
 				}
 			}
 			else await NGame.Instance.LoadRun(runState, save.PreFinishedRoom);
-			if (MegaCrit.Sts2.Core.Nodes.Rooms.NCombatRoom.Instance != null)
-				while (!LiveSharing.LocalSpectatorSource.PendingNativeChoice && (MegaCrit.Sts2.Core.Combat.CombatManager.Instance.IsStarting || MegaCrit.Sts2.Core.Combat.CombatManager.Instance.IsInProgress && runState.Players[0].PlayerCombatState?.Phase != MegaCrit.Sts2.Core.Combat.PlayerTurnPhase.Play))
-					await NGame.Instance.ToSignal(NGame.Instance.GetTree(), SceneTree.SignalName.ProcessFrame);
+            // Native opening effects are visible gameplay. Fade in as soon as
+            // the room exists, rather than hiding them until the play phase.
 			LiveSharing.MirrorFastRestore.Source = false;
 			RestoreStage("native player phase");
 			await NGame.Instance.Transition.FadeIn(0.03f);
@@ -504,6 +503,7 @@ internal static class QuickSlController
 		};
 		_recovery.ExpectedPlayers.Add(message.HostId);
 		_recovery.ExpectedPlayers.Add(_boundService.NetId);
+		LiveSharing.MultiplayerMirrorSession.BeginQuickSlRestore();
 		Log.Info($"[RMP:QuickSL] Client recovery started (host={message.HostId}, previousLobby={message.PreviousLobbyId}, timeout={ClientReconnectTimeoutSeconds}s).");
 		TaskHelper.RunSafely(ReturnAndReconnectClientAsync(_recovery));
 	}
@@ -531,6 +531,7 @@ internal static class QuickSlController
 				IsHost = true
 			};
 			_recovery = recovery;
+			LiveSharing.MultiplayerMirrorSession.BeginQuickSlRestore();
 			service.SendMessage(new RmpQuickSlBeginMessage
 			{
 				OperationId = recovery.OperationId,
@@ -838,6 +839,7 @@ internal static class QuickSlController
 
 	private static void FailClientRecovery(RecoveryState recovery, string reason)
 	{
+		LiveSharing.MultiplayerMirrorSession.CancelQuickSlRestore();
 		if (recovery.AutoStartCancelled)
 		{
 			return;
@@ -855,6 +857,7 @@ internal static class QuickSlController
 
 	private static void FailHostRecovery(RecoveryState recovery, string reason)
 	{
+		LiveSharing.MultiplayerMirrorSession.CancelQuickSlRestore();
 		if (recovery.AutoStartCancelled)
 		{
 			return;

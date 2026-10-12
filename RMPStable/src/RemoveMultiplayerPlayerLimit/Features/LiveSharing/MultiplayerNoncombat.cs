@@ -24,6 +24,7 @@ using MegaCrit.Sts2.Core.Nodes.Rooms;
 using MegaCrit.Sts2.Core.Nodes.Screens.Shops;
 using MegaCrit.Sts2.Core.Nodes.Screens.CardSelection;
 using MegaCrit.Sts2.Core.Nodes.Screens;
+using MegaCrit.Sts2.Core.Nodes.Rewards;
 using MegaCrit.Sts2.Core.Nodes.Screens.Overlays;
 using MegaCrit.Sts2.Core.Rewards;
 using MegaCrit.Sts2.Core.Rooms;
@@ -33,7 +34,7 @@ namespace RemoveMultiplayerPlayerLimit.Features.LiveSharing;
 
 // A separate, source-owned journal fills the gaps in CombatReplay. It records
 // original decisions, not input coordinates, and never edits the game's writer.
-internal static class MultiplayerNoncombat
+internal static partial class MultiplayerNoncombat
 {
     private const BindingFlags Any = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static;
     internal static CombatReplay? Checkpoint;
@@ -45,8 +46,10 @@ internal static class MultiplayerNoncombat
     private static bool _installed;
     internal static bool Replica => MirrorRenderer.Active?.Multiplayer == true;
     private static bool Source => !MirrorRenderer.IsRenderer && RunManager.Instance.NetService?.Type is NetGameType.Host or NetGameType.Client;
-    private static bool Recording => Source && Checkpoint != null && State == RunManager.Instance.DebugOnlyGetState() &&
-        ReferenceEquals(SourceRoom, State?.CurrentRoom) && !CombatManager.Instance.IsInProgress;
+    internal static bool IsCurrent(RunState state) => Checkpoint != null && ReferenceEquals(State, state) &&
+        (ReferenceEquals(SourceRoom, state.CurrentRoom) || SourceRoom is EventRoom parent && state.CurrentRoom is CombatRoom combat && Equals(combat.ParentEventId, parent.ModelId));
+    private static bool Recording => Source && State == RunManager.Instance.DebugOnlyGetState() && State != null && IsCurrent(State) &&
+        (!CombatManager.Instance.IsInProgress || SourceRoom is EventRoom);
     internal static object? Read(object o, string field) => MultiplayerPersonalUi.Read(o, field);
     internal static object? Invoke(object o, string name, params object?[] args)
     {
@@ -93,6 +96,7 @@ internal static class MultiplayerNoncombat
         Patch(typeof(OneOffSynchronizer), "DoTreasureRoomRewards", nameof(TreasureGold));
         Patch(typeof(NTreasureRoom), "OpenChest", nameof(OpenChest));
         Patch(typeof(RunManager), "ProceedFromTerminalRewardsScreen", nameof(Proceed));
+        InstallCrystal(h);
         h.Patch(typeof(NRestSiteRoom).GetMethod("_Ready")!, postfix: new HarmonyMethod(typeof(MultiplayerNoncombat).GetMethod(nameof(RestPortraits), Any)));
         Patch(typeof(NCardRewardSelectionScreen), "OptionSelected", nameof(RewardChoice));
         foreach (string name in new[] { "SelectCard", "OnAlternateRewardSelected", "OnSkipButtonPressed" })
@@ -222,7 +226,19 @@ internal static class MultiplayerNoncombat
 #if STS2_0111
             case "restSkip": Invoke(m.RestSiteSynchronizer, "HandleRestSiteSkippedMessage", MirrorState.Unpack<RestSiteSkippedMessage>(op.Payload), id); break;
 #endif
-            case "reward": m.RewardsSetSynchronizer.HandleRewardSelectedMessage(new() { location = state.RunLocation, setId = int.Parse(values[0]), rewardIndex = int.Parse(values[1]) }, id); break;
+            case "reward":
+                if (LocalContext.IsMe(player) && NOverlayStack.Instance.Peek() is NRewardsScreen rewardScreen &&
+                    Read(rewardScreen, "_rewardsSet") is RewardsSet localSet && localSet.Id == int.Parse(values[0]))
+                {
+                    // The native button awaits selection, emits RewardClaimed
+                    // and removes/reflows its row. Applying only the network
+                    // selection updates the deck but leaves stale local rows.
+                    var reward = localSet.Rewards.ElementAt(int.Parse(values[1]));
+                    var button = LocalSpectatorSource.Descendants<NRewardButton>(rewardScreen).FirstOrDefault(b => ReferenceEquals(b.Reward, reward));
+                    if (button == null) throw new InvalidOperationException("Authoritative local reward button is absent");
+                    return (Task)Invoke(button, "GetReward")!;
+                }
+                m.RewardsSetSynchronizer.HandleRewardSelectedMessage(new() { location = state.RunLocation, setId = int.Parse(values[0]), rewardIndex = int.Parse(values[1]) }, id); break;
             case "skipRewards":
                 if (LocalContext.IsMe(player) && NOverlayStack.Instance.Peek() is NRewardsScreen rewardsScreen && Read(rewardsScreen, "_isTerminal") is false &&
                     Read(rewardsScreen, "_rewardsSet") is RewardsSet displayed && displayed.Id == int.Parse(op.Value))
@@ -249,6 +265,8 @@ internal static class MultiplayerNoncombat
             case "treasureGold": return (Task)Invoke(m.OneOffSynchronizer, "DoTreasureRoomRewards", player)!;
             case "chest": return (Task)Invoke(NRun.Instance.TreasureRoom, "OpenChest")!;
             case "proceed": return m.ProceedFromTerminalRewardsScreen();
+            case "crystalCell": case "crystalTool": return ApplyCrystal(op, state);
+            case "crystalRewards": Invoke(m.OneOffSynchronizer, "HandleCrystalSphereRewardsMessage", MirrorState.Unpack<CrystalSphereRewardsMessage>(op.Payload), id); break;
             default: throw new InvalidOperationException("Unknown noncombat operation: " + op.Kind);
         }
         return null;

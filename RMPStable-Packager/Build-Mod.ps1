@@ -329,6 +329,7 @@ try {
     Copy-Item -LiteralPath $bootstrapDll -Destination (Join-Path $packageModDir "RMPStable.dll") -Force
     Copy-Item -LiteralPath $manifestPath -Destination (Join-Path $packageModDir "RMPStable.json") -Force
     Copy-Item -LiteralPath $updaterPath -Destination (Join-Path $packageModDir "update.cmd") -Force
+    Copy-Item -LiteralPath (Join-Path $repositoryDir 'docs/README-multiInstance.md') -Destination (Join-Path $packageModDir 'README-multiInstance.md') -Force
 
     $zipPath = Join-Path $outputDir "RMPStable-v$safeVersion.zip"
     Compress-Archive -LiteralPath $packageModDir -DestinationPath $zipPath -CompressionLevel Optimal -Force

@@ -14,7 +14,9 @@ namespace RemoveMultiplayerPlayerLimit.Features.LiveSharing;
 internal static class MirrorFastRestore
 {
     internal static bool Source, Replica;
-    private static bool Active => Source || Replica;
+    // Source marks checkpoint priming in Quick SL; it must never accelerate
+    // the authority's visible combat or opening automatic card effects.
+    private static bool Active => MirrorRenderer.IsRenderer && Replica;
     private const BindingFlags Any = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static;
     internal static void Initialize()
     {

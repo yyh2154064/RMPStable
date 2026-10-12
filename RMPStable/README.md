@@ -1,5 +1,23 @@
 # RMP Stable
 
+## v0.4.0
+
+Adds native singleplayer and multiplayer spectator/control windows (F8), with
+the selected player's character in front and source-authorized battle, potion,
+map, event, shop, rest, treasure, reward and ending controls. Source switches,
+Quick SL and resets reuse the same replica process. Fixes native navigation,
+player information, relic inspection/cursor scaling, potion cancellation,
+shop failure feedback, death/ending visuals and event replay synchronization.
+Singleplayer and multiplayer SL openings now play Imbued and chained cards at
+the original speed; only hidden history catch-up is accelerated.
+
+Retains 16-player capacity and the two supported game versions. Multiplayer
+window runtime validation uses three distinct characters on local native ENet;
+cross-computer Steam and larger window rosters remain unverified. Long-history
+source switching currently takes 3.06–3.68 seconds and does not fully meet the
+three-second target. See [window instructions](../docs/README-multiInstance.md)
+and [test evidence](../docs/multiplayer-window19-validation.md).
+
 Standalone 16-player multiplayer mod for Slay the Spire 2 v0.107.1 and
 v0.111.0 Public Beta. It expands
 multiplayer capacity and prevents duplicate remote treasure rewards from

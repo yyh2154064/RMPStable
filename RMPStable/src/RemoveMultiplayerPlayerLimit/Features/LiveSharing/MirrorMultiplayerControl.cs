@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using Godot;
 using HarmonyLib;
+using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Context;
 using MegaCrit.Sts2.Core.Entities.Creatures;
 using MegaCrit.Sts2.Core.Entities.Players;
@@ -25,6 +26,8 @@ internal sealed partial class MirrorRenderer
     private PendingChoice? _pendingChoice;
     private uint _pressedChoiceId;
     private Player? ViewPlayer => Multiplayer ? LocalContext.GetMe(_state) : _state?.Players[0];
+    private System.Collections.Generic.List<Creature> PotionTargets => CombatManager.Instance.IsInProgress && ViewPlayer?.Creature.CombatState is { } combat ?
+        combat.Creatures.ToList() : _state?.Players.Select(p => p.Creature).ToList() ?? new();
     private bool InputIdle => Multiplayer ? MultiplayerInputReady : NativeIdle;
     private bool MultiplayerInputReady => _control && !_busy && _sceneReady && !_multiplayerRoomWaiting && _generation == _desiredGeneration &&
         _battleAuthority?.Granted == true && _battleAuthority.Epoch == _epoch && _personalMessage?.Events <= _events && _error.Length == 0;
@@ -86,12 +89,12 @@ internal sealed partial class MirrorRenderer
     private void ProcessPendingPotion()
     {
         if (_pendingPotion is not { } pending) return;
-        if (!_control || pending.Generation != _generation || pending.Epoch != _epoch || ViewPlayer?.PlayerCombatState?.TurnNumber != pending.Turn ||
+        if (!_control || pending.Generation != _generation || pending.Epoch != _epoch || (ViewPlayer?.PlayerCombatState?.TurnNumber ?? 0) != pending.Turn ||
             Time.GetTicksMsec() - pending.Created > 8000 || ViewPlayer?.Potions.Contains(pending.Potion) != true || pending.Target is { IsAlive: false })
         { _pendingPotion = null; return; }
         if (!MultiplayerInputReady || _waitingForAuthority) return;
         int index = ViewPlayer!.Potions.ToList().IndexOf(pending.Potion);
-        int target = pending.Target?.CombatState.Creatures.ToList().IndexOf(pending.Target) ?? -1;
+        int target = pending.Target == null ? -1 : PotionTargets.IndexOf(pending.Target);
         if (_battleAuthority?.Actions.Any(a => a.Kind == "potion" && a.NativeIndex == index && a.Enabled) != true) return;
         _pendingPotion = null;
         SendMultiplayerIntent("potion", index, target, "");
@@ -103,8 +106,14 @@ internal sealed partial class MirrorRenderer
         {
             if (!_control) { NTargetManager.Instance.CancelTargeting(); return true; }
             var hit = Hit("target", point);
-            var target = hit == null ? null : ViewPlayer?.Creature.CombatState?.Creatures.ElementAtOrDefault(hit.Index);
-            if (target != null && MegaCrit.Sts2.Core.Nodes.Rooms.NCombatRoom.Instance?.GetCreatureNode(target) is { } node && NTargetManager.Instance.AllowedToTargetNode(node)) NTargetManager.Instance.OnNodeHovered(node);
+            var target = hit == null ? null : PotionTargets.ElementAtOrDefault(hit.Index);
+            Node? node = target == null ? null : MegaCrit.Sts2.Core.Nodes.Rooms.NCombatRoom.Instance?.GetCreatureNode(target);
+            node ??= NRun.Instance == null ? null : LocalSpectatorSource.Descendants<MegaCrit.Sts2.Core.Nodes.Multiplayer.NMultiplayerPlayerState>(NRun.Instance)
+                .LastOrDefault(p => p.Player.Creature.IsAlive && Contains(p.Hitbox, point));
+            if (node != null && !NTargetManager.Instance.AllowedToTargetNode(node)) node = null;
+            if (typeof(NTargetManager).GetProperty("HoveredNode", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)?.GetValue(NTargetManager.Instance) is Node previous && previous != node)
+                NTargetManager.Instance.OnNodeUnhovered(previous);
+            if (node != null) NTargetManager.Instance.OnNodeHovered(node);
             if (message == MirrorWin32.LeftUp)
                 NTargetManager.Instance._Input(new InputEventMouseButton { ButtonIndex = MouseButton.Left, Pressed = false, Position = ViewportPoint(point) });
             if (message == 0x204) NTargetManager.Instance.CancelTargeting();
@@ -137,8 +146,11 @@ internal sealed partial class MirrorRenderer
     {
         if (Active is not { Multiplayer: true } renderer) return true;
         int index = renderer.ViewPlayer?.Potions.ToList().IndexOf(__instance) ?? -1;
+        // Native noncombat AnyPlayer potions are drunk, not thrown; the holder
+        // passes null and EnqueueManualUse ordinarily resolves it to the owner.
+        if (target == null && __instance.IsValidTarget(__instance.Owner.Creature)) target = __instance.Owner.Creature;
         if (renderer._control && index >= 0)
-            renderer._pendingPotion = new(__instance, target, renderer._generation, renderer._epoch, renderer.ViewPlayer!.PlayerCombatState!.TurnNumber, Time.GetTicksMsec());
+            renderer._pendingPotion = new(__instance, target, renderer._generation, renderer._epoch, renderer.ViewPlayer!.PlayerCombatState?.TurnNumber ?? 0, Time.GetTicksMsec());
         renderer.ProcessPendingPotion();
         if (NRun.Instance != null)
             foreach (var holder in LocalSpectatorSource.Descendants<NPotionHolder>(NRun.Instance.GlobalUi.TopBar)) holder.CancelPotionUseOrDiscard();

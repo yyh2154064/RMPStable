@@ -3,6 +3,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using Godot;
 using MegaCrit.Sts2.Core.Nodes;
+using MegaCrit.Sts2.Core.Nodes.Rooms;
 using MegaCrit.Sts2.Core.Nodes.Screens.Capstones;
 using MegaCrit.Sts2.Core.Nodes.Screens.Map;
 using MegaCrit.Sts2.Core.Nodes.Screens.Overlays;
@@ -29,11 +30,16 @@ internal static partial class MirrorJournal
     private static bool ReplicaBadgeSave() => !MirrorRenderer.IsRenderer;
     internal static string? EndHash(RunState state) => ReferenceEquals(state, _endedState) && _ending != null ?
         Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(_ending.Payload.Concat(System.Text.Encoding.UTF8.GetBytes(_ending.Value)).ToArray())) : null;
-    private static void RunEnded(SerializableRun serializableRun)
+    private static bool RunEnded(SerializableRun serializableRun)
     {
-        if (MirrorRenderer.IsRenderer || RunManager.Instance.NetService?.Type != MegaCrit.Sts2.Core.Multiplayer.Game.NetGameType.Singleplayer) return;
+        // Native lethal actions can also request an ending during replay. Only
+        // the authority's immutable final record may create that overlay; a
+        // second overlay would destroy the visuals reparented into the first.
+        if (MirrorRenderer.IsRenderer) return false;
+        if (RunManager.Instance.NetService?.Type is not (MegaCrit.Sts2.Core.Multiplayer.Game.NetGameType.Singleplayer or MegaCrit.Sts2.Core.Multiplayer.Game.NetGameType.Host or MegaCrit.Sts2.Core.Multiplayer.Game.NetGameType.Client)) return true;
         var state = RunManager.Instance.DebugOnlyGetState();
-        if (state == null || Checkpoint == null || ReferenceEquals(_endedState, state)) return;
+        bool multiplayer = RunManager.Instance.NetService.Type != MegaCrit.Sts2.Core.Multiplayer.Game.NetGameType.Singleplayer;
+        if (state == null || !multiplayer && Checkpoint == null || ReferenceEquals(_endedState, state)) return true;
         // The original final record is immutable presentation data. It includes
         // the authoritative score/history; no replica achievements are awarded.
         var saved = MirrorState.Unpack<SerializableRun>(MirrorState.Pack(serializableRun));
@@ -43,8 +49,10 @@ internal static partial class MirrorJournal
             Value = System.Text.Json.JsonSerializer.Serialize(new MirrorFinalMetadata {
                 History = RunManager.Instance.History == null ? "" : JsonSerializationUtility.ToJson(RunManager.Instance.History),
                 Progress = JsonSerializationUtility.ToJson(SaveManager.Instance.Progress.ToSerializable()) }) };
-        Operations.Add(_ending);
+        if (multiplayer) MultiplayerMirrorSession.RecordFinal(_ending, state);
+        else Operations.Add(_ending);
         GD.Print("[RMP:Mirror:Ending] authoritative native results recorded");
+        return true;
     }
 }
 
@@ -56,12 +64,29 @@ internal sealed partial class MirrorRenderer
     private async Task PresentEnding(MirrorOperation ending, long generation)
     {
         CheckGeneration(generation);
+        // Enqueued replay actions run asynchronously. Let the final lethal
+        // action finish its cast/damage animation before setting the terminal
+        // pose and handing the visuals to the native results screen.
+        while (RunManager.Instance.ActionExecutor.IsRunning) await Frame(generation);
         _finalSave = MirrorState.Unpack<SerializableRun>(ending.Payload);
         var presentationState = RunState.FromSerializable(_finalSave);
         // Native final UI only needs the victory-room identity. FromSerializable
         // accepts combat/event checkpoints, not map/shop/rest/treasure rooms.
         if (_finalSave.PreFinishedRoom?.RoomType == RoomType.Event) presentationState.PushRoom(new EventRoom(_finalSave.PreFinishedRoom));
         foreach (var player in presentationState.Players) player.Creature.SetCurrentHpInternal(0);
+        // The native combat ending reparents the existing visuals; it never
+        // starts their death animation. Victory also kills players outside the
+        // combat replay. Apply the terminal presentation to the live nodes
+        // before the native overlay takes ownership, without running gameplay
+        // death hooks or generating a second result in the replay process.
+        if (NCombatRoom.Instance is { } combatRoom)
+            foreach (var player in _state!.Players)
+            {
+                player.Creature.SetCurrentHpInternal(0);
+                var creature = combatRoom.GetCreatureNode(player.Creature);
+                if (creature != null && !creature.IsPlayingDeathAnimation)
+                    creature.StartDeathAnim(false);
+            }
         var metadata = System.Text.Json.JsonSerializer.Deserialize<MirrorFinalMetadata>(ending.Value)!;
         RunManager.Instance.History = metadata.History.Length == 0 ? null : JsonSerializationUtility.FromJson<RunHistory>(metadata.History).SaveData;
         // Native score/unlock presentation starts from the authority's progress,

@@ -34,6 +34,7 @@ using MegaCrit.Sts2.Core.Nodes.Screens.Map;
 using MegaCrit.Sts2.Core.Nodes.Screens.Overlays;
 using MegaCrit.Sts2.Core.Nodes.Screens.Settings;
 using MegaCrit.Sts2.Core.Nodes.Screens;
+using MegaCrit.Sts2.Core.Nodes.Multiplayer;
 using RemoveMultiplayerPlayerLimit.Infrastructure;
 
 namespace RemoveMultiplayerPlayerLimit.Features.LiveSharing;
@@ -134,6 +135,18 @@ internal sealed partial class MirrorRenderer : IDisposable
         }
         if (_wire.Error.Length > 0) { Quit(); return; }
         if (!_wire.Connected || NGame.Instance == null) return;
+        // Native final Continue can tear down NRun before the parent parks its
+        // lease. Keep the child alive and wait for the next checkpoint instead
+        // of accessing native singleton getters through the removed run.
+        if (_sceneReady && !_busy && NRun.Instance == null)
+        {
+            _sceneReady = false; _state = null; _replay = null; _control = false;
+            _personalMessage = null; _battleAuthority = null; _authorityReady = false;
+            _pendingPotion = null; _pendingChoice = null; _pressedAction = null;
+            _pendingCards.Clear(); _waitingForAuthority = false;
+            Stage("本局已结束，等待新局检查点");
+        }
+        MirrorCursor.Tick();
         if (!_hello) { _hello = true; _ = _wire.Send(new MirrorMessage { Kind = "hello", Build = MirrorState.Build, Process = Environment.ProcessId, Window = (long)MirrorWin32.OwnWindow }); }
         // Window/mode/result traffic and native hover remain live while ordered
         // replay actions await animations. Only gameplay replay waits on _busy.
@@ -162,12 +175,13 @@ internal sealed partial class MirrorRenderer : IDisposable
                     MirrorWin32.ClipOwn(message);
                     _presentationWheelScale = float.IsFinite(message.WheelScale) ? Math.Clamp(message.WheelScale, 1, 8) : 1; break;
                 case "control":
+                    if (message.Multiplayer && message.Generation != _desiredGeneration) break;
                     if (message.Epoch < _epoch || message.Epoch == _epoch && message.Control == _control) break;
                     _control = message.Control && (!Multiplayer || message.Multiplayer); _epoch = message.Epoch; _statusTimer = 0; CancelDrag(); _pressedUi = null;
                     if (Multiplayer)
                     {
                         _potionPressed = null; _pendingPotion = null; _pendingChoice = null; _pressedAction = null; PotionPopup?.Remove();
-                        if (NTargetManager.Instance?.IsInSelection == true) NTargetManager.Instance.CancelTargeting();
+                        if (NRun.Instance?.GlobalUi?.TargetManager is { IsInSelection: true } targets) targets.CancelTargeting();
                         if (_sceneReady) _phase = _control ? "多人房间控制已授权" : "多人原版房间已同步（观战）";
                     }
                     _pendingCards.Clear(); _submittedCard = null; _waitingForAuthority = false; break;
@@ -190,12 +204,23 @@ internal sealed partial class MirrorRenderer : IDisposable
                     _pendingChoice = null; _pressedAction = null;
                     _desiredGeneration = message.Generation; _sceneReady = false; _timerText = ""; _control = false; CancelDrag(); _pressedUi = null;
                     _waitingForAuthority = false; _stateMessages.Clear(); Stage("等待读档后的权威检查点");
-                    _authorityReady = false; _pendingCards.Clear();
+                    _authorityReady = false; _pendingCards.Clear(); _submittedCard = null; _error = "";
+                    Multiplayer = message.Multiplayer; _epoch = 0; _battleAuthority = null;
+                    _personalMessage = null; _drawFrames = 0; _multiplayerRoomWaiting = false;
+                    _localMapOpen = null;
+                    _pendingPotion = null; _potionPressed = null; PotionPopup?.Remove();
+                    MultiplayerPersonalUi.Reset();
+                    if (NRun.Instance?.GlobalUi?.TargetManager is { IsInSelection: true } resetTargets) resetTargets.CancelTargeting();
+                    if (message.Multiplayer)
+                    {
+                        Stage("正在切换观战来源");
+                    }
                     break;
                 case "load":
                     if (message.Generation <= _desiredGeneration) break;
                     _pendingChoice = null; _pressedAction = null;
                     _multiplayerRoomWaiting = false; _personalMessage = null;
+                    _localMapOpen = null;
                     _desiredGeneration = message.Generation; _sceneReady = false; _timerText = ""; CancelDrag(); _pressedUi = null;
                     _stateMessages.Clear(); _stateMessages.Enqueue(message); break;
                 case "events":
@@ -214,7 +239,11 @@ internal sealed partial class MirrorRenderer : IDisposable
                 if (stateMessage.Kind == "events") { _busy = true; TaskHelper.RunSafely(Apply(stateMessage)); break; }
             }
         if (_waitingForAuthority && _events > _submittedEvents) _waitingForAuthority = false;
-        if (!Multiplayer) { ProcessLocalInput(); ProcessBufferedCards(); }
+        if (!Multiplayer)
+        {
+            if (_sceneReady && _state != null) { ProcessLocalInput(); ProcessBufferedCards(); }
+            else { while (_buttons.TryDequeue(out _)) { } while (_keyboard.TryDequeue(out _)) { } }
+        }
         else
         {
             if (_personalMessage is { } personal && personal.Generation == _generation && _generation == _desiredGeneration && _events >= personal.Events)
@@ -441,7 +470,7 @@ internal sealed partial class MirrorRenderer : IDisposable
                     }
                 }
                 else if (GodotObject.IsInstanceValid(releasedUi) && Contains(releasedUi, input.Point) && releasedUi is NClickableControl clickable)
-                    clickable.ForceClick();
+                    ClickPresentation(clickable);
                 else if (GodotObject.IsInstanceValid(releasedUi) && releasedUi is NCardHolder holder && Contains(holder.Hitbox, input.Point))
                     holder.EmitSignal(NCardHolder.SignalName.Pressed, holder);
                 continue;
@@ -554,7 +583,8 @@ internal sealed partial class MirrorRenderer : IDisposable
     private bool PresentationOpen => UiOnlyOpen || NCapstoneContainer.Instance?.CurrentCapstoneScreen != null ||
         NMapScreen.Instance?.IsOpen == true || NOverlayStack.Instance?.Peek() != null || NModalContainer.Instance?.OpenModal != null;
     private Control? PresentationScrollRoot => NCapstoneContainer.Instance?.CurrentCapstoneScreen is NDeckViewScreen deck ? deck :
-        NCapstoneContainer.Instance?.CurrentCapstoneScreen is NCardPileScreen pile ? pile : null;
+        NCapstoneContainer.Instance?.CurrentCapstoneScreen is NCardPileScreen pile ? pile :
+        NCapstoneContainer.Instance?.CurrentCapstoneScreen is NMultiplayerPlayerExpandedState player ? player : null;
     private static string WheelValue(float wheel) => (wheel > 0 ? "up:" : "down:") + Math.Min(64, Math.Abs(wheel)).ToString(System.Globalization.CultureInfo.InvariantCulture);
     private Control? LocalUiAt(Vector2 point)
     {
@@ -593,7 +623,11 @@ internal sealed partial class MirrorRenderer : IDisposable
         if (top == null) return null;
         // The original pile button cancels targeting. Do not let a local
         // browsing click cancel an authoritative potion/other choice task.
-        return new NClickableControl[] { top.Pause, top.Deck }.Concat(NCombatRoom.Instance == null || NTargetManager.Instance?.IsInSelection == true ? Enumerable.Empty<NClickableControl>() :
+        return new NClickableControl[] { top.Pause, top.Deck, top.Map }
+            .Concat(LocalSpectatorSource.Descendants<MegaCrit.Sts2.Core.Nodes.Relics.NRelicInventoryHolder>(NRun.Instance!))
+            .Concat(NTargetManager.Instance?.IsInSelection == true ? Enumerable.Empty<NClickableControl>() :
+                LocalSpectatorSource.Descendants<NMultiplayerPlayerState>(NRun.Instance!).Select(p => (NClickableControl)p.Hitbox))
+            .Concat(NCombatRoom.Instance == null || NTargetManager.Instance?.IsInSelection == true ? Enumerable.Empty<NClickableControl>() :
             LocalSpectatorSource.Descendants<NClickableControl>(NCombatRoom.Instance).Where(n =>
                 n.GetType().Name is "NDrawPileButton" or "NDiscardPileButton" or "NExhaustPileButton"))
             .LastOrDefault(n => n.IsEnabled && Contains(n, point));
@@ -688,14 +722,16 @@ internal sealed partial class MirrorRenderer : IDisposable
             _finalSave = null; _finalHash = "";
             _authorityReady = false; _pendingCards.Clear(); _submittedCard = null;
             Stage("重建原版对局");
-            MirrorFastRestore.Replica = message.FastRestore;
+            MirrorFastRestore.Replica = message.FastRestore && !message.NormalOpening;
             CheckGeneration(message.Generation);
             RunManager.Instance.CleanUp(); _state = null; _replay = null;
             MirrorJournal.ReplicaActive = true; MirrorJournal.ResetReplicaRewards(); _operations = new();
             var replay = MirrorState.Unpack<CombatReplay>(message.Payload);
+              _viewSource = message.ViewSource == 0 ? _wire.Identity.Source : message.ViewSource;
+              if (replay.serializableRun.Players.All(p => p.NetId != ViewSource)) throw new InvalidDataException("Selected player is absent from checkpoint");
             _state = RunState.FromSerializable(replay.serializableRun); _replay = replay;
             #if STS2_0111
-            RunManager.Instance.SetUpReplay(_state, replay, _wire.Identity.Source);
+              RunManager.Instance.SetUpReplay(_state, replay, ViewSource);
 #else
             RunManager.Instance.SetUpReplay(_state, replay);
 #endif
@@ -737,7 +773,7 @@ internal sealed partial class MirrorRenderer : IDisposable
                 NRun.Instance.GlobalUi.MapScreen.Drawings.LoadDrawings(manager.MapDrawingsToLoad);
                 manager.MapDrawingsToLoad = null;
             }
-            if (message.FastRestore && NCombatRoom.Instance != null)
+            if (message.FastRestore && !message.NormalOpening && NCombatRoom.Instance != null)
                 while (!LocalSpectatorSource.PendingNativeChoice && (CombatManager.Instance.IsStarting || CombatManager.Instance.IsInProgress && ViewPlayer!.PlayerCombatState?.Phase != PlayerTurnPhase.Play))
                     await Frame(message.Generation);
             MirrorFastRestore.Replica = false;

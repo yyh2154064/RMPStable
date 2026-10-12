@@ -11,6 +11,10 @@ internal sealed class MirrorHost : IDisposable
     internal readonly MirrorProcess Process;
     private CombatReplay? _checkpoint;
     private long _generation;
+    private long _sourceGeneration;
+    private ulong _viewSource;
+    internal long LocalGeneration => _generation;
+    internal long SourceGeneration => _sourceGeneration;
     private int _sentEvents = -1;
     private double _timer;
     private long _controlEpoch;
@@ -24,7 +28,11 @@ internal sealed class MirrorHost : IDisposable
     internal bool Verified { get; private set; }
     internal Action<MirrorMessage>? Intent;
     internal MirrorWindowHost? Window { get; private set; }
-    internal readonly bool Multiplayer;
+    internal bool Multiplayer { get; private set; }
+    internal ulong ViewSource => _viewSource;
+    private bool _parked, _fastRestoreNextLoad;
+    private bool _normalOpeningNextLoad;
+    internal void PreserveOpeningOnce() => _normalOpeningNextLoad = true;
     private readonly System.Collections.Generic.Queue<MultiplayerMirrorFrame> _multiFrames = new();
     private MultiplayerMirrorFrame? _multiLatest;
     private MultiplayerMirrorFrame? _personalSent;
@@ -49,7 +57,33 @@ internal sealed class MirrorHost : IDisposable
         _waitingRoom = room; _roomDirty = true; _multiLatest = null; _multiFrames.Clear();
         Process.Phase = "当前房间：" + room + " · 等待来源房间检查点";
     }
-    internal MirrorHost(ulong source, bool multiplayer = false) { Multiplayer = multiplayer; Process = new MirrorProcess(source); }
+    internal MirrorHost(ulong source, bool multiplayer = false) { Multiplayer = multiplayer; _viewSource = source; Process = new MirrorProcess(source); }
+    internal bool CanReuse => Multiplayer && Error.Length == 0 && Process.Authenticated && !Process.Child.HasExited && Process.Wire.Connected && Process.Wire.Error.Length == 0;
+    internal void SwitchMultiplayerSource(ulong source)
+    {
+        if (!CanReuse) throw new InvalidOperationException("Replica is not reusable");
+        Rebind(source, true);
+    }
+    internal void Rebind(ulong source, bool multiplayer)
+    {
+        Window?.Hide(); _parked = false; Multiplayer = multiplayer; Error = ""; _normalOpeningNextLoad = false;
+        _viewSource = source; _sourceGeneration = 0; _checkpoint = null; _sentEvents = -1;
+        _multiFrames.Clear(); _multiLatest = _personalSent = null;
+        _waitingRoom = ""; _roomDirty = false;
+        MultiplayerAuthority = null; _control = _controlDirty = false; _controlEpoch = 0;
+        _publishedReady = false; _publishedHash = ""; _publishedEvents = -1;
+        _timerText = ""; _timerGeneration = -1; _timer = 0; _fastRestoreNextLoad = true;
+        Verified = false; SourceHash = "";
+        Process.DisplayReady = Process.LastIdle = Process.LastControlEnabled = false;
+        Process.LastHash = Process.LastDrawingHash = ""; Process.LastEvents = 0; Process.DrawFrames = 0;
+        _generation++; Process.Wire.Identity.Generation = _generation;
+        _resetDirty = true;
+    }
+    internal void Park()
+    {
+        if (_parked) return;
+        Rebind(_viewSource, Multiplayer); _parked = true; Intent = null;
+    }
     internal void QueueMultiplayer(MultiplayerMirrorFrame frame)
     {
         if (!Multiplayer) throw new InvalidOperationException("Multiplayer frame on singleplayer mirror");
@@ -79,17 +113,18 @@ internal sealed class MirrorHost : IDisposable
         }
         if (Process.Wire.Pending == 0 && _multiFrames.TryDequeue(out var frame))
         {
-            if (frame.Kind == "load") { _generation = frame.Generation; Process.Wire.Identity.Generation = _generation; }
+            if (frame.Kind == "load") { _sourceGeneration = frame.Generation; _generation++; Process.Wire.Identity.Generation = _generation; }
             _ = Process.Wire.Send(new MirrorMessage { Kind = frame.Kind == "load" ? "load" : "events", Multiplayer = true,
-                Generation = frame.Generation, Index = frame.Start, Events = frame.Events, Payload = frame.Checkpoint, NoncombatRoom = frame.NoncombatRoom,
+                Generation = _generation, ViewSource = _viewSource, NormalOpening = frame.Kind == "load" && _normalOpeningNextLoad, Index = frame.Start, Events = frame.Events, Payload = frame.Checkpoint, NoncombatRoom = frame.NoncombatRoom,
                 Operations = frame.Delta.ConvertAll(p => System.Text.Json.JsonSerializer.Deserialize<MirrorOperation>(p) ?? throw new System.IO.InvalidDataException("Empty native operation")) });
+            if (frame.Kind == "load") _normalOpeningNextLoad = false;
         }
         var current = _multiLatest;
-        if (current != null && !ReferenceEquals(_personalSent, current) && current.Generation == _generation && Process.Wire.Pending == 0)
+        if (current != null && !ReferenceEquals(_personalSent, current) && current.Generation == _sourceGeneration && Process.Wire.Pending == 0)
         {
             _personalSent = current;
             ApplyMultiplayerPermission(current.Authority);
-            _ = Process.Wire.Send(new MirrorMessage { Kind = "personal", Generation = current.Generation, Events = current.Events, Choice = current.Choice, Authority = current.Authority, TimerText = current.Timer, MapOpen = current.MapOpen, MapTravelEnabled = current.MapTravelEnabled, ShopOpen = current.ShopOpen });
+            _ = Process.Wire.Send(new MirrorMessage { Kind = "personal", Generation = _generation, Events = current.Events, Choice = current.Choice, Authority = current.Authority, TimerText = current.Timer, MapOpen = current.MapOpen, MapTravelEnabled = current.MapTravelEnabled, ShopOpen = current.ShopOpen });
         }
         SourceHash = current?.Hash ?? "";
         Verified = current?.Settled == true && SourceHash.Length > 0 && Process.DisplayReady && Process.LastIdle && Process.LastEvents == current.Events && Process.LastHash == SourceHash;
@@ -148,12 +183,13 @@ internal sealed class MirrorHost : IDisposable
             else { Error = "独立进程返回了不支持的消息"; Process.Dispose(); return; }
         }
         if (Error.Length > 0 || !Process.Authenticated) return;
-        if (Multiplayer) { TickMultiplayer(); return; }
         if (_resetDirty)
         {
             _resetDirty = false;
-            _ = Process.Wire.Send(new MirrorMessage { Kind = "reset", Generation = _generation, Epoch = _controlEpoch });
+            _ = Process.Wire.Send(new MirrorMessage { Kind = "reset", Multiplayer = Multiplayer, Generation = _generation, Epoch = _controlEpoch });
         }
+        if (_parked) return;
+        if (Multiplayer) { TickMultiplayer(); return; }
         if (_controlDirty && Process.Wire.Pending == 0)
         {
             _controlDirty = false;
@@ -201,7 +237,7 @@ internal sealed class MirrorHost : IDisposable
             _ = Process.Wire.Send(new MirrorMessage { Kind = "clock", Generation = _generation, TimerText = _timerText });
         }
     }
-    internal void PublishCheckpoint(CombatReplay replay, bool fastRestore = false)
+    internal void PublishCheckpoint(CombatReplay replay, bool fastRestore = false, bool normalOpening = false)
     {
         if (!Process.Authenticated || Error.Length > 0 || ReferenceEquals(_checkpoint, replay)) return;
         if (_resetDirty)
@@ -213,7 +249,8 @@ internal sealed class MirrorHost : IDisposable
         _publishedReady = false; _publishedHash = ""; _publishedEvents = -1;
         Process.LastIdle = false; Process.LastHash = ""; Process.DisplayReady = false; Verified = false; _timer = 0;
         _sentEvents = MirrorJournal.Operations.Count;
-        _ = Process.Wire.Send(new MirrorMessage { Kind = "load", Generation = _generation, FastRestore = fastRestore, Events = _sentEvents, Payload = MirrorState.Pack(replay), Operations = new(MirrorJournal.Operations) });
+        _ = Process.Wire.Send(new MirrorMessage { Kind = "load", Generation = _generation, ViewSource = _viewSource, NormalOpening = normalOpening, FastRestore = fastRestore || _fastRestoreNextLoad, Events = _sentEvents, Payload = MirrorState.Pack(replay), Operations = new(MirrorJournal.Operations) });
+        _fastRestoreNextLoad = false;
     }
     internal void Invalidate()
     {

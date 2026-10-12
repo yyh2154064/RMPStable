@@ -8,6 +8,7 @@ using MegaCrit.Sts2.Core.Nodes.Cards.Holders;
 using MegaCrit.Sts2.Core.Nodes.Cards;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Nodes.Combat;
+using MegaCrit.Sts2.Core.Nodes.Multiplayer;
 using MegaCrit.Sts2.Core.Nodes.CommonUi;
 using MegaCrit.Sts2.Core.Nodes.Rooms;
 using MegaCrit.Sts2.Core.Nodes.GodotExtensions;
@@ -120,9 +121,9 @@ internal static class MirrorNativeUi
     // Browsing does not make a game decision. Opening these screens is local
     // presentation, so their back buttons/cards/scrolls cannot enter the journal.
     internal static bool IsLocalPresentation(Node node) => Parent<NCardPileScreen>(node) != null || Parent<NDeckViewScreen>(node) != null ||
-        Parent<NPauseMenu>(node) != null || Parent<NAbandonRunConfirmPopup>(node) != null || Under(node, NGame.Instance?.InspectCardScreen) || Under(node, NGame.Instance?.InspectRelicScreen) ||
+        Parent<NPauseMenu>(node) != null || Parent<MegaCrit.Sts2.Core.Nodes.Relics.NRelicInventoryHolder>(node) != null || Parent<NMultiplayerPlayerState>(node) != null || Parent<NMultiplayerPlayerExpandedState>(node) != null || Parent<NAbandonRunConfirmPopup>(node) != null || Under(node, NGame.Instance?.InspectCardScreen) || Under(node, NGame.Instance?.InspectRelicScreen) ||
         Under(node, RemoveMultiplayerPlayerLimit.Infrastructure.SceneMonitor.FindSettingsScreen()) ||
-        node == NRun.Instance?.GlobalUi.TopBar.Deck || node == NRun.Instance?.GlobalUi.TopBar.Pause ||
+        node == NRun.Instance?.GlobalUi.TopBar.Deck || node == NRun.Instance?.GlobalUi.TopBar.Pause || node == NRun.Instance?.GlobalUi.TopBar.Map ||
         node.GetType().Name is "NDrawPileButton" or "NDiscardPileButton" or "NExhaustPileButton";
     private static bool Under(Node node, Node? root) => root != null && GodotObject.IsInstanceValid(root) && (node == root || root.IsAncestorOf(node));
     // A selector's scroll position is presentation; selection decisions remain

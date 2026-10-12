@@ -9,6 +9,7 @@ namespace RemoveMultiplayerPlayerLimit.Features.LiveSharing;
 internal static partial class LiveSharingController
 {
     private static bool _viewMultiplayer;
+    internal static void HideMultiplayerForRestore() { if (_viewMultiplayer) HideView(); }
     private static void ProcessMultiplayer(RunState? state, bool pressed)
     {
         if (!RunManager.Instance.IsInProgress || state == null || NRun.Instance?.IsNodeReady() != true)
@@ -36,7 +37,10 @@ internal static partial class LiveSharingController
         if (!ulong.TryParse(id, out var source) || !MultiplayerMirrorSession.Sources().Any(p => p.Id == id)) return;
         HideView();
         if (rebuild || MultiplayerMirrorSession.Selected != source || MultiplayerMirrorSession.Mirror == null || MultiplayerMirrorSession.Mirror.Error.Length > 0)
-            MultiplayerMirrorSession.Select(source);
+        {
+            if (rebuild) MultiplayerMirrorSession.Reload(source);
+            else MultiplayerMirrorSession.Select(source);
+        }
         var top = NRun.Instance.GlobalUi.TopBar;
         float status = new Control[] { top.Hp, top.Gold, top.Portrait, top.Deck, top.Map, top.Pause }.Where(c => c.IsVisibleInTree()).Select(c => c.GetGlobalRect().End.Y).DefaultIfEmpty(80).Max();
         float relic = LocalSpectatorSource.Descendants<NRelicInventoryHolder>(NRun.Instance.GlobalUi.RelicInventory).Where(c => c.IsVisibleInTree()).Select(c => c.GetGlobalRect().End.Y).DefaultIfEmpty(0).Max();

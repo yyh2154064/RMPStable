@@ -90,10 +90,10 @@ internal sealed partial class MirrorRenderer
                 else if (!SendShortcutAction(a => a.Kind == "cancel")) NRun.Instance?.GlobalUi.TopBar.Pause.ForceClick();
                 continue;
             }
-            var local = new NClickableControl?[] { NRun.Instance?.GlobalUi.TopBar.Deck } .Concat(NCombatRoom.Instance == null ? Enumerable.Empty<NClickableControl>() :
+            var local = new NClickableControl?[] { NRun.Instance?.GlobalUi.TopBar.Deck, NRun.Instance?.GlobalUi.TopBar.Map } .Concat(NCombatRoom.Instance == null ? Enumerable.Empty<NClickableControl>() :
                 LocalSpectatorSource.Descendants<NClickableControl>(NCombatRoom.Instance).Where(b => b.GetType().Name is "NDrawPileButton" or "NDiscardPileButton" or "NExhaustPileButton"));
             var localButton = local.FirstOrDefault(b => b != null && b.IsEnabled && HasShortcut(b, key));
-            if (localButton != null && NOverlayStack.Instance?.Peek() == null && _dragCard == null) { localButton.ForceClick(); continue; }
+            if (localButton != null && NOverlayStack.Instance?.Peek() == null && _dragCard == null) { ClickPresentation(localButton); continue; }
             if (_keyboardCard && _dragCard != null)
             {
                 if (Match("mega_release_card")) { CancelDrag(); continue; }

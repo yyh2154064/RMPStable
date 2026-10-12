@@ -21,6 +21,11 @@ if ($BuildLegacyHarness) {
 # This script only builds. It never starts a game or deploys to its directory.
 $package = "$root/package/RMPStable"
 New-Item -ItemType Directory -Force $package | Out-Null
-Copy-Item -LiteralPath "$root/bootstrap/RMPStable.dll", "$repo/RMPStable/RMPStable.json", $ModPck -Destination $package -Force
+foreach ($source in @("$root/bootstrap/RMPStable.dll", "$repo/RMPStable/RMPStable.json", $ModPck, "$repo/RMPStable-Packager/update.cmd")) {
+    $destination = Join-Path $package (Split-Path -Leaf $source)
+    if (![IO.Path]::GetFullPath($source).Equals([IO.Path]::GetFullPath($destination),[StringComparison]::OrdinalIgnoreCase)) {
+        Copy-Item -LiteralPath $source -Destination $destination -Force
+    }
+}
 Copy-Item -LiteralPath "$repo/docs/README-multiInstance.md" -Destination $package -Force
 Write-Output "Package: $package"
