@@ -84,6 +84,11 @@ internal sealed partial class MirrorRenderer
                 else if (PresentationScrollRoot is { } browse)
                     LocalSpectatorSource.Descendants<NBackButton>(browse).FirstOrDefault(b => b.IsEnabled)?.ForceClick();
                 else if (NCapstoneContainer.Instance?.CurrentCapstoneScreen != null) NCapstoneContainer.Instance.Close();
+                else if (MapBrowseOpen)
+                {
+                    var back = LocalSpectatorSource.Descendants<NBackButton>(MegaCrit.Sts2.Core.Nodes.Screens.Map.NMapScreen.Instance).FirstOrDefault(b => b.IsEnabled);
+                    if (back != null) ClickPresentation(back);
+                }
                 else if (NTargetManager.Instance?.IsInSelection == true)
                 { if (Multiplayer) NTargetManager.Instance.CancelTargeting(); else SendShortcutAction(a => a.Kind == "cancel"); }
                 else if (LocalSpectatorSource.PendingNativeChoice) SendShortcutAction(a => a.Kind == "cancel" || MirrorNativeUi.Resolve(a.NativePath) is Control node && HasShortcut(node,key));

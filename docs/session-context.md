@@ -1,3 +1,19 @@
+# RMPStable 新会话上下文：v0.4.1 地图浏览修复；等待用户手动验收
+
+2026-10-12 最新交接（优先于下方历史）：用户报告捏奥未选择时，所有窗口不能正常浏览地图，并要求排查所有先古之民、同时修复单人和多人；用户进一步指定版本 **v0.4.1**，完成后推送 **main**。已在现有 `multiInstanceTest` 修改并完成本轮专项，用户授权将本轮提交推送测试分支及合入 main；Git 最终状态以实际查询为准，后续开发仍复用 `multiInstanceTest`。仅保留 main / liveSharingTest / multiInstanceTest，唯一现有 checkout，不新建分支或 C 盘开发资源。
+
+根因与修复：地图滚动/拖动误走授权队列（多人协议没有该入口），图例和返回未接入本地浏览，返回未更新本地地图开关偏好；已统一为原版副本本地浏览，原版轮滚/左键拖动/六类图例提示与高亮/返回/Esc 均可在观战模式使用，不发权威操作、不改变先古之民奖励或旅行。另外，原版 FromSerializable 不恢复 ActFloor，多人直接恢复非战斗房间绕过原版 row+1 初始化，使地图返回被原版禁用；现按检查点地图坐标还原 ActFloor 后进入原版房间。未混入本地模拟、画面传输或自绘界面。
+
+本轮独立入口 `tools/Test-MapBrowse.ps1 -Mode single` / `-Mode multi`，以及最终包单人补验 `-Mode single -NeowOnly`，探针 `tests/MapBrowseProbe`。只测试本轮地图问题，不运行任何历史 full / feedback / replay / all 或累积套件。全部 8 位原版先古之民 Neow、Darv、Nonupeipe、Orobas、Pael、Tanx、Tezcatara、Vakuu 均覆盖未选择状态；捏奥额外覆盖来源授权控制模式。
+
+结果：单人全部先古之民 **394 通过**，实际 `0289EB60...` 候选，证据 `F:/projectFile/RMPStable-development/evidence/multiplayer-map-browse-single-20261012-191630`。其后仅修改多人 ActFloor 路径、单人逻辑未动。最终 `2E7574FA...` 多人原版 localhost ENet 三端各 **435 = 1305 通过**，证据 `.../multiplayer-map-browse-multi-20261012-193310`；同最终包单人捏奥双模式 **88 通过**，证据 `.../multiplayer-map-browse-single-20261012-193733`。不将早期不同候选冒称为最终包全量重测。双游戏版本 payload / Bootstrap 零警告错误；运行验证为 .111，.107 本轮仅编译验证。所有测试隐藏后台、复用既有 F 盘，原版渲染，无系统输入/焦点操作；源进程正常退出 0，隔离档案清理。
+
+交付五文件目录 `F:/projectFile/RMPStable-development/build/package/RMPStable`，版本 **0.4.1**；DLL SHA-256 **2E7574FA2163BB464A0BA2AB7367AD5A8551B68E6B47F5879202024FD1CA570F**。同级 `RMPStable-v0.4.1.zip` 每个文件与候选目录逐一哈希校验一致。版本清单、双 payload/Bootstrap 程序集与日志、模组菜单介绍、README 和更新器标识统一为 0.4.1。更新器沿用动态版本逻辑，本轮没有重跑旧更新器专项；手动发布 v0.4.1 Release 后可使用该附件升级。用户本轮仅授权 main 推送，未代为创建 Release/标签，未替换当前游戏或桌面模组，也未改桌面历史上下文。
+
+**v0.4.1 地图专项仍等待用户手动验收**；自动化通过仅可交付，新会话不因接收上下文自动重建或启动测试。收到明确通过后，从活动测试/待验收中移除本轮项目；当前保留 `Test-MapBrowse.ps1` 及其证据。`.12` 及此前已验收；v0.4.0 和此前未明确验收项目仍按下方真实记录保留，本轮不自动变为通过、不重测。长历史切换 strict3 未全部达标的限制仍保留。详细地图结果见 `docs/map-browse041.md`。
+
+## 以下为 v0.4.0 及更早历史记录
+
 # RMPStable 新会话上下文：v0.4.0；用户授权测试分支合入 main；历史切换三秒待改进
 
 2026-10-12 最新交接（优先于下方所有历史）：用户明确授权更新桌面上下文、提交并推送 `multiInstanceTest`、合并到 `main`；并指定本次模组版本为 **v0.4.0**，模组介绍必须包含本次更新，更新脚本必须能在用户手动发布 v0.4.0 Release 后升级。未授权代为创建 Release/标签、替换当前游戏或桌面模组。Git 最终 HEAD 以实际查询和桌面上下文为准；后续开发仍回到现有 `multiInstanceTest`，不得自行在 main 开发或建立其他分支。

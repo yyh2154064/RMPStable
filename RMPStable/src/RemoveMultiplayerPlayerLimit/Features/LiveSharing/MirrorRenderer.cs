@@ -438,6 +438,7 @@ internal sealed partial class MirrorRenderer : IDisposable
             }
             if (input.Message == MirrorWin32.CaptureChanged)
             {
+                _localMapPan = false;
                 if (_mapGestureKey.Length > 0 && MirrorWin32.GetCapture() != MirrorWin32.OwnWindow) FinishMapGesture(input.Point);
                 // The native mouse arrow changes cursor mode, which can release
                 // Godot's Win32 capture. Keep the in-progress native drag alive.
@@ -477,6 +478,7 @@ internal sealed partial class MirrorRenderer : IDisposable
             }
             if (input.Message == 0x20A)
             {
+                if (TryBrowseMapScroll(input.Point, input.Wheel)) continue;
                 if (SceneMonitor.FindSettingsScreen() is { } settings && settings.IsVisibleInTree())
                 {
                     var scrollable = LocalSpectatorSource.Descendants<NScrollableContainer>(settings).LastOrDefault(n => n.IsVisibleInTree() && Contains(n, input.Point));
@@ -496,6 +498,7 @@ internal sealed partial class MirrorRenderer : IDisposable
                 continue;
             }
             if (UiOnlyOpen || NGame.Instance?.InspectCardScreen?.IsVisibleInTree() == true || NGame.Instance?.InspectRelicScreen?.IsVisibleInTree() == true || NCapstoneContainer.Instance?.CurrentCapstoneScreen is NPauseMenu) { CancelDrag(); continue; }
+            if (ProcessMapBrowsePan(input.Message, input.Point)) continue;
             if (!_control || (!InputIdle || _waitingForAuthority) && !(CanBufferCard && input.Message is MirrorWin32.LeftDown or MirrorWin32.LeftUp)) { CancelDrag(); continue; }
             if (input.Message == MirrorWin32.LeftUp && _pressedAction != null)
             {
@@ -541,6 +544,7 @@ internal sealed partial class MirrorRenderer : IDisposable
             }
         }
         if (_pointer != _lastUiPointer) PushSettingsMotion(_pointer);
+        UpdateMapBrowsePan(_pointer);
         ProcessMapGesture();
         if (_dragCard != null)
         {
@@ -619,6 +623,12 @@ internal sealed partial class MirrorRenderer : IDisposable
         if (PresentationScrollRoot is { } screenNode)
             return LocalSpectatorSource.Descendants<NClickableControl>(screenNode).LastOrDefault(n => n.IsEnabled && MirrorNativeUi.Parent<NCardHolder>(n) == null && Contains(n, point)) ??
                 (Control?)LocalSpectatorSource.Descendants<NCardHolder>(screenNode).LastOrDefault(n => n.Hitbox.IsEnabled && Contains(n.Hitbox, point));
+        if (MapBrowseOpen)
+        {
+            var mapButton = LocalSpectatorSource.Descendants<NClickableControl>(NMapScreen.Instance)
+                .LastOrDefault(n => n.IsEnabled && MirrorNativeUi.IsMapBrowseButton(n) && Contains(InteractiveArea(n), point));
+            if (mapButton != null) return mapButton;
+        }
         var top = NRun.Instance?.GlobalUi.TopBar;
         if (top == null) return null;
         // The original pile button cancels targeting. Do not let a local

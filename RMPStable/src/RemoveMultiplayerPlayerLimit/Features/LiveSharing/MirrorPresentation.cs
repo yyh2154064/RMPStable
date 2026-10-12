@@ -17,7 +17,7 @@ internal sealed partial class MirrorRenderer
     private void ClickPresentation(MegaCrit.Sts2.Core.Nodes.GodotExtensions.NClickableControl button)
     {
         button.ForceClick();
-        if (button == NRun.Instance?.GlobalUi.TopBar.Map)
+        if (button == NRun.Instance?.GlobalUi.TopBar.Map || MirrorNativeUi.IsMapBrowseButton(button))
             _localMapOpen = MegaCrit.Sts2.Core.Nodes.Screens.Map.NMapScreen.Instance?.IsOpen;
     }
     private NPotionPopup? PotionPopup => NRun.Instance == null ? null : LocalSpectatorSource.Descendants<NPotionPopup>(NRun.Instance)

@@ -87,7 +87,14 @@ internal sealed partial class MirrorRenderer
             manager.ChecksumTracker.LoadReplayChecksums(null!, replay.nextChecksumId);
             manager.PlayerChoiceSynchronizer.FastForwardChoiceIds(replay.choiceIds);
             manager.RewardsSetSynchronizer.FastForwardRewardIds(replay.rewardIds);
-            if (message.NoncombatRoom.Length > 0) await manager.EnterRoom(MultiplayerNoncombat.RestoreRoom(message.NoncombatRoom, _state));
+            if (message.NoncombatRoom.Length > 0)
+            {
+                // FromSerializable does not restore ActFloor. Native map entry
+                // derives it from row + 1; direct room restoration bypasses that
+                // step, otherwise an ancient's map back button stays disabled.
+                _state.ActFloor = _state.CurrentMapCoord is { } coordinate ? coordinate.row + 1 : 0;
+                await manager.EnterRoom(MultiplayerNoncombat.RestoreRoom(message.NoncombatRoom, _state));
+            }
             else await manager.LoadIntoLatestMapCoord(AbstractRoom.FromSerializable(replay.serializableRun.PreFinishedRoom, _state));
             // Native multiplayer opening keeps the executor paused until all
             // automatic effects finish. A fresh SL must show that opening now,

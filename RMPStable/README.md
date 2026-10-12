@@ -1,6 +1,8 @@
 # RMP Stable
 
-## v0.4.0
+## v0.4.1
+
+Fixes native map browsing before Neow and other ancient choices in singleplayer and multiplayer windows: wheel/drag, boss routes, legend hover, back and Escape, including spectator mode.
 
 Adds native singleplayer and multiplayer spectator/control windows (F8), with
 the selected player's character in front and source-authorized battle, potion,
