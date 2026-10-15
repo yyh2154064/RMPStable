@@ -1,5 +1,9 @@
 # RMP Stable
 
+## v0.4.2
+
+Fixes rest portrait layering, passive Mend targeting, canonical map drawing coordinates and streaming, direct multiplayer control with native name tips, sidebar names, terminal replay retention and Architect progress context. Focused validation: docs/feedback042.md; pending manual acceptance.
+
 ## v0.4.1
 
 Fixes native map browsing before Neow and other ancient choices in singleplayer and multiplayer windows: wheel/drag, boss routes, legend hover, back and Escape, including spectator mode.

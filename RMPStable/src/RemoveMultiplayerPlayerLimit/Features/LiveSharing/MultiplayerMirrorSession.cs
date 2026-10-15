@@ -43,12 +43,18 @@ internal sealed class MultiplayerMirrorFrame
     public MultiplayerControlRequest? Request { get; set; }
     public bool Accepted { get; set; }
     public string Reason { get; set; } = "";
+    public List<ParticipantSnapshot> Names { get; set; } = new();
+    public RestTargetView? RestTarget { get; set; }
+    public List<MirrorOperation> Drawings { get; set; } = new();
+    public int DrawingStart { get; set; }
+    public string PresentationProgress { get; set; } = "";
+    public int ActFloor { get; set; } = -1;
 }
 
 // Native room subscriptions, passive replay and source-owned battle control.
 internal static partial class MultiplayerMirrorSession
 {
-    private sealed class Subscription { internal string Token = ""; internal long Generation; internal int Events; }
+    private sealed class Subscription { internal string Token = ""; internal long Generation; internal int Events, Drawings; }
     private sealed class FragmentAssembly
     {
         internal int Transfer, Parts, Next;
@@ -106,13 +112,16 @@ internal static partial class MultiplayerMirrorSession
         }
         foreach (var key in Fragments.Where(p => Time.GetTicksMsec() - p.Value.Began > 15000).Select(p => p.Key).ToArray())
         { Fragments[key].Buffer.Dispose(); Fragments.Remove(key); }
-        TickControl(); Mirror?.Tick(null, delta); _timer -= delta; if (_timer > 0) return; _timer = .1;
+        TickControl(); Mirror?.Tick(null, delta); _timer -= delta; if (_timer > 0) return; _timer = .033;
         // Do not reset or mutate the source game's original replay writer.
         // An event-owned fight is reconstructed from its original event and
         // ordered decisions/actions. Its unfinished CombatRoom cannot be saved.
         bool noncombat = MultiplayerNoncombat.IsCurrent(state);
-        var replay = noncombat ? MultiplayerNoncombat.Checkpoint : MirrorState.CurrentReplay;
-        if (replay == null || !noncombat && state.CurrentRoom is not MegaCrit.Sts2.Core.Rooms.CombatRoom)
+        // Vanilla stops its replay writer before the game-over overlay. Keep
+        // the already published checkpoint alive through its immutable ending.
+        var replay = InFinal ? _checkpoint : noncombat ? MultiplayerNoncombat.Checkpoint :
+            MirrorState.CurrentReplay ?? (state.CurrentRoom is MegaCrit.Sts2.Core.Rooms.CombatRoom ? _checkpoint : null);
+        if (replay == null || !InFinal && !noncombat && state.CurrentRoom is not MegaCrit.Sts2.Core.Rooms.CombatRoom)
         {
             RevokeControl();
             foreach (var pair in Subscribers.ToArray())
@@ -137,9 +146,16 @@ internal static partial class MultiplayerMirrorSession
             var frame = Capture(load ? "load" : "delta");
             frame.Authority = ControlFor(pair.Key, sub.Token);
             frame.Generation = _generation; frame.Start = start; frame.Events = operations.Count;
-            if (load) { frame.Checkpoint = _base; if (noncombat) frame.NoncombatRoom = MultiplayerNoncombat.Room; }
+            frame.DrawingStart = load ? 0 : sub.Drawings;
+            frame.Drawings = MultiplayerNoncombat.Drawings.Skip(frame.DrawingStart).ToList();
+            if (load)
+            {
+                frame.Checkpoint = _base;
+                frame.PresentationProgress = MegaCrit.Sts2.Core.Saves.JsonSerializationUtility.ToJson(MegaCrit.Sts2.Core.Saves.SaveManager.Instance.Progress.ToSerializable());
+                if (noncombat) frame.NoncombatRoom = MultiplayerNoncombat.Room;
+            }
             frame.Delta = operations.Skip(start).Select(e => JsonSerializer.SerializeToUtf8Bytes(e)).ToList();
-            Send(pair.Key, sub.Token, frame); sub.Generation = _generation; sub.Events = frame.Events;
+            Send(pair.Key, sub.Token, frame); sub.Generation = _generation; sub.Events = frame.Events; sub.Drawings = MultiplayerNoncombat.Drawings.Count;
         }
     }
     internal static void Select(ulong source)
@@ -193,6 +209,7 @@ internal static partial class MultiplayerMirrorSession
             Settled = Settled, Hash = Settled && _state != null ? MirrorState.MultiplayerHash(_state) : "",
             Room = _state?.CurrentRoom?.RoomType.ToString() ?? "", HandMode = NPlayerHand.Instance?.CurrentMode.ToString() ?? "",
             Screen = NOverlayStack.Instance?.Peek()?.GetType().Name ?? "Room", Choice = MultiplayerPersonalUi.Capture(), Timer = MirrorClock.Label?.Text ?? "",
+            Names = Sources(), RestTarget = MultiplayerPresentation042.CaptureTarget(), ActFloor = _state?.ActFloor ?? -1,
             MapOpen = MegaCrit.Sts2.Core.Nodes.Screens.Map.NMapScreen.Instance?.IsOpen == true,
             MapTravelEnabled = MegaCrit.Sts2.Core.Nodes.Screens.Map.NMapScreen.Instance?.IsTravelEnabled == true,
             ShopOpen = MegaCrit.Sts2.Core.Nodes.NRun.Instance?.MerchantRoom is { } shop && LocalSpectatorSource.Descendants<MegaCrit.Sts2.Core.Nodes.Screens.Shops.NMerchantInventory>(shop).Any(i => i.IsOpen) };

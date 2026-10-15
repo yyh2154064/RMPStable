@@ -34,6 +34,7 @@ internal sealed class MirrorHost : IDisposable
     private bool _normalOpeningNextLoad;
     internal void PreserveOpeningOnce() => _normalOpeningNextLoad = true;
     private readonly System.Collections.Generic.Queue<MultiplayerMirrorFrame> _multiFrames = new();
+    private readonly System.Collections.Generic.Queue<MultiplayerMirrorFrame> _drawingFrames = new();
     private MultiplayerMirrorFrame? _multiLatest;
     private MultiplayerMirrorFrame? _personalSent;
     private string _waitingRoom = "";
@@ -68,7 +69,7 @@ internal sealed class MirrorHost : IDisposable
     {
         Window?.Hide(); _parked = false; Multiplayer = multiplayer; Error = ""; _normalOpeningNextLoad = false;
         _viewSource = source; _sourceGeneration = 0; _checkpoint = null; _sentEvents = -1;
-        _multiFrames.Clear(); _multiLatest = _personalSent = null;
+        _multiFrames.Clear(); _drawingFrames.Clear(); _multiLatest = _personalSent = null;
         _waitingRoom = ""; _roomDirty = false;
         MultiplayerAuthority = null; _control = _controlDirty = false; _controlEpoch = 0;
         _publishedReady = false; _publishedHash = ""; _publishedEvents = -1;
@@ -90,6 +91,8 @@ internal sealed class MirrorHost : IDisposable
         _multiLatest = frame;
         _waitingRoom = "";
         _roomDirty = false;
+        if (frame.Kind == "load") _drawingFrames.Clear();
+        if (frame.Drawings.Count > 0) _drawingFrames.Enqueue(frame);
         if (frame.Kind != "load" && frame.Delta.Count == 0) return;
         if (frame.Kind == "load") { _multiFrames.Clear(); Process.DisplayReady = false; Process.LastIdle = false; Verified = false; }
         if (_multiFrames.Count >= 128) throw new InvalidOperationException("Multiplayer replica backlog exceeded");
@@ -115,16 +118,21 @@ internal sealed class MirrorHost : IDisposable
         {
             if (frame.Kind == "load") { _sourceGeneration = frame.Generation; _generation++; Process.Wire.Identity.Generation = _generation; }
             _ = Process.Wire.Send(new MirrorMessage { Kind = frame.Kind == "load" ? "load" : "events", Multiplayer = true,
-                Generation = _generation, ViewSource = _viewSource, NormalOpening = frame.Kind == "load" && _normalOpeningNextLoad, Index = frame.Start, Events = frame.Events, Payload = frame.Checkpoint, NoncombatRoom = frame.NoncombatRoom,
+                Generation = _generation, ViewSource = _viewSource, Names = frame.Names, PresentationProgress = frame.PresentationProgress, ActFloor = frame.ActFloor, NormalOpening = frame.Kind == "load" && _normalOpeningNextLoad, Index = frame.Start, Events = frame.Events, Payload = frame.Checkpoint, NoncombatRoom = frame.NoncombatRoom,
                 Operations = frame.Delta.ConvertAll(p => System.Text.Json.JsonSerializer.Deserialize<MirrorOperation>(p) ?? throw new System.IO.InvalidDataException("Empty native operation")) });
             if (frame.Kind == "load") _normalOpeningNextLoad = false;
         }
         var current = _multiLatest;
+        if (Process.Wire.Pending == 0 && _drawingFrames.TryPeek(out var drawingFrame) && drawingFrame.Generation == _sourceGeneration)
+        {
+            _drawingFrames.Dequeue();
+            _ = Process.Wire.Send(new MirrorMessage { Kind = "mapDrawings", Generation = _generation, Index = drawingFrame.DrawingStart, Drawings = drawingFrame.Drawings });
+        }
         if (current != null && !ReferenceEquals(_personalSent, current) && current.Generation == _sourceGeneration && Process.Wire.Pending == 0)
         {
             _personalSent = current;
             ApplyMultiplayerPermission(current.Authority);
-            _ = Process.Wire.Send(new MirrorMessage { Kind = "personal", Generation = _generation, Events = current.Events, Choice = current.Choice, Authority = current.Authority, TimerText = current.Timer, MapOpen = current.MapOpen, MapTravelEnabled = current.MapTravelEnabled, ShopOpen = current.ShopOpen });
+            _ = Process.Wire.Send(new MirrorMessage { Kind = "personal", Generation = _generation, Events = current.Events, Names = current.Names, RestTarget = current.RestTarget, Choice = current.Choice, Authority = current.Authority, TimerText = current.Timer, MapOpen = current.MapOpen, MapTravelEnabled = current.MapTravelEnabled, ShopOpen = current.ShopOpen });
         }
         SourceHash = current?.Hash ?? "";
         Verified = current?.Settled == true && SourceHash.Length > 0 && Process.DisplayReady && Process.LastIdle && Process.LastEvents == current.Events && Process.LastHash == SourceHash;
@@ -178,6 +186,12 @@ internal sealed class MirrorHost : IDisposable
             {
                 if (message.Request <= _intentRequest) continue;
                 _intentRequest = message.Request;
+                if (!Multiplayer && message.Model == "mapStroke")
+                {
+                    if (_control && message.Epoch == _controlEpoch && state != null && ReferenceEquals(_checkpoint, MirrorJournal.Checkpoint))
+                        MapDrawing042.Execute(message.Value, message.Epoch);
+                    continue;
+                }
                 Intent?.Invoke(message);
             }
             else { Error = "独立进程返回了不支持的消息"; Process.Dispose(); return; }
@@ -249,7 +263,9 @@ internal sealed class MirrorHost : IDisposable
         _publishedReady = false; _publishedHash = ""; _publishedEvents = -1;
         Process.LastIdle = false; Process.LastHash = ""; Process.DisplayReady = false; Verified = false; _timer = 0;
         _sentEvents = MirrorJournal.Operations.Count;
-        _ = Process.Wire.Send(new MirrorMessage { Kind = "load", Generation = _generation, ViewSource = _viewSource, NormalOpening = normalOpening, FastRestore = fastRestore || _fastRestoreNextLoad, Events = _sentEvents, Payload = MirrorState.Pack(replay), Operations = new(MirrorJournal.Operations) });
+        _ = Process.Wire.Send(new MirrorMessage { Kind = "load", Generation = _generation, ViewSource = _viewSource,
+            PresentationProgress = MegaCrit.Sts2.Core.Saves.JsonSerializationUtility.ToJson(MegaCrit.Sts2.Core.Saves.SaveManager.Instance.Progress.ToSerializable()),
+            NormalOpening = normalOpening, FastRestore = fastRestore || _fastRestoreNextLoad, Events = _sentEvents, Payload = MirrorState.Pack(replay), Operations = new(MirrorJournal.Operations) });
         _fastRestoreNextLoad = false;
     }
     internal void Invalidate()
@@ -268,6 +284,7 @@ internal sealed class MirrorHost : IDisposable
     internal bool AuthorizeIntent(RunState state, MirrorMessage message) => Process.Wire.Identity.Current(message) && _control && message.Epoch == _controlEpoch && message.Events == Process.LastEvents && message.Hash == Process.LastHash && Authorize(state);
     internal void Control(bool enabled, long epoch)
     {
+        if (!enabled) MapDrawing042.Stop();
         if (Multiplayer && enabled) throw new InvalidOperationException("Multiplayer control requires source-owned permission");
         _control = enabled; _controlEpoch = epoch; _controlDirty = true;
         if (Process.Authenticated && !_resetDirty && Process.Wire.Pending == 0)

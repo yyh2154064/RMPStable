@@ -25,6 +25,8 @@ internal sealed partial class MirrorRenderer
     internal ulong ViewSource => _viewSource == 0 ? _wire.Identity.Source : _viewSource;
     internal long MultiplayerGeneration => _generation;
     private bool _multiplayerRoomWaiting;
+    private int _drawingEvents;
+    private readonly System.Collections.Generic.Queue<MirrorMessage> _drawingMessages = new();
     private async Task LoadMultiplayer(MirrorMessage message)
     {
         var presentationSpeed = SaveManager.Instance.PrefsSave.FastMode;
@@ -33,6 +35,11 @@ internal sealed partial class MirrorRenderer
         try
         {
             Multiplayer = true; _control = false;
+            _drawingEvents = 0;
+            MultiplayerPresentation042.Reset();
+            MultiplayerPresentation042.Names = message.Names;
+            if (message.PresentationProgress.Length > 0)
+                SaveManager.Instance.Progress = ProgressState.FromSerializable(JsonSerializationUtility.FromJson<SerializableProgress>(message.PresentationProgress).SaveData!, new MegaCrit.Sts2.Core.Saves.Validation.DeserializationContext());
             MultiplayerPersonalUi.Reset();
             MirrorJournal.ResetReplicaRewards();
             _generation = message.Generation; _wire.Identity.Generation = _generation; _events = 0; _error = "";
@@ -92,10 +99,15 @@ internal sealed partial class MirrorRenderer
                 // FromSerializable does not restore ActFloor. Native map entry
                 // derives it from row + 1; direct room restoration bypasses that
                 // step, otherwise an ancient's map back button stays disabled.
-                _state.ActFloor = _state.CurrentMapCoord is { } coordinate ? coordinate.row + 1 : 0;
+                _state.ActFloor = message.ActFloor >= 0 ? message.ActFloor : _state.CurrentMapCoord is { } coordinate ? coordinate.row + 1 : 0;
                 await manager.EnterRoom(MultiplayerNoncombat.RestoreRoom(message.NoncombatRoom, _state));
             }
             else await manager.LoadIntoLatestMapCoord(AbstractRoom.FromSerializable(replay.serializableRun.PreFinishedRoom, _state));
+            if (manager.MapDrawingsToLoad != null)
+            {
+                MegaCrit.Sts2.Core.Nodes.Screens.Map.NMapScreen.Instance.Drawings.LoadDrawings(manager.MapDrawingsToLoad);
+                manager.MapDrawingsToLoad = null;
+            }
             // Native multiplayer opening keeps the executor paused until all
             // automatic effects finish. A fresh SL must show that opening now,
             // not wait behind its entire animation before exposing the room.
@@ -155,7 +167,9 @@ internal sealed partial class MirrorRenderer
                 // Some native room decisions await another player's choice.
                 // Continue consuming the authoritative stream that resolves it.
                 if (task != null) TrackNoncombatTask(task, _generation);
-                _events++; await Frame(_generation); continue;
+                _events++;
+                if (!operation.Kind.StartsWith("draw", StringComparison.Ordinal)) await Frame(_generation);
+                continue;
             }
             var item = MirrorState.Unpack<CombatReplayEvent>(operation.Payload); var manager = RunManager.Instance;
             switch (item.eventType)
@@ -187,6 +201,8 @@ internal sealed partial class MirrorRenderer
     { try { await task; } catch (Exception e) { if (_generation == generation) { _error = e.ToString(); GD.PrintErr("[RMP:NoncombatReplay] " + e); } } }
     private void ApplyNoncombatPresentation(MirrorMessage message)
     {
+        MultiplayerPresentation042.Names = message.Names;
+        MultiplayerPresentation042.Apply(message.RestTarget);
         var map = MegaCrit.Sts2.Core.Nodes.Screens.Map.NMapScreen.Instance;
         if (map != null && map.IsTravelEnabled != message.MapTravelEnabled) map.SetTravelEnabled(message.MapTravelEnabled);
         bool mapOpen = _localMapOpen ?? message.MapOpen;

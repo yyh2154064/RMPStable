@@ -21,7 +21,7 @@ internal static partial class MultiplayerMirrorSession
     internal static void RecordFinal(MirrorOperation operation, RunState state)
     {
         if (MirrorRenderer.IsRenderer || !ReferenceEquals(_state, state)) return;
-        RevokeControl(); _finalState = state; FinalOperations.Clear(); FinalOperations.Add(operation);
+        RevokeControl(); _finalState = state; FinalOperations.Clear(); FinalOperations.Add(operation); _timer = 0;
     }
     private static IEnumerable<NClickableControl> FinalButtons()
     {

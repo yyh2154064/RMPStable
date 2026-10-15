@@ -12,6 +12,12 @@ internal sealed partial class MirrorRenderer
     private readonly Queue<(long Generation, long Epoch, string Key, string Kind, string Value)> _mapInputs = new();
     private string _mapGestureKey = "", _mapGestureMode = "";
     private Vector2 _mapGesturePoint;
+    private string MapCoordinates(Vector2 point)
+    {
+        var drawings = NMapScreen.Instance.Drawings;
+        var local = drawings.GetGlobalTransformWithCanvas().AffineInverse() * ViewportPoint(point);
+        return Coordinates(MapDrawing042.ToNet(drawings, local));
+    }
     private void QueueScroll(string key, string value)
     {
         if (_mapInputs.Count < 2046) _mapInputs.Enqueue((_desiredGeneration, _epoch, key, "scroll", value));
@@ -25,19 +31,17 @@ internal sealed partial class MirrorRenderer
     }
     private void StartMapGesture(Vector2 point, string mode)
     {
-        if (_state == null || _waitingForAuthority || _mapGestureKey.Length > 0) return;
-        var action = _commands.CaptureCommands(_state).Control.Actions.FirstOrDefault(a => a.Enabled && a.Kind == (mode == "pan" ? "scroll" : "mapInput"));
-        if (action == null) return;
-        _mapGestureKey = action.NativePath; _mapGestureMode = mode; _mapGesturePoint = point;
-        if (mode != "pan") QueueMapInput("mapInput", mode + "," + Coordinates(ViewportPoint(point)));
+        if (_state == null || !_control || !MapBrowseOpen || _mapGestureKey.Length > 0) return;
+        _mapGestureKey = MirrorNativeUi.Key(NMapScreen.Instance); _mapGestureMode = mode; _mapGesturePoint = point;
+        if (mode != "pan") QueueMapInput("mapStroke", (mode == "pen" ? NMapScreen.Instance.Drawings.GetLocalDrawingMode(false) == DrawingMode.Erasing ? "erase" : "draw" : mode) + ":" + MapCoordinates(point));
     }
     private void CancelMapDrawing(Vector2 point)
     {
         if (_mapGestureKey.Length > 0) FinishMapGesture(point);
-        var action = _state == null ? null : _commands.CaptureCommands(_state).Control.Actions.FirstOrDefault(a => a.Enabled && a.Kind == "mapInput");
-        if (action == null) return;
-        _mapGestureKey = action.NativePath;
-        QueueMapInput("mapInput", "cancel," + Coordinates(ViewportPoint(point)));
+        if (_state == null || !MapBrowseOpen) return;
+        _mapGestureKey = MirrorNativeUi.Key(NMapScreen.Instance);
+        QueueMapInput("mapStroke", "cancel:");
+        SetLocalPenMode(DrawingMode.None);
         _mapGestureKey = "";
     }
     private void UpdateMapGesture(Vector2 point)
@@ -48,13 +52,13 @@ internal sealed partial class MirrorRenderer
             float distance = (ViewportPoint(point) - ViewportPoint(_mapGesturePoint)).Y;
             if (distance != 0) QueueMapInput("scroll", (distance > 0 ? "up:" : "down:") + Math.Min(64, Math.Abs(distance) / 40).ToString(CultureInfo.InvariantCulture));
         }
-        else QueueMapInput("mapInput", "move," + Coordinates(ViewportPoint(point)));
+        else QueueMapInput("mapStroke", "move:" + MapCoordinates(point));
         _mapGesturePoint = point;
     }
     private void FinishMapGesture(Vector2 point)
     {
         UpdateMapGesture(point);
-        if (_mapGestureMode != "pan") QueueMapInput("mapInput", "end," + Coordinates(ViewportPoint(point)));
+        if (_mapGestureMode != "pan") QueueMapInput("mapStroke", "end:");
         _mapGestureKey = ""; _mapGestureMode = "";
     }
     private void ProcessMapGesture()
@@ -64,6 +68,21 @@ internal sealed partial class MirrorRenderer
         if (NMapScreen.Instance?.IsOpen != true) { _mapGestureKey = ""; _mapGestureMode = ""; }
         UpdateMapGesture(_pointer);
         while (_mapInputs.TryPeek(out var pending) && (pending.Generation != _desiredGeneration || pending.Epoch != _epoch)) _mapInputs.Dequeue();
+        // Do not serialize every segment behind a gameplay hash round trip.
+        // The source validates the lease/generation and ordered native stroke.
+        while (_mapInputs.TryPeek(out var stroke) && stroke.Kind == "mapStroke")
+        {
+            _mapInputs.Dequeue();
+            string payload = stroke.Value;
+            if (payload.StartsWith("move:", StringComparison.Ordinal))
+            {
+                var points = new List<string> { payload.Substring(5) };
+                while (points.Count < 64 && _mapInputs.TryPeek(out var next) && next.Generation == stroke.Generation && next.Epoch == stroke.Epoch && next.Kind == "mapStroke" && next.Value.StartsWith("move:", StringComparison.Ordinal))
+                { _mapInputs.Dequeue(); points.Add(next.Value.Substring(5)); }
+                payload = "move:" + string.Join(";", points);
+            }
+            _ = _wire.Send(new MirrorMessage { Kind = "intent", Model = "mapStroke", Multiplayer = Multiplayer, Generation = _generation, Epoch = _epoch, Request = ++_request, Value = payload });
+        }
         if (NativeIdle && !_waitingForAuthority && _authorityReady && _authorityEvents == _events &&
             _authorityHash == MirrorState.Hash(_state) && _mapInputs.TryDequeue(out var input))
         {
@@ -107,8 +126,8 @@ internal sealed partial class MirrorRenderer
         float Number(int index) => float.Parse(parts[index], CultureInfo.InvariantCulture);
         switch (operation.Kind)
         {
-            case "drawStart": drawings.BeginLineLocal(new Vector2(Number(1), Number(2)), (DrawingMode)int.Parse(parts[0], CultureInfo.InvariantCulture)); break;
-            case "drawMove": drawings.UpdateCurrentLinePositionLocal(new Vector2(Number(0), Number(1))); break;
+            case "drawStart": drawings.BeginLineLocal(MapDrawing042.FromNet(drawings, new Vector2(Number(1), Number(2))), (DrawingMode)int.Parse(parts[0], CultureInfo.InvariantCulture)); break;
+            case "drawMove": drawings.UpdateCurrentLinePositionLocal(MapDrawing042.FromNet(drawings, new Vector2(Number(0), Number(1)))); break;
             case "drawEnd": drawings.StopLineLocal(); break;
             case "drawMode": drawings.SetDrawingModeLocal((DrawingMode)int.Parse(parts[0], CultureInfo.InvariantCulture)); break;
             default: throw new InvalidOperationException("Unknown native drawing operation");

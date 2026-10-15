@@ -16,9 +16,24 @@ internal sealed partial class MirrorRenderer
     private bool? _localMapOpen;
     private void ClickPresentation(MegaCrit.Sts2.Core.Nodes.GodotExtensions.NClickableControl button)
     {
+        if (button is MegaCrit.Sts2.Core.Nodes.Screens.Map.NMapDrawButton or MegaCrit.Sts2.Core.Nodes.Screens.Map.NMapEraseButton)
+        {
+            if (!_control) return;
+            var drawings = MegaCrit.Sts2.Core.Nodes.Screens.Map.NMapScreen.Instance.Drawings;
+            var wanted = button is MegaCrit.Sts2.Core.Nodes.Screens.Map.NMapEraseButton ? MegaCrit.Sts2.Core.Nodes.Screens.Map.DrawingMode.Erasing : MegaCrit.Sts2.Core.Nodes.Screens.Map.DrawingMode.Drawing;
+            SetLocalPenMode(drawings.GetLocalDrawingMode(false) == wanted ? MegaCrit.Sts2.Core.Nodes.Screens.Map.DrawingMode.None : wanted);
+            return;
+        }
         button.ForceClick();
         if (button == NRun.Instance?.GlobalUi.TopBar.Map || MirrorNativeUi.IsMapBrowseButton(button))
             _localMapOpen = MegaCrit.Sts2.Core.Nodes.Screens.Map.NMapScreen.Instance?.IsOpen;
+    }
+    private void SetLocalPenMode(MegaCrit.Sts2.Core.Nodes.Screens.Map.DrawingMode mode)
+    {
+        var map = MegaCrit.Sts2.Core.Nodes.Screens.Map.NMapScreen.Instance;
+        map.Drawings.SetDrawingModeLocal(mode);
+        foreach (var pen in LocalSpectatorSource.Descendants<MegaCrit.Sts2.Core.Nodes.Screens.Map.NMapDrawButton>(map)) pen.SetIsDrawing(mode == MegaCrit.Sts2.Core.Nodes.Screens.Map.DrawingMode.Drawing);
+        foreach (var eraser in LocalSpectatorSource.Descendants<MegaCrit.Sts2.Core.Nodes.Screens.Map.NMapEraseButton>(map)) eraser.SetIsErasing(mode == MegaCrit.Sts2.Core.Nodes.Screens.Map.DrawingMode.Erasing);
     }
     private NPotionPopup? PotionPopup => NRun.Instance == null ? null : LocalSpectatorSource.Descendants<NPotionPopup>(NRun.Instance)
         .LastOrDefault(p => !p.IsMarkedForRemoval && p.IsVisibleInTree());

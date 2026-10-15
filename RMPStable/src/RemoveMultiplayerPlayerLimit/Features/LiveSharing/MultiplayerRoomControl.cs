@@ -26,6 +26,13 @@ internal static partial class MultiplayerMirrorSession
         var player = LocalContext.GetMe(_state); var root = LocalSpectatorSource.ActiveNativeUi;
         if (player == null || root == null || NModalContainer.Instance?.OpenModal != null || NCapstoneContainer.Instance?.CurrentCapstoneScreen != null ||
             NGame.Instance.InspectCardScreen?.IsVisibleInTree() == true || NGame.Instance.InspectRelicScreen?.IsVisibleInTree() == true) return view;
+        if (MegaCrit.Sts2.Core.Nodes.Combat.NTargetManager.Instance is { IsInSelection: true } targeting && NRun.Instance?.RestSiteRoom is { } rest)
+        {
+            foreach (var character in rest.characterAnims.Where(c => targeting.AllowedToTargetNode(c)))
+                view.Actions.Add(new() { Id = "restTarget:" + ControlId(character), Kind = "restTarget", NativePath = MirrorNativeUi.Key(character.Hitbox), Enabled = true });
+            view.Context = "restTarget:" + _generation + ":" + _controlRevision;
+            return view;
+        }
         foreach (var button in LocalSpectatorSource.Descendants<NClickableControl>(root))
         {
             if (!button.IsEnabled || !button.IsVisibleInTree() || button.MouseFilter == Control.MouseFilterEnum.Ignore ||

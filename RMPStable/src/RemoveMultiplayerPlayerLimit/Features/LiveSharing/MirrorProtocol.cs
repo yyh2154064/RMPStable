@@ -37,6 +37,11 @@ internal sealed class MirrorMessage
     public bool MapTravelEnabled { get; set; }
     public MultiplayerChoiceView? Choice { get; set; }
     public MultiplayerControlView? Authority { get; set; }
+    public List<ParticipantSnapshot> Names { get; set; } = new();
+    public RestTargetView? RestTarget { get; set; }
+    public List<MirrorOperation> Drawings { get; set; } = new();
+    public string PresentationProgress { get; set; } = "";
+    public int ActFloor { get; set; } = -1;
     public string TargetKey { get; set; } = "";
     public bool FastRestore { get; set; }
     public bool NormalOpening { get; set; }

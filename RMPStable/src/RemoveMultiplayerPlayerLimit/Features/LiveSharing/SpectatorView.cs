@@ -41,7 +41,7 @@ internal sealed partial class SpectatorView : IDisposable
         _previousFps = Engine.MaxFps; _previousVsync = DisplayServer.WindowGetVsyncMode();
         if (DisplayServer.GetName() != "headless") { Engine.MaxFps = 120; DisplayServer.WindowSetVsyncMode(DisplayServer.VSyncMode.Disabled); }
         _controlToggle.Disabled = false;
-        if (mirror.Multiplayer) _controlToggle.TooltipText = T("申请战斗控制，须由所选玩家授权", "Request battle control; the selected player must approve");
+        if (mirror.Multiplayer) _controlToggle.TooltipText = "";
         SetControlEnabled(!mirror.Multiplayer && SpectatorPreferences.Current.ControlMode);
     }
     internal void Update(SpectatorSnapshot snapshot, bool verified, string error)
@@ -87,7 +87,7 @@ internal sealed partial class SpectatorView : IDisposable
             _modeThumb.Position = new Vector2(granted ? 58 : 2, 2);
             _controlToggle.SetPressedNoSignal(granted || MultiplayerMirrorSession.ControlRequested);
             _controlToggle.Disabled = !_mirror.Process.DisplayReady;
-            _controlToggle.TooltipText = _mirror.MultiplayerAuthority?.Reason ?? "战斗控制须由所选玩家授权";
+            _controlToggle.TooltipText = "";
         }
         else if (combat && _mirror.ControlEpoch != _epoch) SetControlEnabled(_controlEnabled);
         // Scene construction runs while hidden; expose only the current scene
@@ -102,11 +102,13 @@ internal sealed partial class SpectatorView : IDisposable
         _status.Position = new Vector2(_content.Size.X * .08f, _content.Size.Y * (_retry.Visible ? .68f : .78f));
         _status.Size = new Vector2(_content.Size.X * .84f, Math.Max(50,_content.Size.Y * .14f));
         LiveSharingController.RouteMapInput(!sourceDialog && _panel.GetGlobalRect().HasPoint(ShellPointer()));
+        ProcessControlTip();
     }
     private TResource? Asset<TResource>(string path) where TResource : Resource => ResourceLoader.Exists(path) ? ResourceLoader.Load<TResource>(path) : null;
     public void Dispose()
     {
         SetControlEnabled(false);
+        _controlTip?.Hide();
         if (GodotObject.IsInstanceValid(_overlay)) { RememberPanelLayout(); _overlay.Hide(); _overlay.GetParent()?.RemoveChild(_overlay); _overlay.QueueFree(); }
         if (Engine.MaxFps == 120) Engine.MaxFps = _previousFps;
         if (DisplayServer.GetName() != "headless" && DisplayServer.WindowGetVsyncMode() == DisplayServer.VSyncMode.Disabled) DisplayServer.WindowSetVsyncMode(_previousVsync);

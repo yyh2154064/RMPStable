@@ -42,6 +42,7 @@ internal static partial class MultiplayerNoncombat
     internal static RunState? State;
     internal static AbstractRoom? SourceRoom;
     internal static readonly List<MirrorOperation> Operations = new();
+    internal static readonly List<MirrorOperation> Drawings = new();
     private static int _sharedDepth;
     private static bool _installed;
     internal static bool Replica => MirrorRenderer.Active?.Multiplayer == true;
@@ -63,6 +64,7 @@ internal static partial class MultiplayerNoncombat
     {
         if (_installed) return; _installed = true;
         var h = new Harmony("RMPStable.MultiplayerNoncombat");
+        MultiplayerPresentation042.Initialize(h);
         void Patch(Type type, string method, string before, string? after = null, Func<MethodInfo, bool>? filter = null)
         {
             foreach (var m in type.GetMethods(Any).Where(m => m.Name == method && (filter?.Invoke(m) ?? true)))
@@ -80,6 +82,7 @@ internal static partial class MultiplayerNoncombat
         Patch(typeof(EventSynchronizer), "PlayerVotedForSharedOptionIndex", nameof(EventVote));
         Patch(typeof(EventSynchronizer), "ChooseSharedEventOption", nameof(SourceDecisionOnly));
         Patch(typeof(MapSelectionSynchronizer), "MoveToMapCoord", nameof(SourceDecisionOnly));
+        Patch(typeof(ActChangeSynchronizer), "MoveToNextAct", nameof(SourceDecisionOnly));
         h.Patch(typeof(MapSelectionSynchronizer).GetMethod("PlayerVotedForMapCoord")!, postfix: new HarmonyMethod(typeof(MultiplayerNoncombat).GetMethod(nameof(MapVotePresented), Any)));
         Patch(typeof(RestSiteSynchronizer), "ChooseOption", nameof(RestOption));
 #if STS2_0111
@@ -103,7 +106,7 @@ internal static partial class MultiplayerNoncombat
             Patch(typeof(NCardRewardSelectionScreen), name, nameof(SourceDecisionOnly));
     }
     private static void ReplayCheckpoint()
-    { if (Source) { Operations.Clear(); Checkpoint = null; Room = Array.Empty<byte>(); State = RunManager.Instance.DebugOnlyGetState(); SourceRoom = null; } }
+    { if (Source) { Operations.Clear(); Drawings.Clear(); Checkpoint = null; Room = Array.Empty<byte>(); State = RunManager.Instance.DebugOnlyGetState(); SourceRoom = null; } }
     private static void RoomEntering(AbstractRoom room, bool isRestoringRoomStackBase)
     {
         if (!Source || isRestoringRoomStackBase || room is CombatRoom) return;
@@ -113,7 +116,7 @@ internal static partial class MultiplayerNoncombat
     private static void CaptureRoom(AbstractRoom room, bool finishedCombat)
     {
         var m = RunManager.Instance; State = m.DebugOnlyGetState(); SourceRoom = room;
-        Operations.Clear(); var descriptor = room.ToSerializable(); if (finishedCombat) descriptor.IsPreFinished = true;
+        Operations.Clear(); Drawings.Clear(); var descriptor = room.ToSerializable(); if (finishedCombat) descriptor.IsPreFinished = true;
         Room = MirrorState.Pack(descriptor);
         Checkpoint = new CombatReplay { version = "RMPNoncombat", gitCommit = "native", modelIdHash = ModelIdSerializationCache.Hash, serializableRun = m.ToSave(null), choiceIds = m.PlayerChoiceSynchronizer.ChoiceIds.ToList(), rewardIds = m.RewardsSetSynchronizer.GetNextRewardIds().ToList(),
             nextActionId = m.ActionQueueSet.NextActionId, nextHookId = m.ActionQueueSynchronizer.NextHookId, nextChecksumId = m.ChecksumTracker.NextId };
@@ -150,6 +153,11 @@ internal static partial class MultiplayerNoncombat
         Invoke(map, "OnPlayerVoteChangedInternal", player, previous, __instance.GetVote(player)?.coord);
     }
     private static void RestOption(Player __0, int __1) => Add("rest", __0.NetId, __1.ToString());
+    internal static void RecordDrawing(ulong player, string kind, string value)
+    {
+        if (Source && (Checkpoint != null || MirrorState.CurrentReplay != null))
+            Drawings.Add(new() { Kind = kind, NodeKey = player.ToString(), Value = value });
+    }
 #if STS2_0111
     private static void RestSkipped(RestSiteSkippedMessage __0, ulong __1) => Add("restSkip", __1, payload: MirrorState.Pack(__0));
 #endif
@@ -186,7 +194,10 @@ internal static partial class MultiplayerNoncombat
             (seats[0].Position, seats[own].Position) = (seats[own].Position, seats[0].Position);
             if (own % 2 != 0) { __instance.GetCharacterForPlayer(me)?.FlipX(); __instance.GetCharacterForPlayer(state.Players[0])?.FlipX(); }
         }
-        seats[own].ZIndex = seats.Select(s => s.ZIndex).Max() + 1;
+        // Order siblings inside the background; a positive Z escapes the room
+        // and renders above native map/selection overlays as well.
+        var parent = seats[own].GetParent();
+        parent.MoveChild(seats[own], parent.GetChildCount() - 1);
     }
     private static bool RewardChoice(NCardRewardSelectionScreen __instance, ref Task<int?> __result)
     {
@@ -213,6 +224,8 @@ internal static partial class MultiplayerNoncombat
         var values = op.Value.Split(':');
         switch (op.Kind)
         {
+            case "drawStart": case "drawMove": case "drawEnd": case "drawMode":
+                MapDrawing042.Replay(MegaCrit.Sts2.Core.Nodes.Screens.Map.NMapScreen.Instance.Drawings, id, op.Kind, op.Value); break;
             case "event": Invoke(m.EventSynchronizer, "ChooseOptionForEvent", player, int.Parse(op.Value)); break;
             case "sharedEvent": Invoke(m.EventSynchronizer, "ChooseOptionForSharedEvent", uint.Parse(op.Value)); break;
             case "eventVote": Invoke(m.EventSynchronizer, "PlayerVotedForSharedOptionIndex", player, uint.Parse(values[0]), uint.Parse(values[1])); break;

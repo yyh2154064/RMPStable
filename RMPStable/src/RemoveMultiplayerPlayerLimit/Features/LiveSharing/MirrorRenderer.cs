@@ -157,6 +157,9 @@ internal sealed partial class MirrorRenderer : IDisposable
                 case "personal":
                     if (message.Generation == _desiredGeneration) _personalMessage = message;
                     break;
+                case "mapDrawings":
+                    if (message.Generation == _desiredGeneration) _drawingMessages.Enqueue(message);
+                    break;
                 case "multiplayer-room":
                     if (message.Generation != _desiredGeneration) break;
                     _pendingChoice = null; _pressedAction = null;
@@ -201,7 +204,7 @@ internal sealed partial class MirrorRenderer : IDisposable
                     break;
                 case "reset":
                     if (message.Generation <= _desiredGeneration) break;
-                    _pendingChoice = null; _pressedAction = null;
+                    _pendingChoice = null; _pressedAction = null; _drawingMessages.Clear();
                     _desiredGeneration = message.Generation; _sceneReady = false; _timerText = ""; _control = false; CancelDrag(); _pressedUi = null;
                     _waitingForAuthority = false; _stateMessages.Clear(); Stage("等待读档后的权威检查点");
                     _authorityReady = false; _pendingCards.Clear(); _submittedCard = null; _error = "";
@@ -218,7 +221,7 @@ internal sealed partial class MirrorRenderer : IDisposable
                     break;
                 case "load":
                     if (message.Generation <= _desiredGeneration) break;
-                    _pendingChoice = null; _pressedAction = null;
+                    _pendingChoice = null; _pressedAction = null; _drawingMessages.Clear();
                     _multiplayerRoomWaiting = false; _personalMessage = null;
                     _localMapOpen = null;
                     _desiredGeneration = message.Generation; _sceneReady = false; _timerText = ""; CancelDrag(); _pressedUi = null;
@@ -246,12 +249,23 @@ internal sealed partial class MirrorRenderer : IDisposable
         }
         else
         {
-            if (_personalMessage is { } personal && personal.Generation == _generation && _generation == _desiredGeneration && _events >= personal.Events)
+            if (_sceneReady && _personalMessage is { } personal && personal.Generation == _generation && _generation == _desiredGeneration && _events >= personal.Events)
             { MultiplayerPersonalUi.Apply(personal.Choice); ApplyBattleAuthority(personal); ApplyNoncombatPresentation(personal); _timerText = personal.TimerText; }
             if (_sceneReady && !_multiplayerRoomWaiting) { ProcessLocalInput(); ProcessBufferedCards(); ProcessPendingPotion(); ProcessPendingChoice(); }
             else { while (_buttons.TryDequeue(out _)) { } while (_keyboard.TryDequeue(out _)) { } }
         }
         RefreshRewardHover();
+        if (Multiplayer && _sceneReady && !_busy)
+            while (_drawingMessages.TryDequeue(out var drawingMessage))
+            {
+                if (drawingMessage.Generation != _generation) continue;
+                if (drawingMessage.Index != _drawingEvents) throw new InvalidDataException("Native map drawing sequence gap");
+                foreach (var operation in drawingMessage.Drawings)
+                {
+                    MapDrawing042.Replay(NMapScreen.Instance.Drawings, ulong.Parse(operation.NodeKey), operation.Kind, operation.Value);
+                    _drawingEvents++;
+                }
+            }
         if (_timerText.Length > 0 && _generation == _desiredGeneration && MirrorClock.Label is { } timer)
             timer.SetTextAutoSize(_timerText);
         bool idle = NativeIdle;
@@ -514,7 +528,8 @@ internal sealed partial class MirrorRenderer : IDisposable
                 CancelDrag();
                 var available = InputIdle && !_waitingForAuthority ? InputActions() : new List<ControlActionSnapshot>();
                 var selected = available.LastOrDefault(a => a.Enabled && a.Kind is not "play" and not "endTurn" and not "scroll" and not "mapInput" &&
-                    a.NativePath.Length > 0 && MirrorNativeUi.Resolve(a.NativePath) is Control n && Contains(InteractiveArea(n), input.Point));
+                    a.NativePath.Length > 0 && MirrorNativeUi.Resolve(a.NativePath) is Control n &&
+                    (NMapScreen.Instance?.IsOpen != true || MirrorNativeUi.Parent<NMapScreen>(n) != null) && Contains(InteractiveArea(n), input.Point));
                 if (selected != null) { _pressedAction = selected; if (Diagnostic) GD.Print("[RMP:Mirror:Input] native press " + selected.Kind + ":" + selected.NativePath); continue; }
                 if (NMapScreen.Instance?.IsOpen == true)
                 { StartMapGesture(input.Point, NMapScreen.Instance.Drawings.GetLocalDrawingMode(false) == DrawingMode.None ? "pan" : "pen"); continue; }
@@ -626,7 +641,7 @@ internal sealed partial class MirrorRenderer : IDisposable
         if (MapBrowseOpen)
         {
             var mapButton = LocalSpectatorSource.Descendants<NClickableControl>(NMapScreen.Instance)
-                .LastOrDefault(n => n.IsEnabled && MirrorNativeUi.IsMapBrowseButton(n) && Contains(InteractiveArea(n), point));
+                .LastOrDefault(n => n.IsEnabled && (MirrorNativeUi.IsMapBrowseButton(n) || _control && n is NMapDrawButton or NMapEraseButton) && Contains(InteractiveArea(n), point));
             if (mapButton != null) return mapButton;
         }
         var top = NRun.Instance?.GlobalUi.TopBar;
@@ -728,6 +743,8 @@ internal sealed partial class MirrorRenderer : IDisposable
         Multiplayer = false;
         try
         {
+            if (message.PresentationProgress.Length > 0)
+                SaveManager.Instance.Progress = ProgressState.FromSerializable(JsonSerializationUtility.FromJson<SerializableProgress>(message.PresentationProgress).SaveData!, new MegaCrit.Sts2.Core.Saves.Validation.DeserializationContext());
             _generation = message.Generation; _wire.Identity.Generation = _generation; _events = 0; _error = ""; _waitingForAuthority = false; _drawFrames = 0;
             _finalSave = null; _finalHash = "";
             _authorityReady = false; _pendingCards.Clear(); _submittedCard = null;
@@ -918,7 +935,7 @@ internal sealed partial class MirrorRenderer : IDisposable
                 else throw new InvalidDataException("Unknown native operation: " + operation.Kind);
             }
             _events++;
-            await Frame(generation);
+            if (!operation.Kind.StartsWith("draw", StringComparison.Ordinal)) await Frame(generation);
         }
     }
     private static NTargetingArrow? TargetingArrow => NRun.Instance?.GlobalUi?.TargetManager?.GetNodeOrNull<NTargetingArrow>("TargetingArrow");

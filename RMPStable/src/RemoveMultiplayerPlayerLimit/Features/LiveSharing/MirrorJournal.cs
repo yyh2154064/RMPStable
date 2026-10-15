@@ -226,8 +226,8 @@ internal static partial class MirrorJournal
             Operations.Add(new MirrorOperation { Kind = kind, NodeKey = key, Value = value });
     }
     private static void DrawingStarted(NMapDrawings __instance, Vector2 position, DrawingMode? overrideDrawingMode) =>
-        DrawingEvent(__instance, "drawStart", (int)(overrideDrawingMode ?? __instance.GetLocalDrawingMode(false)) + "," + Point(position));
-    private static void DrawingMoved(NMapDrawings __instance, Vector2 position) => DrawingEvent(__instance, "drawMove", Point(position));
+        DrawingEvent(__instance, "drawStart", (int)(overrideDrawingMode ?? __instance.GetLocalDrawingMode(false)) + "," + Point(MapDrawing042.ToNet(__instance, position)));
+    private static void DrawingMoved(NMapDrawings __instance, Vector2 position) => DrawingEvent(__instance, "drawMove", Point(MapDrawing042.ToNet(__instance, position)));
     private static void DrawingStopped(NMapDrawings __instance) => DrawingEvent(__instance, "drawEnd", "");
     private static void DrawingModeChanged(NMapDrawings __instance, DrawingMode drawingMode) => DrawingEvent(__instance, "drawMode", ((int)drawingMode).ToString());
     private static bool ReplicaDrawingInput() => !MirrorRenderer.IsRenderer && !LiveSharingController.MapInputInPanel;
