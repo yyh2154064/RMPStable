@@ -51,3 +51,5 @@ v0.107.1 / v0.111.0 两个 payload 和 Bootstrap 均为 `0.4.3.0`，编译零警
 - ZIP SHA-256：`04F9C294EA784F73A7D1853944FEA3A40C380C9CCFFF9003216F62842993C564`
 
 用户于 2026-10-17 明确要求提交推送 main、发布 Latest Release，并更新桌面上下文；Release 文案见 `docs/release-v0.4.3.md`。未替换当前游戏、真实存档或桌面旧模组，未运行历史累积测试。
+
+已发布 [RMP Stable v0.4.3](https://github.com/yyh2154064/RMPStable/releases/tag/v0.4.3)，源码提交 `823e38b96636d105a802a237efdcd45d1d85e050`。GitHub API 核对为 Latest、非草稿、非预发布，文案与本地 Markdown 一致；附件 `RMPStable-v0.4.3.zip` 为 2,594,779 字节，GitHub SHA-256 与上述本地 ZIP 一致。发布记录的后续文档提交不改变交付二进制或标签指向的修复代码。

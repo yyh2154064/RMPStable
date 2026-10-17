@@ -1,12 +1,12 @@
 # v0.4.3 交互修复已完成，等待用户手动验收
 
-2026-10-17 用户新反馈：队友窗口许愿选牌及眼睛按钮无交互、展开时观战/操控切换失败、设置返回不可点击。本轮先在现有 `multiInstanceTest` 快进到 main c916876 基线并修复；用户随后明确指定版本 0.4.3、精简介绍、上传 main、参考已有 Release 格式发布 Latest、完成后更新桌面上下文。仅复用唯一工作目录和批准 F 盘资源，不创建分支、工作树或克隆。交付将现有 main / multiInstanceTest 同步到同一修复提交，最终 Git SHA 与发布后核对记录见桌面最新交接；后续开发仍受 AGENTS.md 约束，不能把本轮 main 授权泛化为未来授权。
+2026-10-17 用户新反馈：队友窗口许愿选牌及眼睛按钮无交互、展开时观战/操控切换失败、设置返回不可点击。本轮先在现有 `multiInstanceTest` 快进到 main c916876 基线并修复；用户随后明确指定版本 0.4.3、精简介绍、上传 main、参考已有 Release 格式发布 Latest、完成后更新桌面上下文。仅复用唯一工作目录和批准 F 盘资源，不创建分支、工作树或克隆。交付已将现有 main / multiInstanceTest 同步到同一修复提交，发布源码提交为 823e38b96636d105a802a237efdcd45d1d85e050；发布记录另行正常提交，最终分支 SHA 见 Git 实际查询及桌面最新交接；后续开发仍受 AGENTS.md 约束，不能把本轮 main 授权泛化为未来授权。
 
 源码修改：战斗牌堆完整候选/合法操作与稳定模型定位，来源校验后调用原版选牌回调，眼睛按钮本地浏览，不捕获点击的原生提示窗及模式点击状态，设置返回实际图像点击区域；减少重复元数据排队，修正多选取消的重复高亮，并清理空牌堆/自动完成的选择捕获。原版源码审查涵盖 13 张牌、2 种药水，未找到原版消耗牌堆取牌调用。
 
 最终独立专项 `tools/Test-Interaction043.ps1` / `tests/Interaction043Probe`：三端各 **149 项、合计 447 项通过**。证据 `F:/projectFile/RMPStable-development/evidence/multiplayer-interaction043-20261017-150328`，原版 localhost ENet 三来源/三副本，实际 Windows 渲染，后台隐藏、静音、不操作系统鼠标。三个来源均正常退出 0、未由清理终止，全部隔离副本退出、专项档案清理。实测八张相关卡牌及两种药水，包括真实空弃牌堆、随后许愿、大牌堆滚动、过滤、多选/取消/零张确认；眼睛及展开切换，观战/操控设置返回。其余同类牌完成代码审查。v0.107.1 仅编译验证；没有实际完整打牌通关或 Steam 跨电脑验证。详细范围与失败证据见 `docs/interactions043.md`。
 
-直接可用目录：`F:/projectFile/RMPStable-development/build/package/RMPStable`，同级 `RMPStable-v0.4.3.zip` 五文件逐一哈希一致；DLL SHA-256 **1633F8363ECEA2D70098C1FCCA9F8E3DF8768FC4A01821D9BAD56878F5999DEF**，ZIP SHA-256 **04F9C294EA784F73A7D1853944FEA3A40C380C9CCFFF9003216F62842993C564**。两 payload / Bootstrap 版本为 0.4.3.0，编译零警告错误。模组介绍已精简，版本、启动日志及更新器标识统一。Release 目标为 `https://github.com/yyh2154064/RMPStable/releases/tag/v0.4.3`，标题和 Markdown 沿用现有 Release 风格，附件顶层 `RMPStable/`，内含 DLL、PCK、JSON、README-multiInstance.md、update.cmd。旧 v0.4.2 ZIP 保留，未替换当前游戏、真实存档或桌面旧模组。
+直接可用目录：`F:/projectFile/RMPStable-development/build/package/RMPStable`，同级 `RMPStable-v0.4.3.zip` 五文件逐一哈希一致；DLL SHA-256 **1633F8363ECEA2D70098C1FCCA9F8E3DF8768FC4A01821D9BAD56878F5999DEF**，ZIP SHA-256 **04F9C294EA784F73A7D1853944FEA3A40C380C9CCFFF9003216F62842993C564**。两 payload / Bootstrap 版本为 0.4.3.0，编译零警告错误。模组介绍已精简，版本、启动日志及更新器标识统一。已发布非草稿、非预发布的 Latest Release： `https://github.com/yyh2154064/RMPStable/releases/tag/v0.4.3`，标题和 Markdown 沿用现有 Release 风格，附件顶层 `RMPStable/`，内含 DLL、PCK、JSON、README-multiInstance.md、update.cmd。已核对 GitHub Release 标题、Markdown、附件名称/大小及 SHA-256 与本地一致。旧 v0.4.2 ZIP 保留，未替换当前游戏、真实存档或桌面旧模组。
 
 **v0.4.3 本轮三项问题等待用户手动验收**；未运行任何历史 full / feedback / replay / all 或旧阶段验收套件。新会话不能仅因接收上下文重建或运行游戏。通过后移出活动专项与待验收；未通过按反馈继续修复，未反馈则保留。v0.4.2 及此前未明确验收的其它项目仍按下方记录保留，不自动验收、不默认重跑；.12 及此前已验收。
 
