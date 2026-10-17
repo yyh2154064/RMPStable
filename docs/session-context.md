@@ -1,6 +1,6 @@
-# v0.4.4 修复与专项完成，准备发布（2026-10-17）
+# v0.4.4 已发布 Latest，等待手动验收（2026-10-17）
 
-本轮以 **v0.4.3** 为基线。用户明确确认 v0.4.3 以前的测试验证通过，移出活动待验收，不再默认重跑；历史细节留在 Git 和各版本文档。本轮明确授权修复后提交推送 GitHub main、仿照往期 Release 标题和 Markdown 发布 Latest，并更新原桌面上下文；发布完成后追加实际记录。本轮 main 授权不泛化到未来开发。
+本轮以 **v0.4.3** 为基线。用户明确确认 v0.4.3 以前的测试验证通过，移出活动待验收，不再默认重跑；历史细节留在 Git 和各版本文档。本轮明确授权修复后提交推送 GitHub main、仿照往期 Release 标题和 Markdown 发布 Latest，并更新原桌面上下文；上述发布已完成，桌面交接随后同步。本轮 main 授权不泛化到未来开发。
 
 ## 修复
 
@@ -38,3 +38,12 @@
 唯一工作目录 `C:/Project_file/RMPStable-Github`，开发使用已有 multiInstanceTest；只保留 main / liveSharingTest / multiInstanceTest，发布后实际 SHA 以 Git 查询和桌面交接为准。不建立分支、工作树、克隆、C 盘游戏副本或重复资源。main 与 multiInstanceTest 发布前基线均为 848e5e267009198615f9727fff60fb4497d1fd80；liveSharingTest 保持 6e3b367ee7e5391c83479a68905ead88f91abc0c。
 
 已批准的 F 盘开发根目录 `F:/projectFile/RMPStable-development`，复用 references（双版本引用）、original（旧参考源码）、runtime（隔离游戏）、profile-seed、build、evidence。原版 PCK 只读 `F:/SteamLibrary/steamapps/common/Slay the Spire 2/SlayTheSpire2.pck`。隐藏后台构建／隔离测试已授权，不逐次询问，仍遵守系统权限边界。
+
+
+## 已发布记录
+
+- 正式 Latest Release：[RMP Stable v0.4.4](https://github.com/yyh2154064/RMPStable/releases/tag/v0.4.4)，非草稿、非预发布。
+- 修复源码提交及 v0.4.4 标签：`1edd98e1a5912e146f12247a3237c3442b83f9d2`。
+- GitHub API 已核对标题、正文与 docs/release-v0.4.4.md 一致；附件 RMPStable-v0.4.4.zip 为 2,598,049 字节，远端 SHA-256 与上述本地一致。
+- main / multiInstanceTest 已正常推送至修复提交，随后正常提交发布记录；最终本地／远端 SHA 以 Git 和桌面最新交接为准，liveSharingTest 不变。未建立新分支、工作树或克隆，未强推。
+- 后续文档提交不改变已测 DLL、附件或 Release 标签源码。唯一活动待验收仍为 v0.4.4，不将发布当作用户手动验收。

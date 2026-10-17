@@ -59,3 +59,6 @@ v0.107.1 / v0.111.0 payload 和 Bootstrap 已完成编译，零警告错误；�
 
 - DLL SHA-256：`4FD6037637FDF5E41BDD6082AC7C77A25FB9441E0FF9B13CF46EB2C3D9C0E1F2`
 - ZIP SHA-256：`92B9CD147C2F804DBA000A7F74BA98CAF24EDF73F8E8B06899AF67D2A968C710`
+
+
+已按用户授权发布 [RMP Stable v0.4.4](https://github.com/yyh2154064/RMPStable/releases/tag/v0.4.4) Latest。修复源码及标签为 `1edd98e1a5912e146f12247a3237c3442b83f9d2`；GitHub 正文与 docs/release-v0.4.4.md 一致，附件大小和 SHA-256 与本地一致，非草稿、非预发布。发布后仅补交付文档记录，不修改二进制或标签。
