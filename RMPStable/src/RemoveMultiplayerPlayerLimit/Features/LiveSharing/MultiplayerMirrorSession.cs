@@ -54,7 +54,14 @@ internal sealed class MultiplayerMirrorFrame
 // Native room subscriptions, passive replay and source-owned battle control.
 internal static partial class MultiplayerMirrorSession
 {
-    private sealed class Subscription { internal string Token = ""; internal long Generation; internal int Events, Drawings; }
+    private sealed class Subscription
+    {
+        internal string Token = "";
+        internal long Generation;
+        internal int Events, Drawings;
+        internal byte[] LastFrame = Array.Empty<byte>();
+        internal ulong LastSent;
+    }
     private sealed class FragmentAssembly
     {
         internal int Transfer, Parts, Next;
@@ -155,7 +162,7 @@ internal static partial class MultiplayerMirrorSession
                 if (noncombat) frame.NoncombatRoom = MultiplayerNoncombat.Room;
             }
             frame.Delta = operations.Skip(start).Select(e => JsonSerializer.SerializeToUtf8Bytes(e)).ToList();
-            Send(pair.Key, sub.Token, frame); sub.Generation = _generation; sub.Events = frame.Events; sub.Drawings = MultiplayerNoncombat.Drawings.Count;
+            SendFrame(pair.Key, sub.Token, frame, sub); sub.Generation = _generation; sub.Events = frame.Events; sub.Drawings = MultiplayerNoncombat.Drawings.Count;
         }
     }
     internal static void Select(ulong source)
@@ -218,11 +225,21 @@ internal static partial class MultiplayerMirrorSession
                 .Select(c => MirrorState.Pack(c.CardModel!.ToSerializable())).ToList();
         return frame;
     }
-    private static void Send(ulong destination, string token, MultiplayerMirrorFrame frame)
+    private static void Send(ulong destination, string token, MultiplayerMirrorFrame frame) => SendFrame(destination, token, frame, null);
+    private static void SendFrame(ulong destination, string token, MultiplayerMirrorFrame frame, Subscription? subscription)
     {
         if (_service == null) return;
         byte[] bytes = JsonSerializer.SerializeToUtf8Bytes(frame);
         if (bytes.Length > MirrorWire.MaxPacket) throw new InvalidDataException("Multiplayer mirror frame too large");
+        // A full pile can contain many legal card actions. Do not keep queuing
+        // identical metadata ahead of clicks and their results. Changed state
+        // still publishes immediately; stable state retains a 1s keepalive.
+        if (subscription != null)
+        {
+            ulong now = Time.GetTicksMsec();
+            if (now - subscription.LastSent < 1000 && bytes.AsSpan().SequenceEqual(subscription.LastFrame)) return;
+            subscription.LastFrame = bytes; subscription.LastSent = now;
+        }
         int transfer = ++_transfer, parts = (bytes.Length + 32767) / 32768;
         for (int part = 0; part < parts; part++) Route(new RmpMirrorPacket { Origin = _service.NetId, Destination = destination, Token = token,
             Transfer = transfer, Part = part, Parts = parts, Data = bytes.Skip(part * 32768).Take(32768).ToArray() });

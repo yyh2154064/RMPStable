@@ -60,6 +60,7 @@ internal static class MirrorNativeUi
     internal static string Key(Node? node)
     {
         if (node == null || !GodotObject.IsInstanceValid(node) || !node.IsInsideTree() || node.IsQueuedForDeletion()) return "";
+        if (node is NGridCardHolder && Parent<NCardGrid>(node) is { } grid) return Key(grid) + "/" + Part(node);
         foreach (var (name, root) in Roots())
         {
             if (root == null || !GodotObject.IsInstanceValid(root) || node != root && !root.IsAncestorOf(node)) continue;
@@ -68,6 +69,19 @@ internal static class MirrorNativeUi
             parts.Reverse(); return name + "/" + string.Join("/", parts);
         }
         return "";
+    }
+    internal static List<CardModel> AllGridCards(NCardGrid grid) => ((IEnumerable<CardModel>)GridCards.GetValue(grid)!).ToList();
+    internal static string GridCardKey(NCardGrid grid, CardModel card) => Key(grid) + "/" + nameof(NGridCardHolder) + "!" + card.Id + ":" + card.CurrentUpgradeLevel + ":grid:" + AllGridCards(grid).IndexOf(card);
+    internal static CardModel? ResolveGridCard(string key, out NCardGrid? grid)
+    {
+        grid = null;
+        int slash = key.LastIndexOf('/');
+        if (slash < 0 || Resolve(key.Substring(0, slash)) is not NCardGrid found) return null;
+        string part = key.Substring(slash + 1); int marker = part.LastIndexOf(":grid:", StringComparison.Ordinal);
+        var cards = AllGridCards(found);
+        if (marker < 0 || !int.TryParse(part.Substring(marker + 6), out int index) || index < 0 || index >= cards.Count ||
+            part.Substring(0, marker) != nameof(NGridCardHolder) + "!" + cards[index].Id + ":" + cards[index].CurrentUpgradeLevel) return null;
+        grid = found; return cards[index];
     }
     internal static Node? Resolve(string key, bool revealSelection = false)
     {
@@ -121,6 +135,7 @@ internal static class MirrorNativeUi
     // Browsing does not make a game decision. Opening these screens is local
     // presentation, so their back buttons/cards/scrolls cannot enter the journal.
     internal static bool IsLocalPresentation(Node node) => Parent<NCardPileScreen>(node) != null || Parent<NDeckViewScreen>(node) != null ||
+        node is NPeekButton ||
         IsMapBrowseButton(node) ||
         Parent<NPauseMenu>(node) != null || Parent<MegaCrit.Sts2.Core.Nodes.Relics.NRelicInventoryHolder>(node) != null || Parent<NMultiplayerPlayerState>(node) != null || Parent<NMultiplayerPlayerExpandedState>(node) != null || Parent<NAbandonRunConfirmPopup>(node) != null || Under(node, NGame.Instance?.InspectCardScreen) || Under(node, NGame.Instance?.InspectRelicScreen) ||
         Under(node, RemoveMultiplayerPlayerLimit.Infrastructure.SceneMonitor.FindSettingsScreen()) ||

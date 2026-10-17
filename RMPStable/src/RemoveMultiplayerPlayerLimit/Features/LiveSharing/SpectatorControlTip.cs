@@ -6,7 +6,7 @@ namespace RemoveMultiplayerPlayerLimit.Features.LiveSharing;
 
 internal sealed partial class SpectatorView
 {
-    private PopupPanel? _controlTip;
+    private Window? _controlTip;
     private Label? _controlTipText;
     private ulong _controlHoverAt;
     internal string ControlTipText => T("此操作将控制", "This will control ") +
@@ -23,9 +23,18 @@ internal sealed partial class SpectatorView
     {
         if (_controlTip == null)
         {
-            _controlTip = new PopupPanel { Name = "SpectatorControlTip", ForceNative = true, Unfocusable = true, Transient = true };
+            // PopupPanel grabs popup input even when Unfocusable: the click on
+            // the mode button only dismisses the tip. A passive native window
+            // stays above the replica without consuming owner mouse input.
+            _controlTip = new Window { Name = "SpectatorControlTip", ForceNative = true, Unfocusable = true, Transient = true,
+                Borderless = true, MousePassthrough = true, PopupWindow = false, Visible = false };
             _overlay.AddChild(_controlTip);
-            _controlTipText = new Label { MouseFilter = Control.MouseFilterEnum.Ignore };
+            var background = new Panel { MouseFilter = Control.MouseFilterEnum.Ignore };
+            background.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
+            background.AddThemeStyleboxOverride("panel", new StyleBoxFlat { BgColor = new Color("182126"), BorderColor = new Color("b7c7ce"),
+                BorderWidthLeft = 1, BorderWidthRight = 1, BorderWidthTop = 1, BorderWidthBottom = 1 });
+            _controlTip.AddChild(background);
+            _controlTipText = new Label { MouseFilter = Control.MouseFilterEnum.Ignore, Position = new Vector2(12, 8) };
             _controlTipText.AddThemeFontSizeOverride("font_size", 18);
             _controlTip.AddChild(_controlTipText);
         }
@@ -38,7 +47,9 @@ internal sealed partial class SpectatorView
         if (DisplayServer.GetName() != "headless") MirrorWin32.ClientToScreen(MirrorWin32.OwnWindow, ref screen);
         _controlTip.ContentScaleFactor = Math.Max(.5f, viewport.GetFinalTransform().Scale.X);
         var tipSize = _controlTipText.GetCombinedMinimumSize() * _controlTip.ContentScaleFactor + new Vector2(24, 16);
-        _controlTip.Popup(new Rect2I(screen.X, screen.Y, (int)tipSize.X, (int)tipSize.Y));
+        _controlTip.Position = new Vector2I(screen.X, screen.Y);
+        _controlTip.Size = new Vector2I((int)tipSize.X, (int)tipSize.Y);
+        _controlTip.Show();
         // An engine canvas layer cannot cover a separate OS game window.
         // A native, nonactivating popup is ordered above that owned window.
         if (DisplayServer.GetName() != "headless")

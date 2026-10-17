@@ -42,14 +42,16 @@ internal sealed partial class SpectatorView {
 	private static string T(string zh, string en) => LocalSpectatorSource.T(zh, en);
 	private Button CreateControlToggle()
 	{
-		var button = new Button { Name = "SpectatorControlToggle", ToggleMode = true, FocusMode = Control.FocusModeEnum.None, Size = new Vector2(116, 28), TooltipText = T("观战 / 控制（记住选择）", "Watch / Control (remember selection)") };
+        var button = new Button { Name = "SpectatorControlToggle", FocusMode = Control.FocusModeEnum.None, Size = new Vector2(116, 28), TooltipText = T("观战 / 控制（记住选择）", "Watch / Control (remember selection)") };
 		button.AddThemeStyleboxOverride("normal", new StyleBoxFlat { BgColor = new Color("152126"), CornerRadiusTopLeft = 16, CornerRadiusTopRight = 16, CornerRadiusBottomLeft = 16, CornerRadiusBottomRight = 16 });
 		_modeThumb = new Panel { Position = new Vector2(2, 2), Size = new Vector2(56, 24), MouseFilter = Control.MouseFilterEnum.Ignore };
 		_modeThumb.AddThemeStyleboxOverride("panel", new StyleBoxFlat { BgColor = new Color("42696f"), CornerRadiusTopLeft = 14, CornerRadiusTopRight = 14, CornerRadiusBottomLeft = 14, CornerRadiusBottomRight = 14 });
 		button.AddChild(_modeThumb);
 		Text(button, T("观战", "Watch"), new Rect2(2, 2, 56, 24), 14, HorizontalAlignment.Center);
 		Text(button, T("控制", "Control"), new Rect2(58, 2, 56, 24), 14, HorizontalAlignment.Center);
-		button.Toggled += SetPreferredControl;
+        // Authority updates arrive between mouse-down and mouse-up. Derive the
+        // next request from the session, without rewriting a toggle mid-click.
+        button.Pressed += () => SetPreferredControl(!(_mirror.Multiplayer ? _controlEnabled || MultiplayerMirrorSession.ControlRequested : _controlEnabled));
 		return button;
 	}
 	private void SetPreferredControl(bool enabled)

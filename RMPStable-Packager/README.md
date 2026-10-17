@@ -1,6 +1,6 @@
 # RMP Stable one-click packager
 
-Double-click `一键打包.cmd` to build a distributable v0.4.2 ZIP from the sibling
+Double-click `一键打包.cmd` to build a distributable v0.4.3 ZIP from the sibling
 `RMPStable` source directory. ZIP files are written to `output` beside this
 script. The package contains one DLL with embedded implementations for v0.107.1
 and v0.111.0 Public Beta.

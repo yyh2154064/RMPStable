@@ -9,9 +9,9 @@ using RemoveMultiplayerPlayerLimit.Infrastructure;
 
 [assembly: AssemblyCompany("RMP Stable Contributors")]
 [assembly: AssemblyConfiguration("Release")]
-[assembly: AssemblyFileVersion("0.4.2.0")]
-[assembly: AssemblyInformationalVersion("0.4.2")]
+[assembly: AssemblyFileVersion("0.4.3.0")]
+[assembly: AssemblyInformationalVersion("0.4.3")]
 [assembly: AssemblyProduct("RMP Stable")]
 [assembly: AssemblyTitle("RMP Stable")]
 [assembly: AssemblyHasScripts(new Type[] { typeof(SceneRegistry) })]
-[assembly: AssemblyVersion("0.4.2.0")]
+[assembly: AssemblyVersion("0.4.3.0")]

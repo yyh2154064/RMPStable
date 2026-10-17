@@ -1,5 +1,9 @@
 # RMP Stable
 
+## v0.4.3 原生窗口交互修复
+
+修复多人战斗牌堆选牌、选牌眼睛按钮、展开窗口观战/操控切换及设置返回点击区域。新专项仅覆盖本轮反馈，详见 ../docs/interactions043.md；等待用户手动验收。
+
 ## v0.4.2
 
 Fixes rest portrait layering, passive Mend targeting, canonical map drawing coordinates and streaming, direct multiplayer control with native name tips, sidebar names, terminal replay retention and Architect progress context. Focused validation: docs/feedback042.md; pending manual acceptance.

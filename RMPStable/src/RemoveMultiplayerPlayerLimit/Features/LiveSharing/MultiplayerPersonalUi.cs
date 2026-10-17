@@ -77,7 +77,7 @@ internal static class MultiplayerPersonalUi
         void Patch(MethodBase m, string? before = null, string? after = null) => h.Patch(m,
             before == null ? null : new HarmonyMethod(typeof(MultiplayerPersonalUi).GetMethod(before, Any)),
             after == null ? null : new HarmonyMethod(typeof(MultiplayerPersonalUi).GetMethod(after, Any)));
-        foreach (var method in typeof(CardSelectCmd).GetMethods(Any).Where(m => m.Name.StartsWith("From", StringComparison.Ordinal))) Patch(method, nameof(CaptureCommand));
+        foreach (var method in typeof(CardSelectCmd).GetMethods(Any).Where(m => m.Name.StartsWith("From", StringComparison.Ordinal))) Patch(method, nameof(CaptureCommand), nameof(EndCommand));
         Patch(typeof(PlayerChoiceSynchronizer).GetMethod("ReserveChoiceId")!, after: nameof(ReservedChoice));
         Patch(typeof(PlayerChoiceSynchronizer).GetMethod("WaitForRemoteChoice")!, after: nameof(WaitChoice));
         foreach (var pair in new[] { (typeof(NPlayerHand), "OnHolderPressed"), (typeof(NPlayerHand), "OnSelectModeConfirmButtonPressed"),
@@ -90,8 +90,9 @@ internal static class MultiplayerPersonalUi
             foreach (var m in type.GetMethods(Any).Where(m => m.DeclaringType == type && m.Name is "OnCardClicked" or "ConfirmSelection" or "CloseSelection" or "CancelSelection" or "CheckIfSelectionComplete" or "PreviewSelection")) Patch(m, nameof(AllowSelection));
     }
     private static bool AllowSelection() => !Replica || _applying > 0;
-    private static void CaptureCommand(MethodBase __originalMethod, object[] __args)
+    private static void CaptureCommand(MethodBase __originalMethod, object[] __args, out Selection? __state)
     {
+        __state = null;
         if (!Replica) return;
         var player = __args.OfType<Player>().FirstOrDefault(); if (player == null || !LocalContext.IsMe(player)) return;
         Pending.Remove(player.NetId);
@@ -116,6 +117,20 @@ internal static class MultiplayerPersonalUi
             else if (__originalMethod.Name == "FromDeckForRemoval") selection.Cards = selection.Cards.OrderBy(c => c.Type == CardType.Curse ? -999999999 : player.Deck.Cards.ToList().IndexOf(c)).ToList();
         }
         Pending[player.NetId] = selection;
+        __state = selection;
+    }
+    private static void EndCommand(Task __result, Selection? __state)
+    {
+        if (__state != null) _ = ClearCapture(__result, __state);
+    }
+    private static async Task ClearCapture(Task command, Selection selection)
+    {
+        // Keep the game's original task/result and resume on its UI context.
+        try { await command; } catch { /* The original caller observes failure. */ }
+        // Early-return paths differ between game versions: some reserve an ID,
+        // others do not. Neither needs a selector capture after completion.
+        if (Pending.TryGetValue(selection.Player.NetId, out var pending) && ReferenceEquals(pending, selection)) Pending.Remove(selection.Player.NetId);
+        foreach (var key in Reserved.Where(p => ReferenceEquals(p.Value, selection)).Select(p => p.Key).ToList()) Reserved.Remove(key);
     }
     private static void ReservedChoice(Player player, uint __result)
     {
@@ -167,14 +182,27 @@ internal static class MultiplayerPersonalUi
         finally { if (ReferenceEquals(_view, view)) { _view = null; _kind = ""; } }
     }
     internal static void Reset() { Pending.Clear(); Reserved.Clear(); _view = null; _kind = ""; }
+    internal static bool SelectPileCard(string path)
+    {
+        if (Replica || NOverlayStack.Instance?.Peek() is not NCombatPileCardSelectScreen selector ||
+            Read(selector, "_grid") is not NCardGrid grid ||
+            Read(selector, "_completionSource") is not TaskCompletionSource<IEnumerable<CardModel>> completion || completion.Task.IsCompleted ||
+            MirrorNativeUi.ResolveGridCard(path, out var resolvedGrid) is not { } card || !ReferenceEquals(grid, resolvedGrid) ||
+            Read(selector, "_pile") is not CardPile pile || !pile.Cards.Contains(card) ||
+            Read(selector, "_filter") is Func<CardModel, bool> filter && !filter(card)) return false;
+        // The native grid virtualizes holders; selecting a valid model must not
+        // depend on the source's scroll position or a one-frame allocation pass.
+        // Keep native max-count, deselection, confirmation and async completion.
+        Call(selector, "OnCardClicked", card); return true;
+    }
     private static List<CardModel> Cards(Node view)
     {
         if (view is NCardRewardSelectionScreen) return (Read(view, "_options") as IEnumerable<CardCreationResult>)?.Select(c => c.Card).ToList() ?? new();
         if (view is NPlayerHand) return LocalContext.GetMe(RunManager.Instance.DebugOnlyGetState())?.PlayerCombatState?.Hand.Cards.ToList() ?? new();
-        // Combat-pile selectors leave the base _cards empty; their live grid
-        // owns the filtered, sorted cards and updates on pile contents changes.
+        // The virtualized grid's holders cover only the current scroll window.
+        // A choice must describe the entire filtered, sorted pile on both ends.
         if (view is NCombatPileCardSelectScreen && Read(view, "_grid") is NCardGrid grid)
-            return grid.CurrentlyDisplayedCards.Where(c => c != null).ToList();
+            return MirrorNativeUi.AllGridCards(grid);
         return (Read(view, "_cards") as IEnumerable<CardModel>)?.ToList() ?? new();
     }
     internal static MultiplayerChoiceView? Capture()
@@ -243,7 +271,8 @@ internal static class MultiplayerPersonalUi
             else if (Read(_view, "_selectedCards") is HashSet<CardModel> set && Read(_view, "_grid") is { } grid)
             {
                 foreach (var card in selected.Except(desired)) Call(grid, "UnhighlightCard", card);
-                set.Clear(); foreach (var card in desired) { set.Add(card); Call(grid, "HighlightCard", card); }
+                foreach (var card in desired.Except(selected)) Call(grid, "HighlightCard", card);
+                set.Clear(); foreach (var card in desired) set.Add(card);
                 if (Read(_view, "_confirmButton") is NClickableControl button) { if (source.Confirm) button.Enable(); else button.Disable(); }
             }
         }

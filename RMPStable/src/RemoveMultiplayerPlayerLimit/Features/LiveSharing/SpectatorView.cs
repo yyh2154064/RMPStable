@@ -56,7 +56,6 @@ internal sealed partial class SpectatorView : IDisposable
         if (_mirror.Multiplayer)
         {
             MultiplayerMirrorSession.RequestControl(enabled);
-            _controlToggle.SetPressedNoSignal(enabled);
             return;
         }
         if (_controlEnabled != enabled || _epoch == 0 || _mirror.ControlEpoch != _epoch)
@@ -65,7 +64,6 @@ internal sealed partial class SpectatorView : IDisposable
             _modeTween?.Kill(); _modeTween = _modeThumb.CreateTween();
             _modeTween.TweenProperty(_modeThumb, "position:x", enabled ? 58f : 2f, .16).SetTrans(Tween.TransitionType.Cubic).SetEase(Tween.EaseType.Out);
         }
-        _controlToggle.SetPressedNoSignal(enabled);
     }
     internal Vector2 ShellPointer()
     {
@@ -85,7 +83,6 @@ internal sealed partial class SpectatorView : IDisposable
             bool granted = _mirror.MultiplayerAuthority?.Granted == true;
             _controlEnabled = granted; _epoch = _mirror.ControlEpoch;
             _modeThumb.Position = new Vector2(granted ? 58 : 2, 2);
-            _controlToggle.SetPressedNoSignal(granted || MultiplayerMirrorSession.ControlRequested);
             _controlToggle.Disabled = !_mirror.Process.DisplayReady;
             _controlToggle.TooltipText = "";
         }

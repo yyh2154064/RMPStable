@@ -215,6 +215,15 @@ internal static partial class MultiplayerMirrorSession
         {
             Node? root = choice.Kind is "Hand" or "Upgrade" ? NPlayerHand.Instance : NOverlayStack.Instance.Peek() as Node;
             if (root == null) return view;
+            if (root is MegaCrit.Sts2.Core.Nodes.Screens.CardSelection.NCombatPileCardSelectScreen &&
+                MultiplayerPersonalUi.Read(root, "_grid") is MegaCrit.Sts2.Core.Nodes.Cards.NCardGrid grid)
+            {
+                // Scrolling is local in each process. Advertise every legal
+                // model, including cards for which the source has no holder.
+                foreach (var card in MirrorNativeUi.AllGridCards(grid))
+                    view.Actions.Add(new() { Id = "select:" + ControlId(card) + ":" + nameof(NGridCardHolder), Kind = "select", CardId = card.Id.ToString(), NativePath = MirrorNativeUi.GridCardKey(grid, card), Enabled = true });
+            }
+            else
             foreach (var holder in LocalSpectatorSource.Descendants<NCardHolder>(root).Where(h => h.CardModel != null && LocalSpectatorSource.NativeReplayReady(h, LocalSpectatorSource.HandSelectionContext(h))))
                 view.Actions.Add(new() { Id = "select:" + ControlId(holder.CardModel!) + ":" + holder.GetType().Name, Kind = "select", CardId = holder.CardModel!.Id.ToString(), NativePath = MirrorNativeUi.Key(holder), Enabled = true });
             var confirm = MultiplayerPersonalUi.Read(root, root is NPlayerHand ? "_selectModeConfirmButton" : "_confirmButton") as NClickableControl;
@@ -263,6 +272,8 @@ internal static partial class MultiplayerMirrorSession
         if (action.Kind is "native" or "buy") return ExecuteRoomAction(action);
         if (action.Kind == "select")
         {
+            if (NOverlayStack.Instance?.Peek() is MegaCrit.Sts2.Core.Nodes.Screens.CardSelection.NCombatPileCardSelectScreen)
+                return MultiplayerPersonalUi.SelectPileCard(action.NativePath);
             if (MirrorNativeUi.Resolve(action.NativePath, true) is not NCardHolder selected || !LocalSpectatorSource.NativeReplayReady(selected, LocalSpectatorSource.HandSelectionContext(selected))) return false;
             selected.EmitSignal(NCardHolder.SignalName.Pressed, selected); return true;
         }

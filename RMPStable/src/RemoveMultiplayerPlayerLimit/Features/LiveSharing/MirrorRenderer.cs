@@ -391,7 +391,8 @@ internal sealed partial class MirrorRenderer : IDisposable
     private bool Contains(Control node, Vector2 point) => GodotObject.IsInstanceValid(node) && node.IsVisibleInTree() &&
         new Rect2(Vector2.Zero, node.Size).HasPoint(node.GetGlobalTransformWithCanvas().AffineInverse() * ViewportPoint(point));
     private static Control InteractiveArea(Control node) => node is NCardHolder holder ? holder.Hitbox :
-        node is NMerchantSlot slot ? slot.Hitbox : node is NCreature creature ? creature.Hitbox : node;
+        node is NMerchantSlot slot ? slot.Hitbox : node is NCreature creature ? creature.Hitbox :
+        node is NBackButton && MultiplayerPersonalUi.Read(node, "_buttonImage") is Control image ? image : node;
     private MirrorHit? Hit(string kind, Vector2 point)
     {
         if (kind == "play" && NPlayerHand.Instance is { } hand)
@@ -484,7 +485,7 @@ internal sealed partial class MirrorRenderer : IDisposable
                         else { NCapstoneContainer.Instance.Close(); SendIntent("menu", -1, -1, CurrentHash, _events, value: menuName); }
                     }
                 }
-                else if (GodotObject.IsInstanceValid(releasedUi) && Contains(releasedUi, input.Point) && releasedUi is NClickableControl clickable)
+                else if (GodotObject.IsInstanceValid(releasedUi) && Contains(InteractiveArea(releasedUi), input.Point) && releasedUi is NClickableControl clickable)
                     ClickPresentation(clickable);
                 else if (GodotObject.IsInstanceValid(releasedUi) && releasedUi is NCardHolder holder && Contains(holder.Hitbox, input.Point))
                     holder.EmitSignal(NCardHolder.SignalName.Pressed, holder);
@@ -626,7 +627,7 @@ internal sealed partial class MirrorRenderer : IDisposable
             // clickable controls directly, including controls outside the root's
             // layout rectangle; sliders still receive viewport mouse events.
             var clickable = LocalSpectatorSource.Descendants<NClickableControl>(settings)
-                .LastOrDefault(n => n.IsEnabled && Contains(n, point));
+                .LastOrDefault(n => n.IsEnabled && Contains(InteractiveArea(n), point));
             if (clickable != null && !clickable.GetType().Name.Contains("Slider")) return clickable;
             return LocalSpectatorSource.Descendants<Control>(settings).Any(n => Contains(n, point)) ? settings : null;
         }
@@ -638,6 +639,10 @@ internal sealed partial class MirrorRenderer : IDisposable
         if (PresentationScrollRoot is { } screenNode)
             return LocalSpectatorSource.Descendants<NClickableControl>(screenNode).LastOrDefault(n => n.IsEnabled && MirrorNativeUi.Parent<NCardHolder>(n) == null && Contains(n, point)) ??
                 (Control?)LocalSpectatorSource.Descendants<NCardHolder>(screenNode).LastOrDefault(n => n.Hitbox.IsEnabled && Contains(n.Hitbox, point));
+        // Peeking only hides the local selector. It never completes a choice or
+        // changes the source player's selection, in watch or control mode.
+        if (NOverlayStack.Instance?.Peek() is MegaCrit.Sts2.Core.Nodes.Screens.CardSelection.NCardGridSelectionScreen selector &&
+            MultiplayerPersonalUi.Read(selector, "_peekButton") is NPeekButton eye && eye.IsEnabled && Contains(eye, point)) return eye;
         if (MapBrowseOpen)
         {
             var mapButton = LocalSpectatorSource.Descendants<NClickableControl>(NMapScreen.Instance)
