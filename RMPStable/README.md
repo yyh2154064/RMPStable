@@ -1,16 +1,8 @@
 # RMP Stable
 
-## v0.4.3 原生窗口交互修复
+## v0.4.4 原生选牌修复
 
-修复多人战斗牌堆选牌、选牌眼睛按钮、展开窗口观战/操控切换及设置返回点击区域。新专项仅覆盖本轮反馈，详见 ../docs/interactions043.md；等待用户手动验收。
-
-## v0.4.2
-
-Fixes rest portrait layering, passive Mend targeting, canonical map drawing coordinates and streaming, direct multiplayer control with native name tips, sidebar names, terminal replay retention and Architect progress context. Focused validation: docs/feedback042.md; pending manual acceptance.
-
-## v0.4.1
-
-Fixes native map browsing before Neow and other ancient choices in singleplayer and multiplayer windows: wheel/drag, boss routes, legend hover, back and Escape, including spectator mode.
+补齐附魔、变形界面及预览／取消／确认，记住观战／控制选择，修复潘多拉结果页确认。专项入口 tools/Test-Selection044.ps1，记录 ../docs/selections044.md。以 v0.4.3 为基线，更早版本已验收。
 
 Adds native singleplayer and multiplayer spectator/control windows (F8), with
 the selected player's character in front and source-authorized battle, potion,

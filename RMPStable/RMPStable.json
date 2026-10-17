@@ -1,9 +1,9 @@
 {
   "id": "RMPStable",
   "name": "RMP Stable",
-  "version": "0.4.3",
+  "version": "0.4.4",
   "author": "灰灰神教！",
-  "description": "支持16人联机、快速SL及原生观战/操控窗口。v0.4.3修复许愿、液态记忆等牌堆选牌、眼睛按钮、观战/操控切换及设置返回。兼容v0.107.1、v0.111.0。",
+  "description": "支持16人联机、快速SL及原生观战/操控窗口。v0.4.4修复附魔、变形等选牌界面，并记住观战/控制选择。兼容v0.107.1、v0.111.0。",
   "dependencies": [],
   "has_pck": true,
   "has_dll": true,

@@ -602,7 +602,8 @@ internal sealed partial class MirrorRenderer : IDisposable
     private bool UiOnlyOpen => SceneMonitor.FindSettingsScreen()?.IsVisibleInTree() == true;
     private bool PresentationOpen => UiOnlyOpen || NCapstoneContainer.Instance?.CurrentCapstoneScreen != null ||
         NMapScreen.Instance?.IsOpen == true || NOverlayStack.Instance?.Peek() != null || NModalContainer.Instance?.OpenModal != null;
-    private Control? PresentationScrollRoot => NCapstoneContainer.Instance?.CurrentCapstoneScreen is NDeckViewScreen deck ? deck :
+    private Control? PresentationScrollRoot => NCapstoneContainer.Instance?.CurrentCapstoneScreen is NSimpleCardsViewScreen results ? results :
+        NCapstoneContainer.Instance?.CurrentCapstoneScreen is NDeckViewScreen deck ? deck :
         NCapstoneContainer.Instance?.CurrentCapstoneScreen is NCardPileScreen pile ? pile :
         NCapstoneContainer.Instance?.CurrentCapstoneScreen is NMultiplayerPlayerExpandedState player ? player : null;
     private static string WheelValue(float wheel) => (wheel > 0 ? "up:" : "down:") + Math.Min(64, Math.Abs(wheel)).ToString(System.Globalization.CultureInfo.InvariantCulture);
@@ -637,11 +638,11 @@ internal sealed partial class MirrorRenderer : IDisposable
             return LocalSpectatorSource.Descendants<NClickableControl>(pause).LastOrDefault(n =>
                 n.Name.ToString() is "Resume" or "Settings" or "Compendium" or "GiveUp" or "SaveAndQuit" or "RmpQuickSl" && n.IsEnabled && Contains(n, point));
         if (PresentationScrollRoot is { } screenNode)
-            return LocalSpectatorSource.Descendants<NClickableControl>(screenNode).LastOrDefault(n => n.IsEnabled && MirrorNativeUi.Parent<NCardHolder>(n) == null && Contains(n, point)) ??
+            return LocalSpectatorSource.Descendants<NClickableControl>(screenNode).LastOrDefault(n => n.IsEnabled && MirrorNativeUi.IsLocalPresentation(n) && MirrorNativeUi.Parent<NCardHolder>(n) == null && Contains(n, point)) ??
                 (Control?)LocalSpectatorSource.Descendants<NCardHolder>(screenNode).LastOrDefault(n => n.Hitbox.IsEnabled && Contains(n.Hitbox, point));
         // Peeking only hides the local selector. It never completes a choice or
         // changes the source player's selection, in watch or control mode.
-        if (NOverlayStack.Instance?.Peek() is MegaCrit.Sts2.Core.Nodes.Screens.CardSelection.NCardGridSelectionScreen selector &&
+        if (NOverlayStack.Instance?.Peek() is Node selector &&
             MultiplayerPersonalUi.Read(selector, "_peekButton") is NPeekButton eye && eye.IsEnabled && Contains(eye, point)) return eye;
         if (MapBrowseOpen)
         {

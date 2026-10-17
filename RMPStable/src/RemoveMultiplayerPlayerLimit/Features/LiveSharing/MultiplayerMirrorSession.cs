@@ -10,6 +10,7 @@ using MegaCrit.Sts2.Core.Multiplayer.Replay;
 using MegaCrit.Sts2.Core.Nodes;
 using MegaCrit.Sts2.Core.Nodes.Combat;
 using MegaCrit.Sts2.Core.Nodes.Screens.Overlays;
+using MegaCrit.Sts2.Core.Nodes.Screens.Capstones;
 using MegaCrit.Sts2.Core.Nodes.Cards.Holders;
 using MegaCrit.Sts2.Core.Runs;
 using MegaCrit.Sts2.Core.Platform;
@@ -30,6 +31,7 @@ internal sealed class MultiplayerMirrorFrame
     public bool MapOpen { get; set; }
     public bool MapTravelEnabled { get; set; }
     public bool ShopOpen { get; set; }
+    public bool ResultCardsOpen { get; set; }
     public List<byte[]> Delta { get; set; } = new();
     public string Hash { get; set; } = "";
     public bool Settled { get; set; }
@@ -218,11 +220,13 @@ internal static partial class MultiplayerMirrorSession
             Screen = NOverlayStack.Instance?.Peek()?.GetType().Name ?? "Room", Choice = MultiplayerPersonalUi.Capture(), Timer = MirrorClock.Label?.Text ?? "",
             Names = Sources(), RestTarget = MultiplayerPresentation042.CaptureTarget(), ActFloor = _state?.ActFloor ?? -1,
             MapOpen = MegaCrit.Sts2.Core.Nodes.Screens.Map.NMapScreen.Instance?.IsOpen == true,
+            ResultCardsOpen = NCapstoneContainer.Instance?.CurrentCapstoneScreen is MegaCrit.Sts2.Core.Nodes.Screens.NSimpleCardsViewScreen,
             MapTravelEnabled = MegaCrit.Sts2.Core.Nodes.Screens.Map.NMapScreen.Instance?.IsTravelEnabled == true,
             ShopOpen = MegaCrit.Sts2.Core.Nodes.NRun.Instance?.MerchantRoom is { } shop && LocalSpectatorSource.Descendants<MegaCrit.Sts2.Core.Nodes.Screens.Shops.NMerchantInventory>(shop).Any(i => i.IsOpen) };
-        if (NOverlayStack.Instance?.Peek() is Node screen)
-            frame.Candidates = LocalSpectatorSource.Descendants<NCardHolder>(screen).Where(c => c.CardModel != null)
-                .Select(c => MirrorState.Pack(c.CardModel!.ToSerializable())).ToList();
+        // Transform previews cycle canonical templates, which are not mutable
+        // run cards and cannot be serialized as choices. Publish only the exact
+        // native choice contract, independent of recycled/preview holders.
+        frame.Candidates = frame.Choice?.Cards ?? new();
         return frame;
     }
     private static void Send(ulong destination, string token, MultiplayerMirrorFrame frame) => SendFrame(destination, token, frame, null);

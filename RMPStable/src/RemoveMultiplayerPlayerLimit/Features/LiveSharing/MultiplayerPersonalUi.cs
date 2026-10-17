@@ -37,6 +37,7 @@ internal sealed class MultiplayerChoiceView
     public bool CanSkip { get; set; }
     public bool Preview { get; set; }
     public List<byte[]> Cards { get; set; } = new();
+    public List<int> BundleSizes { get; set; } = new();
     public List<int> Eligible { get; set; } = new();
     public List<int> Selected { get; set; } = new();
 }
@@ -57,6 +58,10 @@ internal static class MultiplayerPersonalUi
         internal List<CardModel> Cards = new();
         internal List<CardCreationResult>? Results;
         internal bool CanSkip;
+        internal IReadOnlyList<IReadOnlyList<CardModel>>? Bundles;
+        internal EnchantmentModel? Enchantment;
+        internal int Amount;
+        internal Func<CardModel, CardTransformation>? Transformation;
     }
     private static readonly Dictionary<ulong, Selection> Pending = new();
     private static readonly Dictionary<(ulong, uint), Selection> Reserved = new();
@@ -86,23 +91,35 @@ internal static class MultiplayerPersonalUi
             (typeof(NCombatPileCardSelectScreen), "OnCardClicked"), (typeof(NCombatPileCardSelectScreen), "CompleteSelection"),
             (typeof(NChooseACardSelectionScreen), "SelectHolder"), (typeof(NChooseACardSelectionScreen), "OnSkipButtonReleased") })
             Patch(pair.Item1.GetMethod(pair.Item2, Any)!, nameof(AllowSelection));
-        foreach (var type in new[] { typeof(NDeckCardSelectScreen), typeof(NDeckUpgradeSelectScreen) })
-            foreach (var m in type.GetMethods(Any).Where(m => m.DeclaringType == type && m.Name is "OnCardClicked" or "ConfirmSelection" or "CloseSelection" or "CancelSelection" or "CheckIfSelectionComplete" or "PreviewSelection")) Patch(m, nameof(AllowSelection));
+        foreach (var name in new[] { "OnBundleClicked", "CancelSelection", "ConfirmSelection" }) Patch(typeof(NChooseABundleSelectionScreen).GetMethod(name, Any)!, nameof(AllowSelection));
+        foreach (var type in new[] { typeof(NDeckCardSelectScreen), typeof(NDeckUpgradeSelectScreen), typeof(NDeckEnchantSelectScreen), typeof(NDeckTransformSelectScreen) })
+            foreach (var m in type.GetMethods(Any).Where(m => m.DeclaringType == type && m.Name is "OnCardClicked" or "ConfirmSelection" or "CloseSelection" or "CancelSelection" or "CheckIfSelectionComplete" or "PreviewSelection" or "OpenPreviewScreen" or "CompleteSelection")) Patch(m, nameof(AllowSelection));
     }
     private static bool AllowSelection() => !Replica || _applying > 0;
     private static void CaptureCommand(MethodBase __originalMethod, object[] __args, out Selection? __state)
     {
         __state = null;
         if (!Replica) return;
-        var player = __args.OfType<Player>().FirstOrDefault(); if (player == null || !LocalContext.IsMe(player)) return;
-        Pending.Remove(player.NetId);
+        // Capture the innermost enchantment overload: it owns the exact filtered
+        // candidates and infers the player from their deck, without a Player arg.
+        if (__originalMethod.Name == "FromDeckForEnchantment" && __args.OfType<Player>().Any()) return;
+        var inputCards = __args.OfType<IEnumerable<CardModel>>().FirstOrDefault()?.ToList();
+        var player = __args.OfType<Player>().FirstOrDefault() ?? inputCards?.FirstOrDefault()?.Owner; if (player == null || !LocalContext.IsMe(player)) return;
         string kind = __originalMethod.Name switch { "FromHand" => "Hand", "FromHandForUpgrade" => "Upgrade", "FromSimpleGrid" or "FromSimpleGridForRewards" => "Grid",
-            "FromCombatPile" => "Pile", "FromChooseACardScreen" => "Choose", "FromDeckGeneric" or "FromDeckForRemoval" => "Deck", "FromDeckForUpgrade" => "DeckUpgrade", _ => "" };
+            "FromCombatPile" => "Pile", "FromChooseACardScreen" => "Choose", "FromDeckGeneric" or "FromDeckForRemoval" => "Deck", "FromDeckForUpgrade" => "DeckUpgrade",
+            "FromChooseABundleScreen" => "Bundle", "FromDeckForEnchantment" => "DeckEnchant", "FromDeckForTransformation" => "DeckTransform", _ => "" };
         if (kind.Length == 0) return;
+        Pending.Remove(player.NetId);
         var selection = new Selection { Player = player, Kind = kind, Prefs = __args.OfType<CardSelectorPrefs>().FirstOrDefault(),
             Pile = __args.OfType<CardPile>().FirstOrDefault(), Filter = __args.OfType<Func<CardModel, bool>>().FirstOrDefault(),
             Source = __args.OfType<AbstractModel>().FirstOrDefault(), CanSkip = __args.OfType<bool>().FirstOrDefault() };
-        selection.Cards = __args.OfType<IEnumerable<CardModel>>().FirstOrDefault()?.ToList() ?? new();
+        selection.Cards = inputCards ?? new();
+        selection.Bundles = __args.OfType<IReadOnlyList<IReadOnlyList<CardModel>>>().FirstOrDefault();
+        selection.Enchantment = __args.OfType<EnchantmentModel>().FirstOrDefault();
+        selection.Amount = __args.OfType<int>().FirstOrDefault();
+        selection.Transformation = __args.OfType<Func<CardModel, CardTransformation>>().FirstOrDefault();
+        if (kind == "DeckEnchant") selection.Cards = selection.Cards.OrderBy(c => player.Deck.Cards.ToList().IndexOf(c)).ToList();
+        if (kind == "DeckTransform") selection.Cards = player.Deck.Cards.Where(c => c.Type != CardType.Quest && c.IsTransformable).ToList();
         selection.Results = __args.OfType<IEnumerable<CardCreationResult>>().FirstOrDefault()?.ToList();
         if (selection.Results != null) selection.Cards = selection.Results.Select(c => c.Card).ToList();
         if (kind == "Upgrade") { selection.Prefs = new CardSelectorPrefs(new LocString("gameplay_ui", "CHOOSE_CARD_UPGRADE_HEADER"), 1); selection.Filter = c => c.IsUpgradable; }
@@ -145,7 +162,7 @@ internal static class MultiplayerPersonalUi
     {
         if (resultTask.IsCompleted) return await resultTask; // Historical choice: no transient selector flashes.
         var renderer = MirrorRenderer.Active!; long generation = renderer.MultiplayerGeneration;
-        Node view; Task<IEnumerable<CardModel>> display;
+        Node view; Task display;
         switch (selection.Kind)
         {
             case "Hand": case "Upgrade":
@@ -164,6 +181,12 @@ internal static class MultiplayerPersonalUi
                 var deck = NDeckCardSelectScreen.Create(selection.Cards, selection.Prefs); NOverlayStack.Instance.Push(deck); view = deck; display = deck.CardsSelected(); break;
             case "DeckUpgrade":
                 var upgrades = NDeckUpgradeSelectScreen.ShowScreen(selection.Cards, selection.Prefs, selection.Player.RunState); view = upgrades; display = upgrades.CardsSelected(); break;
+            case "Bundle":
+                var bundle = NChooseABundleSelectionScreen.ShowScreen(selection.Bundles!); view = bundle; display = bundle.CardsSelected(); break;
+            case "DeckEnchant":
+                var enchant = NDeckEnchantSelectScreen.ShowScreen(selection.Cards, selection.Enchantment!, selection.Amount, selection.Prefs); view = enchant; display = enchant.CardsSelected(); break;
+            case "DeckTransform":
+                var transform = NDeckTransformSelectScreen.ShowScreen(selection.Cards, selection.Transformation ?? (c => new CardTransformation(c)), selection.Prefs); view = transform; display = transform.CardsSelected(); break;
             default: return await resultTask;
         }
         _view = view; _choice = choice; _kind = selection.Kind;
@@ -171,9 +194,15 @@ internal static class MultiplayerPersonalUi
         {
             var result = await resultTask;
             if (renderer.MultiplayerGeneration != generation || !GodotObject.IsInstanceValid(view)) return result;
+            if (selection.Kind == "Bundle")
+            {
+                int index = result.AsIndex();
+                ((TaskCompletionSource<IEnumerable<IReadOnlyList<CardModel>>>)Read(view, "_completionSource")!).TrySetResult(index < 0 ? Array.Empty<IReadOnlyList<CardModel>>() : new[] { selection.Bundles![index] });
+                await display; return result;
+            }
             IEnumerable<CardModel> cards = selection.Kind == "Choose" ? result.AsIndex() < 0 ? Array.Empty<CardModel>() : new[] { selection.Cards[result.AsIndex()] } :
                 selection.Kind == "Grid" ? result.AsIndexes().Select(i => selection.Cards[i]).ToList() :
-                selection.Kind is "Deck" or "DeckUpgrade" ? result.AsDeckCards() : result.AsCombatCards();
+                selection.Kind.StartsWith("Deck", StringComparison.Ordinal) ? result.AsDeckCards() : result.AsCombatCards();
             ((TaskCompletionSource<IEnumerable<CardModel>>)Read(view, view is NPlayerHand ? "_selectionCompletionSource" : "_completionSource")!).TrySetResult(cards.ToList());
             await display;
             if (view is NCardGridSelectionScreen && GodotObject.IsInstanceValid(view) && view.IsInsideTree()) NOverlayStack.Instance.Remove((IOverlayScreen)view);
@@ -182,13 +211,14 @@ internal static class MultiplayerPersonalUi
         finally { if (ReferenceEquals(_view, view)) { _view = null; _kind = ""; } }
     }
     internal static void Reset() { Pending.Clear(); Reserved.Clear(); _view = null; _kind = ""; }
-    internal static bool SelectPileCard(string path)
+    internal static bool SelectGridCard(string path)
     {
-        if (Replica || NOverlayStack.Instance?.Peek() is not NCombatPileCardSelectScreen selector ||
+        if (Replica || NOverlayStack.Instance?.Peek() is not NCardGridSelectionScreen selector ||
             Read(selector, "_grid") is not NCardGrid grid ||
             Read(selector, "_completionSource") is not TaskCompletionSource<IEnumerable<CardModel>> completion || completion.Task.IsCompleted ||
             MirrorNativeUi.ResolveGridCard(path, out var resolvedGrid) is not { } card || !ReferenceEquals(grid, resolvedGrid) ||
-            Read(selector, "_pile") is not CardPile pile || !pile.Cards.Contains(card) ||
+            !MirrorNativeUi.AllGridCards(grid).Contains(card) || PreviewVisible(selector) ||
+            selector is NCombatPileCardSelectScreen && (Read(selector, "_pile") is not CardPile pile || !pile.Cards.Contains(card)) ||
             Read(selector, "_filter") is Func<CardModel, bool> filter && !filter(card)) return false;
         // The native grid virtualizes holders; selecting a valid model must not
         // depend on the source's scroll position or a one-frame allocation pass.
@@ -197,6 +227,7 @@ internal static class MultiplayerPersonalUi
     }
     private static List<CardModel> Cards(Node view)
     {
+        if (view is NChooseABundleSelectionScreen) return ((IReadOnlyList<IReadOnlyList<CardModel>>)Read(view, "_bundles")!).SelectMany(b => b).ToList();
         if (view is NCardRewardSelectionScreen) return (Read(view, "_options") as IEnumerable<CardCreationResult>)?.Select(c => c.Card).ToList() ?? new();
         if (view is NPlayerHand) return LocalContext.GetMe(RunManager.Instance.DebugOnlyGetState())?.PlayerCombatState?.Hand.Cards.ToList() ?? new();
         // The virtualized grid's holders cover only the current scroll window.
@@ -205,36 +236,55 @@ internal static class MultiplayerPersonalUi
             return MirrorNativeUi.AllGridCards(grid);
         return (Read(view, "_cards") as IEnumerable<CardModel>)?.ToList() ?? new();
     }
+    internal static bool PreviewVisible(Node view) => new[] { "_previewContainer", "_upgradeSinglePreviewContainer", "_upgradeMultiPreviewContainer", "_enchantSinglePreviewContainer", "_enchantMultiPreviewContainer", "_bundlePreviewContainer" }.Any(f => Read(view, f) is Control { Visible: true });
     internal static MultiplayerChoiceView? Capture()
     {
         Node? view = NPlayerHand.Instance?.CurrentMode is NPlayerHand.Mode.SimpleSelect or NPlayerHand.Mode.UpgradeSelect ? NPlayerHand.Instance :
             NOverlayStack.Instance?.Peek() as Node;
-        if (view is not NPlayerHand and not NSimpleCardSelectScreen and not NCombatPileCardSelectScreen and not NChooseACardSelectionScreen and not NDeckCardSelectScreen and not NDeckUpgradeSelectScreen and not NCardRewardSelectionScreen) return null;
+        if (view is not NPlayerHand and not NSimpleCardSelectScreen and not NCombatPileCardSelectScreen and not NChooseACardSelectionScreen and not NDeckCardSelectScreen and not NDeckUpgradeSelectScreen and not NDeckEnchantSelectScreen and not NDeckTransformSelectScreen and not NCardRewardSelectionScreen and not NChooseABundleSelectionScreen) return null;
         var player = LocalContext.GetMe(RunManager.Instance.DebugOnlyGetState()); if (player == null) return null;
         int slot = RunManager.Instance.DebugOnlyGetState()!.GetPlayerSlotIndex(player);
         var ids = RunManager.Instance.PlayerChoiceSynchronizer.ChoiceIds; if (slot >= ids.Count || ids[slot] == 0) return null;
         var cards = Cards(view); var prefs = Read(view, "_prefs") is CardSelectorPrefs p ? p : default;
         var selected = (Read(view, "_selectedCards") as IEnumerable<CardModel>)?.ToList() ?? new();
         var filter = (Read(view, "_currentSelectionFilter") ?? Read(view, "_filter")) as Func<CardModel, bool>;
-        bool choose = view is NChooseACardSelectionScreen, canSkip = Read(view, "_canSkip") is true;
-        return new MultiplayerChoiceView { Id = ids[slot] - 1, Kind = view is NPlayerHand ? NPlayerHand.Instance.CurrentMode == NPlayerHand.Mode.UpgradeSelect ? "Upgrade" : "Hand" : view is NSimpleCardSelectScreen ? "Grid" : view is NCombatPileCardSelectScreen ? "Pile" : view is NDeckCardSelectScreen ? "Deck" : view is NDeckUpgradeSelectScreen ? "DeckUpgrade" : view is NCardRewardSelectionScreen ? "Reward" : "Choose",
+        bool choose = view is NChooseACardSelectionScreen, bundleChoice = view is NChooseABundleSelectionScreen, canSkip = Read(view, "_canSkip") is true;
+        if (bundleChoice) prefs = new CardSelectorPrefs(new LocString("gameplay_ui", "CHOOSE_A_PACK"), 1);
+        return new MultiplayerChoiceView { Id = ids[slot] - 1, Kind = view is NPlayerHand ? NPlayerHand.Instance.CurrentMode == NPlayerHand.Mode.UpgradeSelect ? "Upgrade" : "Hand" : view is NSimpleCardSelectScreen ? "Grid" : view is NCombatPileCardSelectScreen ? "Pile" : view is NDeckCardSelectScreen ? "Deck" : view is NDeckUpgradeSelectScreen ? "DeckUpgrade" : view is NDeckEnchantSelectScreen ? "DeckEnchant" : view is NDeckTransformSelectScreen ? "DeckTransform" : view is NCardRewardSelectionScreen ? "Reward" : bundleChoice ? "Bundle" : "Choose",
             Prompt = choose ? new LocString("gameplay_ui", "CHOOSE_CARD_HEADER").GetFormattedText() : prefs.Prompt?.GetFormattedText() ?? "",
             Min = choose ? canSkip ? 0 : 1 : prefs.MinSelect, Max = choose ? 1 : prefs.MaxSelect, Manual = prefs.RequireManualConfirmation, Cancelable = choose ? canSkip : prefs.Cancelable,
             Confirm = Read(view, view is NPlayerHand ? "_selectModeConfirmButton" : "_confirmButton") is NClickableControl confirm && confirm.IsEnabled,
             CanSkip = canSkip,
-            Preview = new[] { "_previewContainer", "_upgradeSinglePreviewContainer", "_upgradeMultiPreviewContainer" }.Any(f => Read(view, f) is Control { Visible: true }),
+            Preview = PreviewVisible(view),
             Cards = cards.Select(c => MirrorState.Pack(c.ToSerializable())).ToList(), Eligible = cards.Select((c, i) => (c, i)).Where(c => filter?.Invoke(c.c) ?? true).Select(c => c.i).ToList(),
-            Selected = selected.Select(c => cards.IndexOf(c)).Where(i => i >= 0).ToList() };
+            BundleSizes = bundleChoice ? ((IReadOnlyList<IReadOnlyList<CardModel>>)Read(view, "_bundles")!).Select(b => b.Count).ToList() : new(),
+            Selected = bundleChoice ? Read(view, "_selectedBundle") is NCardBundle chosen ? new() { ((Node)Read(view, "_bundleRow")!).GetChildren().ToList().IndexOf(chosen) } : new() : selected.Select(c => cards.IndexOf(c)).Where(i => i >= 0).ToList() };
     }
     internal static void Apply(MultiplayerChoiceView? source)
     {
         if (!Replica || source == null || _view == null || !GodotObject.IsInstanceValid(_view) || source.Id != _choice || source.Kind != _kind) return;
         var cards = Cards(_view);
         if (cards.Count != source.Cards.Count || !cards.Select(c => MirrorState.Pack(c.ToSerializable())).Zip(source.Cards).All(p => p.First.SequenceEqual(p.Second))) return;
+        if (source.Kind == "Bundle")
+        {
+            _applying++;
+            try
+            {
+                var row = (Node)Read(_view, "_bundleRow")!; var current = Read(_view, "_selectedBundle") as NCardBundle;
+                int desiredIndex = source.Selected.FirstOrDefault(-1), currentIndex = current == null ? -1 : row.GetChildren().ToList().IndexOf(current);
+                if (currentIndex != desiredIndex)
+                {
+                    if (current != null) Call(_view, "CancelSelection", (object)null!);
+                    if (desiredIndex >= 0 && desiredIndex < row.GetChildCount()) Call(_view, "OnBundleClicked", row.GetChild(desiredIndex));
+                }
+            }
+            finally { _applying--; }
+            return;
+        }
         var selected = (Read(_view, "_selectedCards") as IEnumerable<CardModel>)?.ToList() ?? new();
         var desired = source.Selected.Where(i => i >= 0 && i < cards.Count).Select(i => cards[i]).ToList();
         bool same = selected.SequenceEqual(desired);
-        if (same && source.Kind is not "Deck" and not "DeckUpgrade") return;
+        if (same && !source.Kind.StartsWith("Deck", StringComparison.Ordinal)) return;
         _applying++;
         try
         {
@@ -254,9 +304,9 @@ internal static class MultiplayerPersonalUi
                     Call(container, "RefreshHolderPositions");
                 }
             }
-            else if (source.Kind is "Deck" or "DeckUpgrade")
+            else if (source.Kind.StartsWith("Deck", StringComparison.Ordinal))
             {
-                bool preview = new[] { "_previewContainer", "_upgradeSinglePreviewContainer", "_upgradeMultiPreviewContainer" }.Any(f => Read(_view, f) is Control { Visible: true });
+                bool preview = PreviewVisible(_view);
                 // Native CancelSelection needs the previous selected card to
                 // restore focus before it clears the set. Cancel first.
                 if (!source.Preview && preview)
@@ -265,8 +315,8 @@ internal static class MultiplayerPersonalUi
                     selected = (Read(_view, "_selectedCards") as IEnumerable<CardModel>)?.ToList() ?? new();
                 }
                 foreach (var card in selected.Except(desired).Concat(desired.Except(selected)).ToArray()) Call(_view, "OnCardClicked", card);
-                preview = new[] { "_previewContainer", "_upgradeSinglePreviewContainer", "_upgradeMultiPreviewContainer" }.Any(f => Read(_view, f) is Control { Visible: true });
-                if (source.Preview && !preview && _view is NDeckCardSelectScreen) _view.GetType().GetMethods(Any).First(m => m.Name == "PreviewSelection" && m.GetParameters().Length == 0).Invoke(_view, null);
+                preview = PreviewVisible(_view);
+                if (source.Preview && !preview) _view.GetType().GetMethods(Any).First(m => m.Name == (_view is NDeckTransformSelectScreen ? "OpenPreviewScreen" : "PreviewSelection") && m.GetParameters().Length == 0).Invoke(_view, null);
             }
             else if (Read(_view, "_selectedCards") is HashSet<CardModel> set && Read(_view, "_grid") is { } grid)
             {

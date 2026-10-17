@@ -24,7 +24,7 @@ internal static partial class MultiplayerMirrorSession
     {
         var view = new MultiplayerControlView { Epoch = _permissionEpoch };
         var player = LocalContext.GetMe(_state); var root = LocalSpectatorSource.ActiveNativeUi;
-        if (player == null || root == null || NModalContainer.Instance?.OpenModal != null || NCapstoneContainer.Instance?.CurrentCapstoneScreen != null ||
+        if (player == null || root == null || NModalContainer.Instance?.OpenModal != null || NCapstoneContainer.Instance?.CurrentCapstoneScreen is not null and not MegaCrit.Sts2.Core.Nodes.Screens.NSimpleCardsViewScreen ||
             NGame.Instance.InspectCardScreen?.IsVisibleInTree() == true || NGame.Instance.InspectRelicScreen?.IsVisibleInTree() == true) return view;
         if (MegaCrit.Sts2.Core.Nodes.Combat.NTargetManager.Instance is { IsInSelection: true } targeting && NRun.Instance?.RestSiteRoom is { } rest)
         {
@@ -41,6 +41,13 @@ internal static partial class MultiplayerMirrorSession
                 button is NMapPoint point && MultiplayerNoncombat.Invoke(point, "get_IsTravelable") is not true) continue;
             view.Actions.Add(new() { Id = "room:" + ControlId(button), Kind = "native", NativePath = MirrorNativeUi.Key(button), Enabled = true });
         }
+        if (root is NCardGridSelectionScreen && LocalSpectatorSource.PendingNativeChoice && !MultiplayerPersonalUi.PreviewVisible(root) &&
+            MultiplayerPersonalUi.Read(root, "_grid") is MegaCrit.Sts2.Core.Nodes.Cards.NCardGrid grid)
+        {
+            foreach (var card in MirrorNativeUi.AllGridCards(grid))
+                view.Actions.Add(new() { Id = "select:" + ControlId(card) + ":" + nameof(NGridCardHolder), Kind = "select", CardId = card.Id.ToString(), NativePath = MirrorNativeUi.GridCardKey(grid, card), Enabled = true });
+        }
+        else if (root is not NCardGridSelectionScreen)
         foreach (var holder in LocalSpectatorSource.Descendants<NCardHolder>(root).Where(h => h.CardModel != null && h.IsVisibleInTree() && MirrorNativeUi.Parent<NMerchantSlot>(h) == null && LocalSpectatorSource.NativeReplayReady(h, LocalSpectatorSource.HandSelectionContext(h))))
             view.Actions.Add(new() { Id = "select:" + ControlId(holder.CardModel!) + ":" + holder.GetType().Name, Kind = "select", CardId = holder.CardModel!.Id.ToString(), NativePath = MirrorNativeUi.Key(holder), Enabled = true });
         foreach (var slot in LocalSpectatorSource.Descendants<NMerchantSlot>(root).Where(s => s.IsVisibleInTree() && s.Hitbox.IsEnabled && s.Entry.IsStocked && MirrorNativeUi.Parent<NMerchantInventory>(s)?.IsOpen == true))
@@ -70,6 +77,7 @@ internal static partial class MultiplayerMirrorSession
     }
     private static bool ExecuteRoomAction(ControlActionSnapshot action)
     {
+        if (action.Kind == "select" && action.NativePath.Contains(":grid:", StringComparison.Ordinal)) return MultiplayerPersonalUi.SelectGridCard(action.NativePath);
         var node = MirrorNativeUi.Resolve(action.NativePath, true);
         if (action.Kind == "buy" && node is NMerchantSlot slot && slot.Hitbox.IsEnabled && slot.Entry.IsStocked && slot.IsVisibleInTree())
         { if (MultiplayerNoncombat.Invoke(slot, "OnSelected") is System.Threading.Tasks.Task task) MegaCrit.Sts2.Core.Helpers.TaskHelper.RunSafely(task); return true; }

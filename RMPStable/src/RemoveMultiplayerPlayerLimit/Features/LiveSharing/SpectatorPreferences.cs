@@ -19,6 +19,7 @@ internal sealed class SpectatorPreferences
 	public bool Pinned { get; set; } = true;
 	public int LayoutRevision { get; set; }
 	public bool ControlMode { get; set; }
+    public bool MultiplayerControlMode { get; set; }
 	public string SourceId { get; set; } = "";
 	public string MultiplayerSourceId { get; set; } = "";
 	public string PreviewSourceId { get; set; } = "local-preview:1";

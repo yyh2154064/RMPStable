@@ -201,6 +201,9 @@ internal sealed partial class MirrorRenderer
     { try { await task; } catch (Exception e) { if (_generation == generation) { _error = e.ToString(); GD.PrintErr("[RMP:NoncombatReplay] " + e); } } }
     private void ApplyNoncombatPresentation(MirrorMessage message)
     {
+        if (!message.ResultCardsOpen && !_busy && _events >= message.Events &&
+            MegaCrit.Sts2.Core.Nodes.Screens.Capstones.NCapstoneContainer.Instance?.CurrentCapstoneScreen is MegaCrit.Sts2.Core.Nodes.Screens.NSimpleCardsViewScreen resultView)
+            MegaCrit.Sts2.Core.Nodes.Screens.Capstones.NCapstoneContainer.Instance.Close();
         MultiplayerPresentation042.Names = message.Names;
         MultiplayerPresentation042.Apply(message.RestTarget);
         var map = MegaCrit.Sts2.Core.Nodes.Screens.Map.NMapScreen.Instance;

@@ -135,7 +135,7 @@ internal static class MirrorNativeUi
     // Browsing does not make a game decision. Opening these screens is local
     // presentation, so their back buttons/cards/scrolls cannot enter the journal.
     internal static bool IsLocalPresentation(Node node) => Parent<NCardPileScreen>(node) != null || Parent<NDeckViewScreen>(node) != null ||
-        node is NPeekButton ||
+        node is NPeekButton || Parent<NSimpleCardsViewScreen>(node) is { } resultView && !ReferenceEquals(MultiplayerPersonalUi.Read(resultView, "_confirmButton"), node) ||
         IsMapBrowseButton(node) ||
         Parent<NPauseMenu>(node) != null || Parent<MegaCrit.Sts2.Core.Nodes.Relics.NRelicInventoryHolder>(node) != null || Parent<NMultiplayerPlayerState>(node) != null || Parent<NMultiplayerPlayerExpandedState>(node) != null || Parent<NAbandonRunConfirmPopup>(node) != null || Under(node, NGame.Instance?.InspectCardScreen) || Under(node, NGame.Instance?.InspectRelicScreen) ||
         Under(node, RemoveMultiplayerPlayerLimit.Infrastructure.SceneMonitor.FindSettingsScreen()) ||

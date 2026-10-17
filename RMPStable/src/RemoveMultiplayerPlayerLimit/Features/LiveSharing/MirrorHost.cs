@@ -47,7 +47,7 @@ internal sealed class MirrorHost : IDisposable
         MultiplayerAuthority = view;
         if (_control == enabled && _controlEpoch == epoch) return;
         _control = enabled; _controlEpoch = epoch;
-        if (!Process.Authenticated) { _controlDirty = true; return; }
+        if (!Process.Authenticated || !Process.DisplayReady) { _controlDirty = true; return; }
         _ = Process.Wire.Send(new MirrorMessage { Kind = "control", Multiplayer = true, Generation = _generation, Epoch = epoch, Control = enabled });
     }
     internal void WaitForMultiplayerRoom(string room)
@@ -100,7 +100,7 @@ internal sealed class MirrorHost : IDisposable
     }
     private void TickMultiplayer()
     {
-        if (_controlDirty && Process.Wire.Pending == 0)
+        if (_controlDirty && Process.DisplayReady && Process.Wire.Pending == 0)
         {
             _controlDirty = false;
             _ = Process.Wire.Send(new MirrorMessage { Kind = "control", Multiplayer = true, Generation = _generation, Epoch = _controlEpoch, Control = _control });
@@ -116,7 +116,14 @@ internal sealed class MirrorHost : IDisposable
         }
         if (Process.Wire.Pending == 0 && _multiFrames.TryDequeue(out var frame))
         {
-            if (frame.Kind == "load") { _sourceGeneration = frame.Generation; _generation++; Process.Wire.Identity.Generation = _generation; }
+            if (frame.Kind == "load")
+            {
+                _sourceGeneration = frame.Generation; _generation++; Process.Wire.Identity.Generation = _generation;
+                Process.DisplayReady = false; Process.LastIdle = false;
+                // Loading clears replica input. Re-send this generation's
+                // source-validated lease only after its native scene is ready.
+                _controlDirty = true;
+            }
             _ = Process.Wire.Send(new MirrorMessage { Kind = frame.Kind == "load" ? "load" : "events", Multiplayer = true,
                 Generation = _generation, ViewSource = _viewSource, Names = frame.Names, PresentationProgress = frame.PresentationProgress, ActFloor = frame.ActFloor, NormalOpening = frame.Kind == "load" && _normalOpeningNextLoad, Index = frame.Start, Events = frame.Events, Payload = frame.Checkpoint, NoncombatRoom = frame.NoncombatRoom,
                 Operations = frame.Delta.ConvertAll(p => System.Text.Json.JsonSerializer.Deserialize<MirrorOperation>(p) ?? throw new System.IO.InvalidDataException("Empty native operation")) });
@@ -132,7 +139,7 @@ internal sealed class MirrorHost : IDisposable
         {
             _personalSent = current;
             ApplyMultiplayerPermission(current.Authority);
-            _ = Process.Wire.Send(new MirrorMessage { Kind = "personal", Generation = _generation, Events = current.Events, Names = current.Names, RestTarget = current.RestTarget, Choice = current.Choice, Authority = current.Authority, TimerText = current.Timer, MapOpen = current.MapOpen, MapTravelEnabled = current.MapTravelEnabled, ShopOpen = current.ShopOpen });
+            _ = Process.Wire.Send(new MirrorMessage { Kind = "personal", Generation = _generation, Events = current.Events, Names = current.Names, RestTarget = current.RestTarget, Choice = current.Choice, Authority = current.Authority, TimerText = current.Timer, MapOpen = current.MapOpen, MapTravelEnabled = current.MapTravelEnabled, ShopOpen = current.ShopOpen, ResultCardsOpen = current.ResultCardsOpen });
         }
         SourceHash = current?.Hash ?? "";
         Verified = current?.Settled == true && SourceHash.Length > 0 && Process.DisplayReady && Process.LastIdle && Process.LastEvents == current.Events && Process.LastHash == SourceHash;

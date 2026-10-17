@@ -62,6 +62,7 @@ internal static partial class MultiplayerMirrorSession
 
     private static string _controlNotice = "";
     private static ulong _nextControlHeartbeat;
+    private static ulong _nextPreferredControlRequest;
     internal static bool ControlRequested { get; private set; }
     internal static int AcceptedControlRequests { get; private set; }
     internal static int RejectedControlRequests { get; private set; }
@@ -108,6 +109,15 @@ internal static partial class MultiplayerMirrorSession
     }
     private static void TickControl()
     {
+        // User preference survives docking, permission/checkpoint refreshes and
+        // scene reconstruction. Every renewed lease is still source-validated.
+        if (SpectatorPreferences.Current.MultiplayerControlMode && _selected != 0 && _remoteSession.Length > 0 && _receivedGeneration > 0 &&
+            Mirror is { } preferred && preferred.MultiplayerAuthority?.Granted != true && preferred.Error.Length == 0 &&
+            Time.GetTicksMsec() >= _nextPreferredControlRequest)
+        {
+            _nextPreferredControlRequest = Time.GetTicksMsec() + 1000;
+            RequestControl(true);
+        }
         if (_selected != 0 && Mirror is { } mirror && mirror.MultiplayerAuthority?.Granted == true && !mirror.Process.Child.HasExited && mirror.Error.Length == 0 && Time.GetTicksMsec() >= _nextControlHeartbeat)
         {
             _nextControlHeartbeat = Time.GetTicksMsec() + 1000;
@@ -272,8 +282,8 @@ internal static partial class MultiplayerMirrorSession
         if (action.Kind is "native" or "buy") return ExecuteRoomAction(action);
         if (action.Kind == "select")
         {
-            if (NOverlayStack.Instance?.Peek() is MegaCrit.Sts2.Core.Nodes.Screens.CardSelection.NCombatPileCardSelectScreen)
-                return MultiplayerPersonalUi.SelectPileCard(action.NativePath);
+            if (NOverlayStack.Instance?.Peek() is MegaCrit.Sts2.Core.Nodes.Screens.CardSelection.NCardGridSelectionScreen)
+                return MultiplayerPersonalUi.SelectGridCard(action.NativePath);
             if (MirrorNativeUi.Resolve(action.NativePath, true) is not NCardHolder selected || !LocalSpectatorSource.NativeReplayReady(selected, LocalSpectatorSource.HandSelectionContext(selected))) return false;
             selected.EmitSignal(NCardHolder.SignalName.Pressed, selected); return true;
         }

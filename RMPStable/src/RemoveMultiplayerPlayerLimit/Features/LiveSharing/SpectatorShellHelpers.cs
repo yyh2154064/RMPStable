@@ -51,12 +51,12 @@ internal sealed partial class SpectatorView {
 		Text(button, T("控制", "Control"), new Rect2(58, 2, 56, 24), 14, HorizontalAlignment.Center);
         // Authority updates arrive between mouse-down and mouse-up. Derive the
         // next request from the session, without rewriting a toggle mid-click.
-        button.Pressed += () => SetPreferredControl(!(_mirror.Multiplayer ? _controlEnabled || MultiplayerMirrorSession.ControlRequested : _controlEnabled));
+        button.Pressed += () => SetPreferredControl(!(_mirror.Multiplayer ? SpectatorPreferences.Current.MultiplayerControlMode : _controlEnabled));
 		return button;
 	}
 	private void SetPreferredControl(bool enabled)
 	{
-        if (_mirror.Multiplayer) { SetControlEnabled(enabled); return; }
+        if (_mirror.Multiplayer) { SpectatorPreferences.Current.MultiplayerControlMode = enabled; SpectatorPreferences.Save(); SetControlEnabled(enabled); return; }
 		SpectatorPreferences.Current.ControlMode = enabled; SpectatorPreferences.Save(); SetControlEnabled(enabled);
 	}
 

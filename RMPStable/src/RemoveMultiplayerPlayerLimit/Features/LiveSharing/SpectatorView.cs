@@ -42,7 +42,7 @@ internal sealed partial class SpectatorView : IDisposable
         if (DisplayServer.GetName() != "headless") { Engine.MaxFps = 120; DisplayServer.WindowSetVsyncMode(DisplayServer.VSyncMode.Disabled); }
         _controlToggle.Disabled = false;
         if (mirror.Multiplayer) _controlToggle.TooltipText = "";
-        SetControlEnabled(!mirror.Multiplayer && SpectatorPreferences.Current.ControlMode);
+        SetControlEnabled(mirror.Multiplayer ? SpectatorPreferences.Current.MultiplayerControlMode : SpectatorPreferences.Current.ControlMode);
     }
     internal void Update(SpectatorSnapshot snapshot, bool verified, string error)
     {
@@ -82,7 +82,7 @@ internal sealed partial class SpectatorView : IDisposable
         {
             bool granted = _mirror.MultiplayerAuthority?.Granted == true;
             _controlEnabled = granted; _epoch = _mirror.ControlEpoch;
-            _modeThumb.Position = new Vector2(granted ? 58 : 2, 2);
+            _modeThumb.Position = new Vector2(SpectatorPreferences.Current.MultiplayerControlMode ? 58 : 2, 2);
             _controlToggle.Disabled = !_mirror.Process.DisplayReady;
             _controlToggle.TooltipText = "";
         }
