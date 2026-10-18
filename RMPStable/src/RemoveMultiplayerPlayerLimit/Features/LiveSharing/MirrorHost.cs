@@ -74,6 +74,7 @@ internal sealed class MirrorHost : IDisposable
         MultiplayerAuthority = null; _control = _controlDirty = false; _controlEpoch = 0;
         _publishedReady = false; _publishedHash = ""; _publishedEvents = -1;
         _timerText = ""; _timerGeneration = -1; _timer = 0; _fastRestoreNextLoad = true;
+        _crystalFogPreview = null;
         Verified = false; SourceHash = "";
         Process.DisplayReady = Process.LastIdle = Process.LastControlEnabled = false;
         Process.LastHash = Process.LastDrawingHash = ""; Process.LastEvents = 0; Process.DrawFrames = 0;
@@ -139,7 +140,7 @@ internal sealed class MirrorHost : IDisposable
         {
             _personalSent = current;
             ApplyMultiplayerPermission(current.Authority);
-            _ = Process.Wire.Send(new MirrorMessage { Kind = "personal", Generation = _generation, Events = current.Events, Names = current.Names, RestTarget = current.RestTarget, Choice = current.Choice, Authority = current.Authority, TimerText = current.Timer, MapOpen = current.MapOpen, MapTravelEnabled = current.MapTravelEnabled, ShopOpen = current.ShopOpen, ResultCardsOpen = current.ResultCardsOpen });
+            _ = Process.Wire.Send(new MirrorMessage { Kind = "personal", Generation = _generation, Events = current.Events, Names = current.Names, RestTarget = current.RestTarget, Choice = current.Choice, Authority = current.Authority, TimerText = current.Timer, MapOpen = current.MapOpen, MapTravelEnabled = current.MapTravelEnabled, ShopOpen = current.ShopOpen, ResultCardsOpen = current.ResultCardsOpen, CrystalFogPreview = current.CrystalFogPreview });
         }
         SourceHash = current?.Hash ?? "";
         Verified = current?.Settled == true && SourceHash.Length > 0 && Process.DisplayReady && Process.LastIdle && Process.LastEvents == current.Events && Process.LastHash == SourceHash;
@@ -148,6 +149,7 @@ internal sealed class MirrorHost : IDisposable
     private bool _publishedReady;
     private string _publishedHash = "";
     private int _publishedEvents = -1;
+    private bool? _crystalFogPreview;
     private string _timerText = "";
     private long _timerGeneration = -1;
     internal void Tick(RunState? state, double delta)
@@ -155,6 +157,11 @@ internal sealed class MirrorHost : IDisposable
         Verified = false;
         if (Process.Child.HasExited) { Error = "独立游戏进程已退出"; return; }
         if (Process.Wire.Error.Length > 0) { Error = Process.Wire.Error; return; }
+        if (!Multiplayer && Process.Authenticated && _crystalFogPreview != CrystalFog.Enabled)
+        {
+            _crystalFogPreview = CrystalFog.Enabled;
+            _ = Process.Wire.Send(new MirrorMessage { Kind = "crystalFog", CrystalFogPreview = CrystalFog.Enabled });
+        }
         while (Process.Wire.Incoming.TryDequeue(out var message))
         {
             if (!Process.Authenticated)
@@ -195,8 +202,10 @@ internal sealed class MirrorHost : IDisposable
                 _intentRequest = message.Request;
                 if (!Multiplayer && message.Model == "mapStroke")
                 {
-                    if (_control && message.Epoch == _controlEpoch && state != null && ReferenceEquals(_checkpoint, MirrorJournal.Checkpoint))
+                    bool accepted = _control && message.Epoch == _controlEpoch && state != null && ReferenceEquals(_checkpoint, MirrorJournal.Checkpoint) &&
                         MapDrawing042.Execute(message.Value, message.Epoch);
+                    _ = Process.Wire.Send(new MirrorMessage { Kind = "result", Model = "mapStroke", Generation = message.Generation, Epoch = message.Epoch,
+                        Request = message.Request, Accepted = accepted, Value = MapDrawing042.Origin(message.Value) });
                     continue;
                 }
                 Intent?.Invoke(message);

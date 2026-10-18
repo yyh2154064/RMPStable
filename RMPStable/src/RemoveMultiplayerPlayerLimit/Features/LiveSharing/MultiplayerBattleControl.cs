@@ -205,9 +205,21 @@ internal static partial class MultiplayerMirrorSession
         if (Mirror is not { } mirror) return;
         var request = frame.Request;
         if (request.Generation != mirror.SourceGeneration) return;
-        _ = mirror.Process.Wire.Send(new MirrorMessage { Kind = "result", Generation = mirror.LocalGeneration, Epoch = request.Epoch, Request = request.Id, Accepted = frame.Accepted, Room = frame.Reason });
+        _ = mirror.Process.Wire.Send(new MirrorMessage { Kind = "result", Generation = mirror.LocalGeneration, Epoch = request.Epoch, Request = request.Id, Accepted = frame.Accepted, Room = frame.Reason,
+            Model = request.Action == "mapStroke" ? "mapStroke" : "", Value = request.Action == "mapStroke" ? MapDrawing042.Origin(request.Target) : "" });
     }
     private static MultiplayerControlView CaptureBattleControl()
+    {
+        var view = CaptureGameplayControl();
+        if (RunManager.Instance.IsInProgress && !InFinal && NModalContainer.Instance?.OpenModal == null)
+        {
+            view.Actions.Add(new() { Id = "shortcut:crystalFog", Kind = "crystalFog", NativePath = "RmpCrystalFog", Enabled = true });
+            if (QuickSl.QuickSlController.CanConfirmFromMirror)
+                view.Actions.Add(new() { Id = "shortcut:quickSl", Kind = "quickSl", NativePath = "RmpQuickSl", Enabled = true });
+        }
+        return view;
+    }
+    private static MultiplayerControlView CaptureGameplayControl()
     {
         if (InFinal) return CaptureFinalControl();
         if (!CombatManager.Instance.IsInProgress && !CombatManager.Instance.IsStarting) return CaptureRoomControl();
@@ -269,6 +281,8 @@ internal static partial class MultiplayerMirrorSession
     }
     private static bool ExecuteBattleAction(ControlActionSnapshot action, string targetId, MultiplayerControlView view)
     {
+        if (action.Kind == "crystalFog") { CrystalFog.Toggle(); return true; }
+        if (action.Kind == "quickSl") return QuickSl.QuickSlController.ConfirmFromMirror();
         if (action.Kind == "restTarget")
         {
             var node = MirrorNativeUi.Resolve(action.NativePath);

@@ -156,7 +156,7 @@ internal static partial class MultiplayerNoncombat
     internal static void RecordDrawing(ulong player, string kind, string value)
     {
         if (Source && (Checkpoint != null || MirrorState.CurrentReplay != null))
-            Drawings.Add(new() { Kind = kind, NodeKey = player.ToString(), Value = value });
+            Drawings.Add(new() { Kind = kind, NodeKey = player.ToString(), Value = value, DrawingOrigin = MapDrawing042.ActiveOrigin });
     }
 #if STS2_0111
     private static void RestSkipped(RestSiteSkippedMessage __0, ulong __1) => Add("restSkip", __1, payload: MirrorState.Pack(__0));

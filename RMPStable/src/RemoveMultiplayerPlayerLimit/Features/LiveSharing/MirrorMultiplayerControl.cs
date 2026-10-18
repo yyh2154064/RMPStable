@@ -50,7 +50,8 @@ internal sealed partial class MirrorRenderer
         var target = _battleAuthority.Targets.FirstOrDefault(t => t.NativeIndex == targetIndex);
         if (action.RequiresTarget && (target == null || !action.TargetIds.Contains(target.Id))) return;
         _waitingForAuthority = true; _submittedEvents = _events;
-        _ = _wire.Send(new MirrorMessage { Kind = "intent", Multiplayer = true, Generation = _generation, Epoch = _epoch, Request = ++_request,
+        _waitingRequest = ++_request;
+        _ = _wire.Send(new MirrorMessage { Kind = "intent", Multiplayer = true, Generation = _generation, Epoch = _epoch, Request = _waitingRequest,
             Model = kind, NodeKey = action.Id, Value = _battleAuthority.Context, TargetKey = target?.Id ?? "", Events = _events });
     }
     private NClickableControl? _potionPressed;

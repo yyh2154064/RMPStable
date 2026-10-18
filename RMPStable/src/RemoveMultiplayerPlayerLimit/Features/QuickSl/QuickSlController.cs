@@ -76,12 +76,18 @@ internal static class QuickSlController
 	internal static uint NativeHotkey { get; private set; } = 0x74;
     internal static bool ConfirmationOpen => _popupOpen;
     internal static void RequestFromMirror() => TriggerRequested();
-    internal static void ShowReplicaConfirmation(Action confirm) => ShowConfirmation(Localization.Get("QUICK_SL_CONFIRM_TITLE", "Quick SL"), Localization.Get("QUICK_SL_CONFIRM_SINGLE", "Return to the latest native save checkpoint?"), confirm);
+    internal static void ShowReplicaConfirmation(Action confirm, bool multiplayer = false) => ShowConfirmation(Localization.Get("QUICK_SL_CONFIRM_TITLE", "Quick SL"), multiplayer ? "对当前实况玩家执行快速 SL？多人对局将按原版流程由房主重载全队。若该玩家不是房主，将向房主发送请求。" : Localization.Get("QUICK_SL_CONFIRM_SINGLE", "Return to the latest native save checkpoint?"), confirm);
+    internal static bool CanConfirmFromMirror => !_popupOpen && !_operationRunning && RunManager.Instance.IsInProgress && NModalContainer.Instance?.OpenModal == null;
     internal static bool ConfirmFromMirror()
     {
-        if (!_popupOpen && !_operationRunning && RunManager.Instance.IsInProgress && RunManager.Instance.NetService?.Type == NetGameType.Singleplayer)
-        { TaskHelper.RunSafely(RunSingleplayerSlAsync()); return true; }
-        return false;
+        if (!CanConfirmFromMirror) return false;
+        var service = RunManager.Instance.NetService;
+        if (service?.Type == NetGameType.Singleplayer) TaskHelper.RunSafely(RunSingleplayerSlAsync());
+        else if (service?.Type == NetGameType.Host) TaskHelper.RunSafely(BeginHostSlAsync());
+        else if (service?.Type == NetGameType.Client)
+        { service.SendMessage(new RmpQuickSlRequestMessage()); Log.Info("[RMP:QuickSL] Mirror request sent to host from selected client " + service.NetId); }
+        else return false;
+        return true;
     }
 	private static RecoveryState? _recovery;
 

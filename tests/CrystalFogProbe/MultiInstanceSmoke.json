@@ -1,0 +1,12 @@
+{
+  "id": "MultiInstanceSmoke",
+  "name": "Crystal Sphere focused visible probe",
+  "author": "RMP Stable Contributors",
+  "version": "0.12.1",
+  "description": "Independent Crystal Sphere-only diagnostic; no legacy tests.",
+  "has_dll": true,
+  "has_pck": false,
+  "affects_gameplay": true,
+  "min_game_version": "0.111.0",
+  "dependencies": [{ "id": "RMPStable" }]
+}

@@ -32,6 +32,7 @@ internal sealed class MultiplayerMirrorFrame
     public bool MapTravelEnabled { get; set; }
     public bool ShopOpen { get; set; }
     public bool ResultCardsOpen { get; set; }
+    public bool CrystalFogPreview { get; set; }
     public List<byte[]> Delta { get; set; } = new();
     public string Hash { get; set; } = "";
     public bool Settled { get; set; }
@@ -215,6 +216,7 @@ internal static partial class MultiplayerMirrorSession
     private static MultiplayerMirrorFrame Capture(string kind)
     {
         var frame = new MultiplayerMirrorFrame { Kind = kind, Build = MirrorState.Build, Session = _session,
+            CrystalFogPreview = CrystalFog.Enabled,
             Settled = Settled, Hash = Settled && _state != null ? MirrorState.MultiplayerHash(_state) : "",
             Room = _state?.CurrentRoom?.RoomType.ToString() ?? "", HandMode = NPlayerHand.Instance?.CurrentMode.ToString() ?? "",
             Screen = NOverlayStack.Instance?.Peek()?.GetType().Name ?? "Room", Choice = MultiplayerPersonalUi.Capture(), Timer = MirrorClock.Label?.Text ?? "",

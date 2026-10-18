@@ -13,6 +13,8 @@ internal static class MapDrawing042
 {
     private static NMapDrawings? _stroke;
     private static long _epoch;
+    internal static string ActiveOrigin { get; private set; } = "";
+    internal static string Origin(string value) => value.IndexOf('|') is var split && split > 0 ? value.Substring(0, split) : "";
     internal static void Stop()
     {
         if (_stroke != null && GodotObject.IsInstanceValid(_stroke) && _stroke.IsInsideTree() && _stroke.IsLocalDrawing()) _stroke.StopLineLocal();
@@ -21,6 +23,15 @@ internal static class MapDrawing042
     internal static Vector2 ToNet(NMapDrawings drawing, Vector2 local) => (Vector2)MultiplayerNoncombat.Invoke(drawing, "ToNetPosition", local)!;
     internal static Vector2 FromNet(NMapDrawings drawing, Vector2 net) => (Vector2)MultiplayerNoncombat.Invoke(drawing, "FromNetPosition", net)!;
     internal static bool Execute(string value, long epoch)
+    {
+        string origin = Origin(value);
+        if (origin.Length > 64 || origin.Any(c => !char.IsAsciiLetterOrDigit(c) && c != '-')) return false;
+        string previous = ActiveOrigin;
+        ActiveOrigin = origin;
+        try { return ExecuteCore(origin.Length == 0 ? value : value.Substring(origin.Length + 1), epoch); }
+        finally { ActiveOrigin = previous; }
+    }
+    private static bool ExecuteCore(string value, long epoch)
     {
         if (NMapScreen.Instance?.Drawings is not { } drawings || RunManager.Instance.DebugOnlyGetState()?.IsGameOver != false) return false;
         var pieces = value.Split(':', 2);

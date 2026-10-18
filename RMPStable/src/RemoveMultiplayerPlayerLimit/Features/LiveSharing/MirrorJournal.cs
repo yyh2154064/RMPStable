@@ -28,6 +28,7 @@ internal sealed class MirrorOperation
     public string NodeKey { get; set; } = "";
     public string Value { get; set; } = "";
     public byte[] Payload { get; set; } = Array.Empty<byte>();
+    public string DrawingOrigin { get; set; } = "";
 }
 
 // Record authoritative native decisions. The replica runs the original
@@ -79,6 +80,9 @@ internal static partial class MirrorJournal
         Patch(typeof(ActionQueueSet).GetMethod("EnqueueWithoutSynchronizing", Any)!, prefix: nameof(ActionQueued));
         Patch(typeof(NClickableControl).GetMethod("ForceClick", Any)!, nameof(ForcedButton), finalizer: nameof(EndUi));
         Patch(typeof(NClickableControl).GetMethod("OnReleaseHandler", Any)!, nameof(ReleasedButton), finalizer: nameof(EndUi));
+        // Crystal cells consume MouseReleased directly without the base button
+        // release handler. Record that native decision as well as remote clicks.
+        Patch(typeof(MegaCrit.Sts2.Core.Nodes.Events.Custom.CrystalSphere.NCrystalSphereScreen).GetMethod("OnCellClicked", Any)!, nameof(CrystalCellClicked), finalizer: nameof(EndUi));
         Patch(typeof(GodotObject).GetMethod("EmitSignal", new[] { typeof(StringName), typeof(Variant[]) })!, nameof(SignalEmitted), finalizer: nameof(EndUi));
         Patch(typeof(NMerchantSlot).GetMethod("OnSelected", Any)!, nameof(MerchantSelected), finalizer: nameof(EndUi));
         Patch(typeof(NetReplayGameService).GetProperty("Type")!.GetMethod!, postfix: nameof(ReplicaServiceType));
@@ -175,6 +179,14 @@ internal static partial class MirrorJournal
         if ((bool)typeof(NClickableControl).GetField("_isPressed", Any)!.GetValue(__instance)!) MultiplayerMirrorSession.RecordFinalButton(__instance);
         if ((bool)typeof(NClickableControl).GetField("_isPressed", Any)!.GetValue(__instance)! && !MirrorNativeUi.IgnoreButton(__instance)) BeginUi(__instance, "button", out __state);
     }
+    private static void CrystalCellClicked(MegaCrit.Sts2.Core.Nodes.Events.Custom.CrystalSphere.NCrystalSphereScreen __instance,
+        MegaCrit.Sts2.Core.Nodes.Events.Custom.CrystalSphere.NCrystalSphereCell cell, out bool __state)
+    {
+        __state = false;
+        if (cell.Entity.IsHidden && typeof(MegaCrit.Sts2.Core.Nodes.Events.Custom.CrystalSphere.NCrystalSphereScreen).GetField("_entity", Any)!.GetValue(__instance)
+            is MegaCrit.Sts2.Core.Events.Custom.CrystalSphereEvent.CrystalSphereMinigame { DivinationCount: > 0 })
+            BeginUi(cell, "button", out __state);
+    }
     private static void SignalEmitted(GodotObject __instance, StringName signal, out bool __state)
     {
         __state = false;
@@ -223,7 +235,7 @@ internal static partial class MirrorJournal
     private static void DrawingEvent(NMapDrawings node, string kind, string value)
     {
         if (Recording && _uiDepth == 0 && MirrorNativeUi.Key(node) is { Length: > 0 } key)
-            Operations.Add(new MirrorOperation { Kind = kind, NodeKey = key, Value = value });
+            Operations.Add(new MirrorOperation { Kind = kind, NodeKey = key, Value = value, DrawingOrigin = MapDrawing042.ActiveOrigin });
     }
     private static void DrawingStarted(NMapDrawings __instance, Vector2 position, DrawingMode? overrideDrawingMode) =>
         DrawingEvent(__instance, "drawStart", (int)(overrideDrawingMode ?? __instance.GetLocalDrawingMode(false)) + "," + Point(MapDrawing042.ToNet(__instance, position)));

@@ -32,7 +32,7 @@ internal static partial class LiveSharingController
     private static bool _sourceMenuStarting;
     private static MegaCrit.Sts2.Core.Multiplayer.Replay.CombatReplay? _restoreOldCheckpoint;
     internal static uint NativeHotkey { get; private set; } = 0x77;
-    internal static void Initialize() { Suspend(); MirrorJournal.Initialize(); }
+    internal static void Initialize() { Suspend(); MirrorJournal.Initialize(); CrystalFog.Initialize(); }
     internal static void RouteMapInput(bool insidePanel) => _source?.RouteNativeMapInput(insidePanel);
     internal static bool MapInputInPanel => _source?.MapInputInPanel == true || _mirror?.Window?.PointerInside == true;
     internal static void ProcessFrame(double delta)
@@ -48,6 +48,7 @@ internal static partial class LiveSharingController
     }
     private static void Process(double delta)
     {
+        CrystalFog.ProcessFrame();
         if (MirrorRenderer.IsRenderer) { if (!_rendererFailed) { _renderer ??= new MirrorRenderer(); _renderer.ProcessFrame(delta); } return; }
         _settingsTimer -= delta;
         if (_settingsTimer <= 0) { RegisterInput(); _settingsTimer = .5; }
@@ -170,6 +171,11 @@ internal static partial class LiveSharingController
         SpectatorCommandResult Reject(string text) => new() { RequestId = message.Request, Message = text };
         if (message.Kind != "intent" || message.Request <= 0 || _mirror?.AuthorizeIntent(state,message) != true || _source == null || _view?.ControlEnabled != true || _view.Epoch != message.Epoch)
             return Reject("状态或控制权限已变化，请重新操作");
+        if (message.Model == "crystalFog")
+        {
+            CrystalFog.Toggle();
+            return new() { RequestId = message.Request, Accepted = true, Message = "占卜灰雾偏好已切换" };
+        }
         if (message.Model == "menu")
         {
             if (message.Value is not "GiveUp" and not "GiveUpConfirmed" and not "SaveAndQuit" and not "Compendium" and not "RmpQuickSl" and not "RmpQuickSlConfirmed" || SourceMenuOpen ||

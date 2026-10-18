@@ -1,0 +1,1 @@
+{"id":"MultiInstanceSmoke","name":"v0.4.3 interaction feedback probe","author":"RMP Stable Contributors","version":"1.0.0","description":"Independent multiplayer pile selection, passive mode tip and settings back verification. Case: interaction043.","has_dll":true,"has_pck":false,"affects_gameplay":true,"min_game_version":"0.111.0","dependencies":[{"id":"RMPStable"}]}

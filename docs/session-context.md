@@ -1,49 +1,46 @@
-# v0.4.4 已发布 Latest，等待手动验收（2026-10-17）
+# v0.4.5 占卜、快捷键与地图绘画（2026-10-19）
 
-本轮以 **v0.4.3** 为基线。用户明确确认 v0.4.3 以前的测试验证通过，移出活动待验收，不再默认重跑；历史细节留在 Git 和各版本文档。本轮明确授权修复后提交推送 GitHub main、仿照往期 Release 标题和 Markdown 发布 Latest，并更新原桌面上下文；上述发布已完成，桌面交接随后同步。本轮 main 授权不泛化到未来开发。
+基线 **v0.4.4 已由用户明确验收通过**，原附魔／选牌／模式偏好问题移出活动测试和待验收。docs/selections044.md 与原脚本仅保留为历史证据，不再默认执行。新会话先读本文件与 AGENTS.md，核对实际 Git 和资源；不要仅因接收上下文重建或启动游戏。
 
-## 修复
+用户本轮明确授权切换 main 开发、测试后提交推送 main、按往期名称及 Markdown 发布 **RMP Stable v0.4.5**，并更新原桌面上下文。本轮授权不能泛化为未来版本开发。
 
-- 遗忘之墓等 9 类原版附魔问号全部附魔选项，接入原版附魔选择、单张／多张、预览、取消和确认。
-- 补齐原版变形和卡包 UI，保留实际过滤、选择数量、牌组顺序及专用变形映射；完整网格候选由来源校验执行，不依赖来源滚动或持牌控件。原版记录结果完成副本任务，观战不能选择。
-- 覆盖储君 Begone（下去）、Charge（抽牌堆两张变牌）、Wish、Prepared、融合打击／防御、先古附魔、Claws→Maul（撕咬）、潘多拉结果确认及 ScrollBoxes 卡包。
-- 单人／多人分别保存观战／控制偏好；收纳展开、临时权限和房间刷新不改写玩家选择。新代次清除旧就绪标记，场景就绪后重新发送来源有效租约，避免重建吃掉早到的授权。
-- 修复随机变形预览模板被当作对局卡牌序列化、阻断后续同步的问题；只采集真实选择合同。潘多拉结果确认交回来源，再同步关闭；卡牌浏览本地执行。
+## 本轮范围
 
-仍只传状态和操作，来源权威，原版房主判定，独立进程原版界面；不混合本地模拟、画面传输或手绘 UI。
+- 占卜三次／六次灰雾预览，默认关闭，F4 切换，账号／档案偏好保存，SL 和重启保留。16% 不透明灰雾，95% 原版明亮揭示边界，保留原版隐藏状态、鼠标命中、次数、奖励和随机数。修复本体直接 MouseReleased 揭格漏记同步。
+- 单人／多人控制实况时 F4/F5 操作当前来源，支持好友；远程 F4 只改变选中来源。F5 在实况内确认／取消，来源客户端按原版向房主申请，来源房主执行原版全队 SL；切换来源／代次后旧确认失效。F8 只管理本机窗口。
+- 实况地图右键绘画、中键擦除，本地立即调用原版绘图方法及场景；来源权威回声到齐后移除临时展示。保留每个鼠标移动点，使用当前视口和地图变换，跟随原版笔尖热点；绘画流与普通操作等待编号分离，避免画后 F4/F5 等回复错误。
 
-## 最终专项与活动验收
+始终是独立进程原版界面，只传状态与操作，来源权威、原版房主判定；临时地图笔迹不进入存档或权威模型，不混合本地模拟、画面传输或手绘 UI。
 
-独立入口 **tools/Test-Selection044.ps1**、**tests/Selection044Probe**，只运行新 TestSelections，`-Part all|combat|events|ancients|extras|cardpack`；未调用历史 full / feedback / replay / all 或阶段验收入口。最终完整整轮证据：
+## 独立专项与证据
 
-`F:/projectFile/RMPStable-development/evidence/multiplayer-selection044-20261017-201858`
+只运行本轮新入口：
 
-三端各 **438 项、共 1314 项通过**，最终 DLL 上全自动完成，无调试补发操作；三个来源退出 0、未被清理终止，全部隔离副本退出，专项档案清理。三来源／三副本原版 localhost ENet、实际 Windows 渲染、后台隐藏、静音，不操作系统鼠标、当前游戏或真实存档。v0.111.0 为运行验证，v0.107.1 为编译验证；不称完整通关、Steam 跨电脑或物理鼠标／DPI 已验证。真实失败调试记录见 **docs/selections044.md**，不混计最终通过数量。
+- tools/Test-CrystalFog.ps1 -Scenario both -CheckRestart、tests/CrystalFogProbe：单人三次／六次、本体与实况占卜交互、奖励、偏好重启、F5 取消与真实存档恢复。
+- tools/Test-CrystalFogMulti.ps1、tests/CrystalFogMultiProbe：三来源／三原生副本，三次／六次、双工具、交替揭格和奖励、来源隔离、观战拒绝、远程 F4、F5 客户端请求／房主拒绝和远程房主确认后全队 SL，F8 不转发。
+- tools/Test-MapDrawing045.ps1 -Mode single|multi、tests/MapDrawing045Probe：右键绘画／中键擦除、故意扣留网络提交、三种尺寸和地图滚动、同帧原生笔迹和坐标精度、来源回声收敛、观战拒绝、绘画后 F4/F5。
 
-实际程序集只读核对入口 **tools/Inspect-Selection044.ps1**。当前 v0.111.0 美丽手镯自动随机附魔 4 张×2，不弹选择器；旧 original 目录仅作参考。非战斗卡包眼睛原版禁用／隐藏。美丽手镯及潘多拉消耗共享 RunRng.Niche，专项顺序触发原版选择，不宣称并发共享随机验证。其余附魔／变形覆盖观战拒绝、预览、取消重选、确认及完整状态对照。
+复用启动／隔离／原版 ENet／输入／日志工具，不调用历史 full／feedback／replay／all 或阶段验收入口。均为可见 Windows 渲染窗口，静音，F 盘独立档案；没有操作当前游戏或真实存档。v0.111.0 实际运行，v0.107.1 编译，三次构建零警告错误。不称完整通关、Steam 跨电脑、全屏高 DPI 或系统物理鼠标全部组合已验证。多人 SL 仅替换 Steam 发现／重连边界为 localhost ENet，原版存档、开始／广播、退出、loaded-run 加入与自动准备实际执行。
 
-**唯一活动待验收：v0.4.4 本轮问题。** 自动化通过表示可交付，仍等待用户手动验收；明确通过后移出活动清单，未通过按新反馈继续修复，未反馈保留脚本及状态。新会话不能仅因接收上下文重新构建或启动游戏。
+最终 DLL：42BD66421F740CCEF94043F4880A71A5457D37492560E461E1E6CE3A3092ED05。
 
-## 交付
+- 地图单人最终：F:/projectFile/RMPStable-development/evidence/multiplayer-map-drawing045-single-20261019-014555，18 项通过。
+- 地图多人最终：F:/projectFile/RMPStable-development/evidence/multiplayer-map-drawing045-multi-20261019-014337，81 项通过，18 条轨迹／738 个指针位置，坐标最大误差 0.00003412 像素，处理输入到笔迹更新相差 0 帧；权威接替最大差 0.00001526 像素。扣留提交 8 帧仍已显示笔迹；来源回声 176～343 毫秒不阻塞本地落笔，不声称物理网络零延迟。
+- 占卜单人最终：F:/projectFile/RMPStable-development/evidence/crystal-fog-20261019-015251，三次新档／同档重启／六次新档共 98 项通过；每次均含实际 F5 恢复。
+- 占卜多人最终：F:/projectFile/RMPStable-development/evidence/multiplayer-crystal-fog-20261019-015750，三端 128／115／118，共 361 项通过，远程房主 F5 后原版三人存档恢复及全队状态／历史对照通过。
+- 四组共 **558 项通过**，使用同一最终 DLL，三个来源退出 0、未被清理终止，副本全部退出，隔离档案清理。开发中真实失败与修正详见 docs/crystal-fog045.md、docs/map-drawing045.md，不混计为通过。
 
-- 直接可用五文件目录：`F:/projectFile/RMPStable-development/build/package/RMPStable`。
-- 附件：同级 `RMPStable-v0.4.4.zip`，顶层 RMPStable/，内含 DLL、PCK、JSON、README-multiInstance.md、update.cmd，逐文件哈希一致。
-- DLL SHA-256：`4FD6037637FDF5E41BDD6082AC7C77A25FB9441E0FF9B13CF46EB2C3D9C0E1F2`。
-- ZIP SHA-256：`92B9CD147C2F804DBA000A7F74BA98CAF24EDF73F8E8B06899AF67D2A968C710`，2,598,049 字节。
-- 双版本 payload / Bootstrap 为 0.4.4.0，构建零警告错误；清单、启动日志、更新器标识为 0.4.4。最终测试后只更新了包内 README 版本／安装说明和通过数量，DLL、PCK、JSON、更新器未改。
-- 发布文案 `docs/release-v0.4.4.md`，沿用 v0.4.3 格式。未替换当前游戏、真实存档或桌面旧模组目录。
+## 活动验收与交付
+
+**唯一活动待手动验收：v0.4.5 本轮占卜／实况快捷键／地图绘画。** 自动化通过表示可交付，发布不等于用户手动验收。明确通过后移出活动清单，未通过按新反馈修复，未反馈保留专项脚本；已验收 v0.4.4 不再参与默认执行。
+
+- 五文件直接可用目录：F:/projectFile/RMPStable-development/build/package/RMPStable。
+- 附件：同级 RMPStable-v0.4.5.zip，顶层 RMPStable/，DLL、PCK、JSON、README-multiInstance.md、update.cmd，五文件哈希全部一致；2,607,539 字节，ZIP SHA-256：8E75240B1D656CD7C3F1401DEE2B94962EAEF63BAFA964863EE3905B2BBA275D。
+- 版本统一为 0.4.5；发布文案 docs/release-v0.4.5.md 沿用 v0.4.4 标题／列表／安装段落／测试结尾格式。
+- 当前发布状态以本文末尾实测记录及实际 Git 为准；发布前不得将候选称为已发布。
 
 ## 仓库与资源
 
-唯一工作目录 `C:/Project_file/RMPStable-Github`，开发使用已有 multiInstanceTest；只保留 main / liveSharingTest / multiInstanceTest，发布后实际 SHA 以 Git 查询和桌面交接为准。不建立分支、工作树、克隆、C 盘游戏副本或重复资源。main 与 multiInstanceTest 发布前基线均为 848e5e267009198615f9727fff60fb4497d1fd80；liveSharingTest 保持 6e3b367ee7e5391c83479a68905ead88f91abc0c。
+唯一 checkout C:/Project_file/RMPStable-Github，当前明确授权的 main；仅 main／liveSharingTest／multiInstanceTest，无新分支、工作树、克隆或 detached HEAD。本轮不改其他测试分支。提交前基线 main 和 multiInstanceTest 为 659ea990748d351f74edf83d62c4179f9aad9d6f，liveSharingTest 为 6e3b367ee7e5391c83479a68905ead88f91abc0c；发布后查询实际本地／远端 SHA。
 
-已批准的 F 盘开发根目录 `F:/projectFile/RMPStable-development`，复用 references（双版本引用）、original（旧参考源码）、runtime（隔离游戏）、profile-seed、build、evidence。原版 PCK 只读 `F:/SteamLibrary/steamapps/common/Slay the Spire 2/SlayTheSpire2.pck`。隐藏后台构建／隔离测试已授权，不逐次询问，仍遵守系统权限边界。
-
-
-## 已发布记录
-
-- 正式 Latest Release：[RMP Stable v0.4.4](https://github.com/yyh2154064/RMPStable/releases/tag/v0.4.4)，非草稿、非预发布。
-- 修复源码提交及 v0.4.4 标签：`1edd98e1a5912e146f12247a3237c3442b83f9d2`。
-- GitHub API 已核对标题、正文与 docs/release-v0.4.4.md 一致；附件 RMPStable-v0.4.4.zip 为 2,598,049 字节，远端 SHA-256 与上述本地一致。
-- main / multiInstanceTest 已正常推送至修复提交，随后正常提交发布记录；最终本地／远端 SHA 以 Git 和桌面最新交接为准，liveSharingTest 不变。未建立新分支、工作树或克隆，未强推。
-- 后续文档提交不改变已测 DLL、附件或 Release 标签源码。唯一活动待验收仍为 v0.4.4，不将发布当作用户手动验收。
+既有资源根 F:/projectFile/RMPStable-development：references/v0.107.1、v0.111.0、runtime、profile-seed、build、evidence。大输出均用 F 盘，不新增 C 盘工作树或运行目录，不替换当前游戏、真实存档或桌面旧模组文件夹。

@@ -10,6 +10,7 @@ namespace RemoveMultiplayerPlayerLimit.Features.LiveSharing;
 // Account/profile scoped, independent of run saves and Quick SL checkpoints.
 internal sealed class SpectatorPreferences
 {
+	public bool CrystalFogPreview { get; set; }
 	public bool Open { get; set; }
 	public bool HasLayout { get; set; }
 	public float X { get; set; }

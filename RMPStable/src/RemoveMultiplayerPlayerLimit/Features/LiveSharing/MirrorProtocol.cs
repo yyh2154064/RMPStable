@@ -31,6 +31,7 @@ internal sealed class MirrorMessage
     public int Index { get; set; } = -1;
     public int TargetIndex { get; set; } = -1;
     public bool Control { get; set; }
+    public bool CrystalFogPreview { get; set; }
     public bool Multiplayer { get; set; }
     public byte[] NoncombatRoom { get; set; } = Array.Empty<byte>();
     public bool ShopOpen { get; set; }

@@ -57,6 +57,12 @@ internal sealed partial class MirrorRenderer
                 continue;
             }
             if (!pressed || key.Echo) continue;
+            if (key.Keycode == Key.F4)
+            {
+                if (_control && InputIdle && !_waitingForAuthority && _state != null)
+                    SendIntent("crystalFog", -1, -1, CurrentHash, _events, "RmpCrystalFog");
+                continue;
+            }
             if (Diagnostic) GD.Print("[RMP:Mirror:Keyboard] key=" + key.Keycode + " control=" + _control + " waiting=" + _waitingForAuthority + " idle=" + InputIdle + " cards=" + CanBufferCard + " handMode=" + NPlayerHand.Instance?.CurrentMode);
             bool Match(string action) => MatchesShortcut(key, action);
             bool confirm = key.Keycode == Key.Enter || Match("ui_confirm") || Match("ui_accept") || Match(MegaInput.select);
@@ -193,7 +199,14 @@ internal sealed partial class MirrorRenderer
     private void RequestKeyboardSl()
     {
         if (!_control || !InputIdle || _waitingForAuthority || _state == null) return;
+        if (Multiplayer && !InputActions().Any(a => a.Kind == "quickSl" && a.Enabled)) return;
+        long generation = _generation, epoch = _epoch;
+        ulong source = ViewSource;
         QuickSl.QuickSlController.ShowReplicaConfirmation(() =>
-        { if (_state != null) SendIntent("menu", -1, -1, CurrentHash, _events, value: "RmpQuickSlConfirmed"); });
+        {
+            if (_state == null || _generation != generation || _epoch != epoch || ViewSource != source) return;
+            if (Multiplayer) SendIntent("quickSl", -1, -1, CurrentHash, _events, "RmpQuickSl");
+            else SendIntent("menu", -1, -1, CurrentHash, _events, value: "RmpQuickSlConfirmed");
+        }, Multiplayer);
     }
 }

@@ -63,6 +63,7 @@ internal sealed partial class MirrorRenderer : IDisposable
     private bool _control, _attached, _lastIdle, _waitingForAuthority;
     private long _epoch, _request, _dragGeneration;
     private int _submittedEvents;
+    private long _waitingRequest;
     private int _dragTurn;
     private CardModel? _dragCard;
     private NCardPlay? _nativePlay;
@@ -73,6 +74,7 @@ internal sealed partial class MirrorRenderer : IDisposable
     internal Vector2 NativePointer => ViewportPoint(_eventPointer ?? _pointer);
     private Control? _pressedUi;
     private bool _uiButton;
+    private bool _mapMotionTracking;
     private Vector2 _lastUiPointer = new(-1, -1);
     private Vector2 _pointer = new(-1,-1), _dragStart;
     private CanvasLayer? _noticeLayer;
@@ -154,8 +156,12 @@ internal sealed partial class MirrorRenderer : IDisposable
         {
             switch (message.Kind)
             {
+                case "crystalFog":
+                    CrystalFog.SetRendererPreference(message.CrystalFogPreview);
+                    break;
                 case "personal":
-                    if (message.Generation == _desiredGeneration) _personalMessage = message;
+                    if (message.Generation == _desiredGeneration)
+                    { _personalMessage = message; CrystalFog.SetRendererPreference(message.CrystalFogPreview); }
                     break;
                 case "mapDrawings":
                     if (message.Generation == _desiredGeneration) _drawingMessages.Enqueue(message);
@@ -181,6 +187,7 @@ internal sealed partial class MirrorRenderer : IDisposable
                     if (message.Multiplayer && message.Generation != _desiredGeneration) break;
                     if (message.Epoch < _epoch || message.Epoch == _epoch && message.Control == _control) break;
                     _control = message.Control && (!Multiplayer || message.Multiplayer); _epoch = message.Epoch; _statusTimer = 0; CancelDrag(); _pressedUi = null;
+                    if (!_control) DiscardMapPreview();
                     if (Multiplayer)
                     {
                         _potionPressed = null; _pendingPotion = null; _pendingChoice = null; _pressedAction = null; PotionPopup?.Remove();
@@ -196,14 +203,17 @@ internal sealed partial class MirrorRenderer : IDisposable
                     if (message.Generation == _desiredGeneration) _timerText = message.TimerText;
                     break;
                 case "result":
-                    if (Multiplayer && message.Generation == _generation && message.Epoch == _epoch && message.Request == _request)
+                    if (message.Model == "mapStroke" && !message.Accepted && _mapPreview?.Owns(message.Value) == true)
+                    { DiscardMapPreview(); _mapGestureKey = _mapGestureMode = _mapGestureOrigin = ""; _mapInputs.Clear(); }
+                    if (Multiplayer && message.Model != "mapStroke" && message.Generation == _generation && message.Epoch == _epoch && message.Request >= LastMultiplayerResult)
                     { LastMultiplayerResult = message.Request; LastMultiplayerAccepted = message.Accepted; }
                     if (Diagnostic) GD.Print("[RMP:Mirror:Input] result accepted=" + message.Accepted + " reason=" + message.Room);
-                    if (message.Generation == _generation && message.Epoch == _epoch && message.Request == _request && (Multiplayer || !message.Accepted || message.Model == "menu")) _waitingForAuthority = false;
-                    if (message.Generation == _generation && message.Epoch == _epoch && message.Request == _request && !message.Accepted) _submittedCard = null;
+                    if (message.Generation == _generation && message.Epoch == _epoch && message.Request == _waitingRequest && (Multiplayer || !message.Accepted || message.Model is "menu" or "crystalFog")) _waitingForAuthority = false;
+                    if (message.Generation == _generation && message.Epoch == _epoch && message.Request == _waitingRequest && !message.Accepted) _submittedCard = null;
                     break;
                 case "reset":
                     if (message.Generation <= _desiredGeneration) break;
+                    DiscardMapPreview();
                     _pendingChoice = null; _pressedAction = null; _drawingMessages.Clear();
                     _desiredGeneration = message.Generation; _sceneReady = false; _timerText = ""; _control = false; CancelDrag(); _pressedUi = null;
                     _waitingForAuthority = false; _stateMessages.Clear(); Stage("等待读档后的权威检查点");
@@ -221,6 +231,7 @@ internal sealed partial class MirrorRenderer : IDisposable
                     break;
                 case "load":
                     if (message.Generation <= _desiredGeneration) break;
+                    DiscardMapPreview();
                     _pendingChoice = null; _pressedAction = null; _drawingMessages.Clear();
                     _multiplayerRoomWaiting = false; _personalMessage = null;
                     _localMapOpen = null;
@@ -263,6 +274,7 @@ internal sealed partial class MirrorRenderer : IDisposable
                 foreach (var operation in drawingMessage.Drawings)
                 {
                     MapDrawing042.Replay(NMapScreen.Instance.Drawings, ulong.Parse(operation.NodeKey), operation.Kind, operation.Value);
+                    DrawingEcho(operation, ulong.Parse(operation.NodeKey));
                     _drawingEvents++;
                 }
             }
@@ -354,10 +366,18 @@ internal sealed partial class MirrorRenderer : IDisposable
             MirrorWin32.GetClientRect(MirrorWin32.OwnWindow,out var size);
             _pointer = new Vector2((short)((long)data & 0xFFFF) / (float)Math.Max(1,size.Right), (short)(((long)data >> 16) & 0xFFFF) / (float)Math.Max(1,size.Bottom));
         }
+        // Preserve each native motion event during a map stroke, including
+        // motions in the same engine frame as button-down. Sampling only the
+        // last frame pointer cuts corners and leaves the ink behind the nib.
+        if (message is MirrorWin32.LeftDown or 0x204 or 0x207)
+            _mapMotionTracking = _control && NMapScreen.Instance?.IsOpen == true;
+        if (message == MirrorWin32.Move && _mapMotionTracking && _buttons.Count < 4092)
+            _buttons.Enqueue((message, _pointer, _desiredGeneration, _epoch, 0));
+        if (message is MirrorWin32.LeftUp or 0x205 or 0x208 or MirrorWin32.CaptureChanged) _mapMotionTracking = false;
         if (message is MirrorWin32.LeftDown or MirrorWin32.LeftUp or MirrorWin32.CaptureChanged)
         {
             if (message == MirrorWin32.LeftDown) _uiButton = LocalUiAt(_pointer) != null;
-            if (_buttons.Count < 32) _buttons.Enqueue((message,_pointer,_desiredGeneration,_epoch,0));
+            if (_buttons.Count < 4096) _buttons.Enqueue((message,_pointer,_desiredGeneration,_epoch,0));
             if (message == MirrorWin32.LeftDown && (_control || _uiButton)) MirrorWin32.SetCapture(MirrorWin32.OwnWindow);
             if (message == MirrorWin32.LeftUp && MirrorWin32.GetCapture() == MirrorWin32.OwnWindow) MirrorWin32.ReleaseCapture();
         }
@@ -373,7 +393,7 @@ internal sealed partial class MirrorRenderer : IDisposable
                 _pointer = new Vector2(point.X / (float)Math.Max(1, size.Right), point.Y / (float)Math.Max(1, size.Bottom));
             _buttons.Enqueue((message,_pointer,_desiredGeneration,_epoch,(short)((ulong)key >> 16) / 120f));
         }
-        if (message is 0x204 or 0x205 or 0x207 or 0x208 && _buttons.Count < 32)
+        if (message is 0x204 or 0x205 or 0x207 or 0x208 && _buttons.Count < 4096)
         {
             _buttons.Enqueue((message,_pointer,_desiredGeneration,_epoch,0));
             if (_control && message is 0x204 or 0x207) MirrorWin32.SetCapture(MirrorWin32.OwnWindow);
@@ -422,6 +442,8 @@ internal sealed partial class MirrorRenderer : IDisposable
             if (input.Generation == _desiredGeneration && input.Epoch == _epoch && ProcessMultiplayerPotion(input.Message, input.Point)) continue;
             if (Diagnostic && input.Message == MirrorWin32.LeftDown) GD.Print("[RMP:Mirror:Input] down point=" + input.Point + " control=" + _control + " idle=" + InputIdle + " waiting=" + _waitingForAuthority + " localUi=" + LocalUiAt(input.Point)?.GetType().Name + " generation=" + input.Generation + "/" + _desiredGeneration + " epoch=" + input.Epoch + "/" + _epoch);
             if (input.Generation != _desiredGeneration || input.Epoch != _epoch) continue;
+            if (input.Message == MirrorWin32.Move)
+            { if (_mapGestureKey.Length > 0) UpdateMapGesture(input.Point); continue; }
             if (input.Message == MirrorWin32.LeftDown && PotionPopup is { } outsidePopup && !Contains(outsidePopup, input.Point)) continue;
             if (_keyboardCard && _dragCard != null && input.Message is MirrorWin32.LeftDown or MirrorWin32.LeftUp)
             {
@@ -668,7 +690,8 @@ internal sealed partial class MirrorRenderer : IDisposable
         if (Multiplayer) { SendMultiplayerIntent(kind, index, target, nodeKey); return; }
         if (!_control || !NativeIdle || _waitingForAuthority) return;
         _waitingForAuthority = true; _submittedEvents = events;
-        _ = _wire.Send(new MirrorMessage { Kind = "intent", Generation = _generation, Epoch = _epoch, Request = ++_request,
+        _waitingRequest = ++_request;
+        _ = _wire.Send(new MirrorMessage { Kind = "intent", Generation = _generation, Epoch = _epoch, Request = _waitingRequest,
             Model = kind, NodeKey = nodeKey, Value = value, Index = index, TargetIndex = target, Hash = hash, Events = events });
     }
     private void CancelDrag()
@@ -961,6 +984,7 @@ internal sealed partial class MirrorRenderer : IDisposable
     private void Quit() { Dispose(); ((SceneTree)Engine.GetMainLoop()).Quit(); }
     public void Dispose()
     {
+        DiscardMapPreview();
         if (DisplayServer.GetName() != "headless" && RenderingServer.Singleton.IsConnected(RenderingServer.SignalName.FramePostDraw, _drawCallback))
             RenderingServer.Singleton.Disconnect(RenderingServer.SignalName.FramePostDraw, _drawCallback);
         _input?.Dispose(); _input = null; _wire.Dispose();
