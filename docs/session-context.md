@@ -1,4 +1,4 @@
-# v0.4.5 占卜、快捷键与地图绘画（2026-10-19）
+# v0.4.5 已发布 Latest，等待手动验收（2026-10-19）
 
 基线 **v0.4.4 已由用户明确验收通过**，原附魔／选牌／模式偏好问题移出活动测试和待验收。docs/selections044.md 与原脚本仅保留为历史证据，不再默认执行。新会话先读本文件与 AGENTS.md，核对实际 Git 和资源；不要仅因接收上下文重建或启动游戏。
 
@@ -37,10 +37,19 @@
 - 五文件直接可用目录：F:/projectFile/RMPStable-development/build/package/RMPStable。
 - 附件：同级 RMPStable-v0.4.5.zip，顶层 RMPStable/，DLL、PCK、JSON、README-multiInstance.md、update.cmd，五文件哈希全部一致；2,607,539 字节，ZIP SHA-256：8E75240B1D656CD7C3F1401DEE2B94962EAEF63BAFA964863EE3905B2BBA275D。
 - 版本统一为 0.4.5；发布文案 docs/release-v0.4.5.md 沿用 v0.4.4 标题／列表／安装段落／测试结尾格式。
-- 当前发布状态以本文末尾实测记录及实际 Git 为准；发布前不得将候选称为已发布。
+- 已正式发布，详见下方发布核验；自动化通过和发布均不替代用户手动验收。
 
 ## 仓库与资源
 
 唯一 checkout C:/Project_file/RMPStable-Github，当前明确授权的 main；仅 main／liveSharingTest／multiInstanceTest，无新分支、工作树、克隆或 detached HEAD。本轮不改其他测试分支。提交前基线 main 和 multiInstanceTest 为 659ea990748d351f74edf83d62c4179f9aad9d6f，liveSharingTest 为 6e3b367ee7e5391c83479a68905ead88f91abc0c；发布后查询实际本地／远端 SHA。
 
 既有资源根 F:/projectFile/RMPStable-development：references/v0.107.1、v0.111.0、runtime、profile-seed、build、evidence。大输出均用 F 盘，不新增 C 盘工作树或运行目录，不替换当前游戏、真实存档或桌面旧模组文件夹。
+
+## 发布核验
+
+- 正式 Latest：[RMP Stable v0.4.5](https://github.com/yyh2154064/RMPStable/releases/tag/v0.4.5)，非草稿、非预发布，按 v0.4.4 标题和 Markdown 格式发布。
+- 源码提交及 v0.4.5 标签：d048e62fe9942e8685226d8dff8f2bf3b4eb561e，已正常推送 main 和标签，无强推；随后文档提交只记录交付，不改变 DLL／附件／标签。
+- 通过用户已登录的内置浏览器正常上传与发布；公开 GitHub API 已核对 Latest、标题、正文与 docs/release-v0.4.5.md 一致，附件名称／大小／SHA-256 与本地完全一致。
+- 附件下载：https://github.com/yyh2154064/RMPStable/releases/download/v0.4.5/RMPStable-v0.4.5.zip。
+- 核验记录 F:/projectFile/RMPStable-development/evidence/release-v045-published.json；发布截图同目录 release-v045-published.jpg。桌面原上下文随交付更新；未改桌面旧模组目录。
+- multiInstanceTest 与 liveSharingTest 未改；各分支本地／远端以最终 Git 核对和桌面上下文为准。未来开发仍遵守 AGENTS.md，不继承本轮 main 授权。
