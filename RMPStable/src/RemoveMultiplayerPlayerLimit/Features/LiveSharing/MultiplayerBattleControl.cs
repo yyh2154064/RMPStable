@@ -82,9 +82,9 @@ internal static partial class MultiplayerMirrorSession
     internal static void RequestControl(bool enabled)
     {
         ControlRequested = enabled;
-        if (_selected == 0 || _service == null || _remoteSession.Length == 0) return;
-        Send(_selected, _token, new() { Kind = enabled ? "control-request" : "control-release", Build = MirrorState.Build, Session = _remoteSession, Generation = _receivedGeneration });
         if (!enabled) Mirror?.ApplyMultiplayerPermission(new MultiplayerControlView());
+        if (_selected == 0 || _remoteSession.Length == 0 || !Connected(_selected)) return;
+        Send(_selected, _token, new() { Kind = enabled ? "control-request" : "control-release", Build = MirrorState.Build, Session = _remoteSession, Generation = _receivedGeneration });
     }
     private static void ReleaseControl(ulong viewer, string token)
     {

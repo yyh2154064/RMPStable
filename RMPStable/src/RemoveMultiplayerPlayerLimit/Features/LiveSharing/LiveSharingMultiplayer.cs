@@ -14,10 +14,20 @@ internal static partial class LiveSharingController
     {
         if (!RunManager.Instance.IsInProgress || state == null || NRun.Instance?.IsNodeReady() != true)
         { if (_viewMultiplayer) HideView(); return; }
-        if (pressed && _viewMultiplayer) { Close(); return; }
         if (_viewMultiplayer && (MultiplayerMirrorSession.Mirror == null || !MultiplayerMirrorSession.Sources().Any(p => p.Id == MultiplayerMirrorSession.Selected.ToString())))
-        { HideView(); SpectatorPreferences.Current.Open = false; SpectatorPreferences.Save(); return; }
-        if (_view == null && (pressed || SpectatorPreferences.Current.Open))
+        { HideView(); SpectatorPreferences.Current.Open = false; SpectatorPreferences.Save(); }
+        if (pressed)
+        {
+            _openFailed = false;
+            if (_viewMultiplayer)
+            {
+                if (MultiplayerMirrorSession.Mirror?.Process.NeedsReplacement == true)
+                    ShowMultiplayerSource(MultiplayerMirrorSession.Selected.ToString(), true);
+                else Close();
+                return;
+            }
+        }
+        if (_view == null && !_openFailed && (pressed || SpectatorPreferences.Current.Open))
         {
             var choices = MultiplayerMirrorSession.Sources();
             var source = choices.FirstOrDefault(p => p.Id == SpectatorPreferences.Current.MultiplayerSourceId) ?? choices.FirstOrDefault(p => p.Id != RunManager.Instance.NetService.NetId.ToString()) ?? choices.FirstOrDefault();

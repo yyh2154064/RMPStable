@@ -39,6 +39,7 @@ internal sealed class MirrorProcess : IDisposable
     private readonly ProcessStartInfo _start;
     private readonly bool _requiresStartupWindow;
     internal string StartupError { get; private set; } = "";
+    internal bool NeedsReplacement => _disposed || Child?.HasExited == true || Wire.Error.Length > 0;
     internal MirrorProcess(ulong source)
     {
         string executable = OS.GetExecutablePath();

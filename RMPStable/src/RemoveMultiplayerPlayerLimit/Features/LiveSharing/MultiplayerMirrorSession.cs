@@ -188,9 +188,12 @@ internal static partial class MultiplayerMirrorSession
     }
     private static void Unsubscribe()
     {
-        if (_selected != 0 && _service?.IsConnected == true) Send(_selected, _token, new MultiplayerMirrorFrame { Kind = "unsubscribe" });
+        ulong source = _selected;
+        string token = _token;
         Latest = null; _selected = 0; _token = _remoteSession = ""; ControlRequested = false;
         _receivedEvents = 0; _receivedGeneration = 0;
+        if (source != 0 && Connected(source))
+            Send(source, token, new MultiplayerMirrorFrame { Kind = "unsubscribe" });
     }
     private static void Reset()
     {
@@ -204,7 +207,7 @@ internal static partial class MultiplayerMirrorSession
     }
     private static bool Connected(ulong id)
     {
-        if (_service == null) return false;
+        if (_service?.IsConnected != true) return false;
         if (id == _service.NetId) return true;
         if (_service is MegaCrit.Sts2.Core.Multiplayer.NetHostGameService host) return host.ConnectedPeers.Any(p => p.peerId == id);
 #if STS2_0111
@@ -253,10 +256,20 @@ internal static partial class MultiplayerMirrorSession
     }
     private static void Route(RmpMirrorPacket packet)
     {
-        if (_service == null) return;
-        if (packet.Destination == _service.NetId) Accept(packet);
-        else if (_service.Type == NetGameType.Host) _service.SendMessage(packet, packet.Destination);
-        else _service.SendMessage(packet);
+        var service = _service;
+        if (service == null || !Connected(packet.Destination)) return;
+        if (packet.Destination == service.NetId) { Accept(packet); return; }
+        try
+        {
+            if (service.Type == NetGameType.Host) service.SendMessage(packet, packet.Destination);
+            else service.SendMessage(packet);
+        }
+        catch (InvalidOperationException error) when (!Connected(packet.Destination) ||
+            // Steam can remove its transport connection before the game peer list updates.
+            service.Type == NetGameType.Host && error.Message == $"Could not find connection for peer {packet.Destination}!")
+        {
+            // Disconnect notification and the next tick retire the subscription.
+        }
     }
     private static void Receive(RmpMirrorPacket packet, ulong sender)
     {

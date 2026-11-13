@@ -225,7 +225,15 @@ internal static partial class LiveSharingController
     internal static void Close() { SpectatorPreferences.Current.Open = false; SpectatorPreferences.Save(); HideView(); }
     private static void HideView()
     {
-        _view?.Dispose(); _view = null; _viewMultiplayer = false; _mirror?.Window?.Hide(); MultiplayerMirrorSession.Mirror?.Window?.Hide(); RouteMapInput(false);
+        var view = _view;
+        _view = null; _viewMultiplayer = false;
+        try { view?.Dispose(); }
+        finally
+        {
+            _mirror?.Window?.Hide();
+            MultiplayerMirrorSession.Mirror?.Window?.Hide();
+            RouteMapInput(false);
+        }
     }
     internal static void Suspend()
     {

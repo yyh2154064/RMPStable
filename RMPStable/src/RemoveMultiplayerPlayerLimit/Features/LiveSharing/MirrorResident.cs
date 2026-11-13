@@ -1,24 +1,16 @@
-using System;
-
 namespace RemoveMultiplayerPlayerLimit.Features.LiveSharing;
 
-// One native child belongs to the lifetime of this game process. Controllers
-// lease its current view; leaving a run releases that lease, not the process.
+// Reuse the native child across runs while its process and pipe are healthy.
 internal static class MirrorResident
 {
     private static MirrorHost? _host;
     internal static MirrorHost? Host => _host;
     internal static MirrorHost Acquire(ulong source, bool multiplayer)
     {
-        if (_host != null && (_host.Process.Child?.HasExited == true || _host.Process.StartupError.Length > 0))
+        if (_host?.Process.NeedsReplacement == true)
         { _host.Dispose(); _host = null; }
         if (_host == null) _host = new MirrorHost(source, multiplayer);
-        else
-        {
-            if (_host.Process.Wire.Error.Length > 0)
-                throw new InvalidOperationException("常驻副本通信已失效，无法在原进程内恢复：" + _host.Process.Wire.Error);
-            _host.Rebind(source, multiplayer);
-        }
+        else _host.Rebind(source, multiplayer);
         return _host;
     }
     internal static void Release(MirrorHost? host)

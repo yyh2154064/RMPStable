@@ -1,7 +1,7 @@
 {
   "id": "RMPStable",
   "name": "RMP Stable",
-  "version": "0.4.6",
+  "version": "0.4.7",
   "author": "灰灰神教！",
   "description": "支持16人联机、快速SL及原生观战/操控窗口。副本按需启动。包含v0.107.1、v0.111.0、v0.113.0的兼容程序集。",
   "dependencies": [],

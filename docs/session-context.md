@@ -1,24 +1,32 @@
 # RMPStable 会话上下文
 
-## v0.4.6 已发布 Latest，等待手动验收（2026-11-13）
+## v0.4.7 已完成本地交付，等待发布选择与手动验收（2026-11-14）
+
+- 用户批准修复掉线重连后 F8 无法打开实况，并要求项目交接只维护仓库内三份文档，后续 GitHub 提交使用简洁中文。在现有 `multiInstanceTest` 从 `659ea99` 快进至 `039867f` 后实施。当前正式发布仍为 v0.4.6。
+- 正式游戏日志显示 Steam 连接超时后，v0.4.6 实况向离线好友发送取消订阅和释放控制消息，异常打断清理。重连后旧副本本机管道已报告接收积压溢出，F8 仍尝试复用。v0.4.7 先清理本地订阅与控制，避开离线对端，F8 可替换通信失效的副本并重新订阅。日志未确定 Steam 掉线起因。
+- 本轮独立入口 [Test-ReconnectF8.ps1](../tools/Test-ReconnectF8.ps1) 在 v0.113.0 隔离双端以原版 localhost ENet 和原版存档载入通过 11 项断言。测试将第二个大厅切到另一回环端口。房主和重连端均可用 F8 显示好友实况。暂停房主读取副本消息触发了真实管道积压，按一次 F8 成功替换副本、重新同步，旧控制授权失效。v0.107.1 和 v0.111.0 完成编译。真实 Steam 跨机重连待手动复测。
+- Mod 文件夹与 ZIP 位于 F 盘开发根 `build/v047/package/`。专项记录为 `evidence/reconnect-f8-20261113-165509-745/result.json`。DLL SHA-256 为 `9D8133538D2CDCEDAFC42C866A5F02E998D8E8AE0927FE437928E70B670DD4CD`。默认待选发布目标 `main` 和 `v0.4.7` 正式 Latest，见 [v0.4.7 Release 文案](release-v0.4.7.md)。
+
+## 当前正式版本 v0.4.6（2026-11-13）
 
 - 用户通过版本输入批准 STS2 v0.113.0 兼容和启动性能方案。在现有 `multiInstanceTest` 快进到 `f7540b2` 后实施，纳入已要求的项目流程 Skill 与三份维护文档。
 - 兼容包包含三个版本。新版适配建房、扩容消息、商店购买、选牌、宝箱、结算及实况。启动和选角期间禁止预热副本，首次打开实况时在对局内按需创建。大厅与暂停菜单改用原版栈查询。
 - v0.113.0 隔离专项通过 The Fool、单人 Quick SL、Standard／Blitz／Dread 双端联机和启动对照。最终三组对照的进程到主菜单中位数为 7.17 秒与 7.75 秒，选角 P95 为 12.84 ms 与 13.24 ms。已覆盖第 16 席位封包往返，实际 16 人和 Steam 跨机待验。
 - 用户选择由助手发布。`main` 已包含源码提交 `14e0c91ea0ac39b0f5b91bd1df6ca5c7ac283e8a`，标签 `v0.4.6` 指向该提交。[RMP Stable v0.4.6](https://github.com/yyh2154064/RMPStable/releases/tag/v0.4.6) 为公开 Latest。实际运行公开 v0.4.5 包内的 `update.cmd` 已在线升级到 0.4.6，三个安装文件的 SHA-256 一致，重复运行正确跳过。
 - 本轮独立入口为 [Test-Beta113Startup.ps1](../tools/Test-Beta113Startup.ps1)。Mod 文件夹与 ZIP 位于批准的 F 盘开发根 `build/v046/package/`。手动验收待确认。发布文案见 [v0.4.6 Release 文案](release-v0.4.6.md)，专项证据及剩余覆盖面见 [v0.4.6 专项记录](beta113-v046-validation.md)。
-- v0.4.5 的占卜、实况快捷键和地图绘画仍处于待手动验收状态。
+- 当前待手动验收包括 v0.4.6 兼容和启动改动，以及 v0.4.5 遗留的占卜、实况快捷键和地图绘画。
 
 ## 开发流程（2026-11-13）
 
 - 项目开发与发布从 [AGENTS.md](../AGENTS.md) 进入，按 [开发流程 Skill](../.agents/skills/rmpstable-development/SKILL.md) 审批。只读调查后先审方案并输入版本，专项完成后再决定 GitHub 上传方式。[项目架构](project-architecture.md)和[组织与部署](project-deployment.md)记录稳定技术与发布事实。
 - 后续记录日期、版本、批准范围、改动入口、专项结果、交付/发布状态及待手动验收。用链接指向详细报告。跨会话续作记录已确认的分支、版本、阶段和未决事项，授权以对应用户回复为准。
+- 项目交接以仓库内三份维护文档为准。发布到 GitHub 时，新增 Git 提交使用简洁中文说明改动。
 
-## v0.4.5 已发布 Latest，等待手动验收（2026-10-19）
+## v0.4.5 历史交付与待验收项目（2026-10-19）
 
 基线 **v0.4.4 已由用户明确验收通过**，原附魔／选牌／模式偏好问题移出活动测试和待验收。docs/selections044.md 与原脚本仅保留为历史证据，不再默认执行。新会话先读本文件与 AGENTS.md，核对实际 Git 和资源；不要仅因接收上下文重建或启动游戏。
 
-用户本轮明确授权切换 main 开发、测试后提交推送 main、按往期名称及 Markdown 发布 **RMP Stable v0.4.5**，并更新原桌面上下文。本轮授权不能泛化为未来版本开发。
+该轮获准在 main 开发、测试后提交推送 main、按往期名称及 Markdown 发布 **RMP Stable v0.4.5**。后续版本按各轮批准范围执行。
 
 ## 本轮范围
 
@@ -48,7 +56,7 @@
 
 ## 活动验收与交付
 
-**唯一活动待手动验收：v0.4.5 本轮占卜／实况快捷键／地图绘画。** 自动化通过表示可交付，发布不等于用户手动验收。明确通过后移出活动清单，未通过按新反馈修复，未反馈保留专项脚本；已验收 v0.4.4 不再参与默认执行。
+**v0.4.5 待手动验收项目：占卜／实况快捷键／地图绘画。** 明确通过后移出活动清单，未通过按新反馈修复，未反馈保留专项脚本。已验收 v0.4.4 不再参与默认执行。
 
 - 五文件直接可用目录：F:/projectFile/RMPStable-development/build/package/RMPStable。
 - 附件：同级 RMPStable-v0.4.5.zip，顶层 RMPStable/，DLL、PCK、JSON、README-multiInstance.md、update.cmd，五文件哈希全部一致；2,607,539 字节，ZIP SHA-256：8E75240B1D656CD7C3F1401DEE2B94962EAEF63BAFA964863EE3905B2BBA275D。
@@ -57,15 +65,15 @@
 
 ## 仓库与资源
 
-唯一 checkout C:/Project_file/RMPStable-Github，当前明确授权的 main；仅 main／liveSharingTest／multiInstanceTest，无新分支、工作树、克隆或 detached HEAD。本轮不改其他测试分支。提交前基线 main 和 multiInstanceTest 为 659ea990748d351f74edf83d62c4179f9aad9d6f，liveSharingTest 为 6e3b367ee7e5391c83479a68905ead88f91abc0c；发布后查询实际本地／远端 SHA。
+v0.4.5 在唯一 checkout C:/Project_file/RMPStable-Github 的 main 开发，基线为 659ea990748d351f74edf83d62c4179f9aad9d6f。其他两个分支在该轮保持原位。
 
 既有资源根 F:/projectFile/RMPStable-development：references/v0.107.1、v0.111.0、runtime、profile-seed、build、evidence。大输出均用 F 盘，不新增 C 盘工作树或运行目录，不替换当前游戏、真实存档或桌面旧模组文件夹。
 
 ## 发布核验
 
-- 正式 Latest：[RMP Stable v0.4.5](https://github.com/yyh2154064/RMPStable/releases/tag/v0.4.5)，非草稿、非预发布，按 v0.4.4 标题和 Markdown 格式发布。
+- 历史正式发布：[RMP Stable v0.4.5](https://github.com/yyh2154064/RMPStable/releases/tag/v0.4.5)，按 v0.4.4 标题和 Markdown 格式发布。
 - 源码提交及 v0.4.5 标签：d048e62fe9942e8685226d8dff8f2bf3b4eb561e，已正常推送 main 和标签，无强推；随后文档提交只记录交付，不改变 DLL／附件／标签。
 - 通过用户已登录的内置浏览器正常上传与发布；公开 GitHub API 已核对 Latest、标题、正文与 docs/release-v0.4.5.md 一致，附件名称／大小／SHA-256 与本地完全一致。
 - 附件下载：https://github.com/yyh2154064/RMPStable/releases/download/v0.4.5/RMPStable-v0.4.5.zip。
-- 核验记录 F:/projectFile/RMPStable-development/evidence/release-v045-published.json；发布截图同目录 release-v045-published.jpg。桌面原上下文随交付更新；未改桌面旧模组目录。
-- multiInstanceTest 与 liveSharingTest 未改；各分支本地／远端以最终 Git 核对和桌面上下文为准。未来开发仍遵守 AGENTS.md，不继承本轮 main 授权。
+- 核验记录 F:/projectFile/RMPStable-development/evidence/release-v045-published.json；发布截图同目录 release-v045-published.jpg。
+- 各分支本地／远端以 Git 核对为准。未来开发按 AGENTS.md 和各轮批准范围执行。
