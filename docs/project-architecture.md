@@ -1,6 +1,6 @@
 # RMPStable 项目架构
 
-本页覆盖 v0.4.6 开发候选。每次按目标分支和实际游戏版本核对实现。[会话上下文](session-context.md)记录当前验收，[组织与部署](project-deployment.md)记录构建产物和发布约定。
+本页覆盖 v0.4.6 正式发布版本。每次按目标分支和实际游戏版本核对实现。[会话上下文](session-context.md)记录当前验收，[组织与部署](project-deployment.md)记录构建产物和发布约定。
 
 ## 技术栈与加载
 

@@ -1,11 +1,12 @@
 # RMPStable 会话上下文
 
-## v0.4.6 开发交接（2026-11-13）
+## v0.4.6 已发布 Latest，等待手动验收（2026-11-13）
 
 - 用户通过版本输入批准 STS2 v0.113.0 兼容和启动性能方案。在现有 `multiInstanceTest` 快进到 `f7540b2` 后实施，纳入已要求的项目流程 Skill 与三份维护文档。
 - 兼容包包含三个版本。新版适配建房、扩容消息、商店购买、选牌、宝箱、结算及实况。启动和选角期间禁止预热副本，首次打开实况时在对局内按需创建。大厅与暂停菜单改用原版栈查询。
 - v0.113.0 隔离专项通过 The Fool、单人 Quick SL、Standard／Blitz／Dread 双端联机和启动对照。最终三组对照的进程到主菜单中位数为 7.17 秒与 7.75 秒，选角 P95 为 12.84 ms 与 13.24 ms。已覆盖第 16 席位封包往返，实际 16 人和 Steam 跨机待验。
-- 本轮独立入口为 [Test-Beta113Startup.ps1](../tools/Test-Beta113Startup.ps1)。候选 Mod 文件夹与 ZIP 位于批准的 F 盘开发根 `build/v046/package/`。用户已选择由助手更新 `main`、发布 GitHub Latest 并验证在线升级。手动验收待确认。发布文案见 [v0.4.6 Release](release-v0.4.6.md)，专项证据及剩余覆盖面见 [v0.4.6 专项记录](beta113-v046-validation.md)。
+- 用户选择由助手发布。`main` 已包含源码提交 `14e0c91ea0ac39b0f5b91bd1df6ca5c7ac283e8a`，标签 `v0.4.6` 指向该提交。[RMP Stable v0.4.6](https://github.com/yyh2154064/RMPStable/releases/tag/v0.4.6) 为公开 Latest。实际运行公开 v0.4.5 包内的 `update.cmd` 已在线升级到 0.4.6，三个安装文件的 SHA-256 一致，重复运行正确跳过。
+- 本轮独立入口为 [Test-Beta113Startup.ps1](../tools/Test-Beta113Startup.ps1)。Mod 文件夹与 ZIP 位于批准的 F 盘开发根 `build/v046/package/`。手动验收待确认。发布文案见 [v0.4.6 Release 文案](release-v0.4.6.md)，专项证据及剩余覆盖面见 [v0.4.6 专项记录](beta113-v046-validation.md)。
 - v0.4.5 的占卜、实况快捷键和地图绘画仍处于待手动验收状态。
 
 ## 开发流程（2026-11-13）

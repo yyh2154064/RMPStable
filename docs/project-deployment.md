@@ -4,10 +4,10 @@
 
 - 面向 Slay the Spire 2 单人和联机玩家。联机队员关闭游戏后使用同一游戏版本和 Mod 版本。本项目通过 GitHub Release 分发 Mod 文件夹，由玩家在本机安装。日常专项使用 F 盘独立环境与隔离档案，保护现有游戏和真实存档。
 - `origin` 为公开仓库 [yyh2154064/RMPStable](https://github.com/yyh2154064/RMPStable)，默认分支 `main`。既有 `liveSharingTest` 为本地模拟，`multiInstanceTest` 为原生多实例。开发和发布授权见 [AGENTS.md](../AGENTS.md) 及 [开发流程 Skill](../.agents/skills/rmpstable-development/SKILL.md)。每轮检查当前工作区、远端目标、分支引用及版本标签。
-- 2026-11-13 核对公开页面和附件列表，[RMP Stable v0.4.5](https://github.com/yyh2154064/RMPStable/releases/tag/v0.4.5) 显示为 Latest，标签指向源码提交 `d048e62`，[公开附件](https://github.com/yyh2154064/RMPStable/releases/expanded_assets/v0.4.5) `RMPStable-v0.4.5.zip` 的 SHA-256 与本地 ZIP 一致。[v0.4.4](https://github.com/yyh2154064/RMPStable/releases/tag/v0.4.4) 和 [v0.4.5 本地文案](release-v0.4.5.md) 是标题与正文格式参考。
+- 2026-11-13 发布并核对 [RMP Stable v0.4.6](https://github.com/yyh2154064/RMPStable/releases/tag/v0.4.6) 为公开 Latest，标签指向源码提交 `14e0c91ea0ac39b0f5b91bd1df6ca5c7ac283e8a`，该提交已进入 `main`。[v0.4.5](https://github.com/yyh2154064/RMPStable/releases/tag/v0.4.5) 和 [v0.4.6 文案](release-v0.4.6.md) 可供后续发布参考。
 - 当前开发资源在 `F:/projectFile/RMPStable-development`。构建输出 `build/package/RMPStable/`，同级存放发布 ZIP。引用、runtime、profile seed 和证据目录详见 [开发资源](development-resources.md)。以实际路径与候选文件哈希为准。
 - v0.4.6 使用 `build/v046/package/` 保存候选文件夹和 ZIP。`runtime/v0.113.0` 复用 F 盘隔离环境，匹配游戏 PCK 从 Steam 安装只读加载。游戏程序集、测试探针和隔离档案均在候选包之外。
-- v0.4.6 本地候选 ZIP 为 2,883,776 字节，SHA-256 为 `1B5B5C13311D5308067AD6499EF85114AF4DF6B42FEADFC6753F0EE760158533`。五个归档文件与候选目录逐一核对。v0.4.5 原更新器用模拟 GitHub Latest 和附件下载完成升级，三项安装文件的哈希均与候选一致。公开 Latest、附件和更新器联网复验待发布后完成。
+- [v0.4.6 公开 ZIP](https://github.com/yyh2154064/RMPStable/releases/download/v0.4.6/RMPStable-v0.4.6.zip) 与本地交付 ZIP 均为 2,883,776 字节，SHA-256 为 `1B5B5C13311D5308067AD6499EF85114AF4DF6B42FEADFC6753F0EE760158533`。从公开 v0.4.5 附件解压到 F 盘隔离目录后，原 `update.cmd` 识别 Latest 并实际联网下载、安装 0.4.6。DLL、PCK 和清单哈希均与发布包一致。再次运行正确跳过。
 
 ## 版本和更新器约定
 
