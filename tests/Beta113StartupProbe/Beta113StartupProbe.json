@@ -1,0 +1,1 @@
+{"id":"Beta113StartupProbe","name":"Beta 0.113 startup measurements","author":"RMP Stable Contributors","version":"0.1.0","description":"Isolated 0.4.6 startup and on-demand replica probe.","has_dll":true,"has_pck":false,"affects_gameplay":false,"min_game_version":"0.113.0","dependencies":[]}

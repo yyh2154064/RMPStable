@@ -71,7 +71,11 @@ internal static partial class MultiplayerMirrorSession
         // teammate finishing their personal page must not block our own click.
         string context = JsonSerializer.Serialize(new { _generation, _controlRevision, player = Convert.ToBase64String(MirrorState.Pack(player.ToSerializable())),
             room = _state!.CurrentRoom?.RoomType, page = root.GetInstanceId(), choice = MultiplayerPersonalUi.Capture(), crystal = MultiplayerNoncombat.CrystalContext(), actions = view.Actions,
+#if STS2_0113
+            shop = _state.CurrentRoom is MerchantRoom ? RunManager.Instance.MerchantSynchronizer.GetLocalInventory()?.AllEntries.Select(e => new { id = ControlId(e), e.Cost, e.IsStocked }).ToArray() : null });
+#else
             shop = _state.CurrentRoom is MerchantRoom merchant ? merchant.GetLocalInventory().AllEntries.Select(e => new { id = ControlId(e), e.Cost, e.IsStocked }).ToArray() : null });
+#endif
         view.Context = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(context)));
         return view;
     }

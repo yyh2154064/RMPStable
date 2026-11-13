@@ -26,10 +26,13 @@ public static class ModEntry
 
 	public static void Initialize()
 	{
-#if STS2_0111
-		Log.Warn("[RMP Stable] Initializing native multi-instance v0.4.5 for STS2 v0.111.0 Public Beta...");
+#if STS2_0113
+		Log.Warn("[RMP Stable] Initializing native multi-instance v0.4.6 for STS2 v0.113.0...");
+		PayloadMessageRegistration.AttachPayloadDuringModLoad();
+#elif STS2_0111
+		Log.Warn("[RMP Stable] Initializing native multi-instance v0.4.6 for STS2 v0.111.0...");
 #else
-		Log.Warn("[RMP Stable] Initializing native multi-instance v0.4.5 for STS2 v0.107.1...");
+		Log.Warn("[RMP Stable] Initializing native multi-instance v0.4.6 for STS2 v0.107.1...");
 #endif
 		Modules.Clear();
 		ConfigManager configManager = new ConfigManager();

@@ -97,7 +97,11 @@ public class VictoryModule : IRMPModule
 			if (_missingGameOverTicks >= 12)
 			{
 				Log.Warn("[RMP:Victory] Victory summary did not appear in time. Forcing GameOverScreen.");
+#if STS2_0113
+				instance.ShowGameOverScreen(MegaCrit.Sts2.Core.Entities.Save.PostRunProgressUpdateResult.Unsuccessful(RunManager.Instance.ToSave(null)));
+#else
 				instance.ShowGameOverScreen(RunManager.Instance.ToSave(null));
+#endif
 				_summaryForcedForCurrentRun = true;
 				_missingGameOverTicks = 0;
 			}

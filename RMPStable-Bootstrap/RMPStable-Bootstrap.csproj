@@ -20,10 +20,12 @@
     <Compile Include="..\RMPStable\src\GodotPlugins\Game\Main.cs" Link="GodotPlugins\Game\Main.cs" />
     <EmbeddedResource Include="$(StablePayloadPath)" LogicalName="RMPStable.Payload.v0107.dll" />
     <EmbeddedResource Include="$(BetaPayloadPath)" LogicalName="RMPStable.Payload.v0111.dll" />
+    <EmbeddedResource Include="$(V0113PayloadPath)" LogicalName="RMPStable.Payload.v0113.dll" />
   </ItemGroup>
   <Target Name="ValidateInputs" BeforeTargets="ResolveAssemblyReferences">
     <Error Condition="!Exists('$(GameManagedDir)\sts2.dll')" Text="GameManagedDir must contain sts2.dll." />
     <Error Condition="!Exists('$(StablePayloadPath)')" Text="StablePayloadPath does not exist." />
     <Error Condition="!Exists('$(BetaPayloadPath)')" Text="BetaPayloadPath does not exist." />
+    <Error Condition="!Exists('$(V0113PayloadPath)')" Text="V0113PayloadPath does not exist." />
   </Target>
 </Project>

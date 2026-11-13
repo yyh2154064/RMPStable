@@ -51,7 +51,12 @@ internal sealed partial class LocalSpectatorSource
 		{
 			var overlay = NOverlayStack.Instance?.Peek() as Control;
 			if (overlay == null || !Ready(overlay)) return false;
+#if STS2_0113
+			if (overlay is not MegaCrit.Sts2.Core.Nodes.Screens.CardSelection.ICardSelectionScreen &&
+				overlay is not MegaCrit.Sts2.Core.Nodes.Screens.CardSelection.NCardRewardSelectionScreen &&
+#else
 			if (overlay is not MegaCrit.Sts2.Core.Nodes.Screens.CardSelection.ICardSelector &&
+#endif
 				overlay is not MegaCrit.Sts2.Core.Nodes.Screens.CardSelection.NChooseABundleSelectionScreen) return false;
 			for (var type = overlay.GetType(); type != null; type = type.BaseType)
 				if (type.GetField("_completionSource", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.DeclaredOnly)?.GetValue(overlay) is { } completion)

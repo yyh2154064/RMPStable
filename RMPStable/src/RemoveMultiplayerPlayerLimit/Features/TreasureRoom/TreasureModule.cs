@@ -80,7 +80,11 @@ public class TreasureModule : IRMPModule
 
 		private Action? _diagnosticVotesChangedHandler;
 
+#if STS2_0113
+		private Action<List<RelicPickingResult>, bool>? _diagnosticRelicsAwardedHandler;
+#else
 		private Action<List<RelicPickingResult>>? _diagnosticRelicsAwardedHandler;
+#endif
 
 		private readonly HashSet<ulong> _diagnosticHolderIds = new HashSet<ulong>();
 
@@ -326,7 +330,11 @@ public class TreasureModule : IRMPModule
 			}
 
 			_diagnosticVotesChangedHandler = () => LogTreasureState("votes-changed", force: true);
+#if STS2_0113
+			_diagnosticRelicsAwardedHandler = (results, _) =>
+#else
 			_diagnosticRelicsAwardedHandler = results =>
+#endif
 			{
 				StringBuilder summary = new StringBuilder();
 				for (int i = 0; i < results.Count; i++)

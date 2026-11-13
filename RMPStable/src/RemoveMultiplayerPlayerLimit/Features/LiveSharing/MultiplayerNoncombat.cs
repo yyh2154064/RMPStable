@@ -83,19 +83,27 @@ internal static partial class MultiplayerNoncombat
         Patch(typeof(EventSynchronizer), "ChooseSharedEventOption", nameof(SourceDecisionOnly));
         Patch(typeof(MapSelectionSynchronizer), "MoveToMapCoord", nameof(SourceDecisionOnly));
         Patch(typeof(ActChangeSynchronizer), "MoveToNextAct", nameof(SourceDecisionOnly));
+#if !STS2_0113
         h.Patch(typeof(MapSelectionSynchronizer).GetMethod("PlayerVotedForMapCoord")!, postfix: new HarmonyMethod(typeof(MultiplayerNoncombat).GetMethod(nameof(MapVotePresented), Any)));
+#endif
         Patch(typeof(RestSiteSynchronizer), "ChooseOption", nameof(RestOption));
 #if STS2_0111
         Patch(typeof(RestSiteSynchronizer), "HandleRestSiteSkippedMessage", nameof(RestSkipped));
 #endif
         Patch(typeof(RewardsSetSynchronizer), "SelectRewardForPlayer", nameof(RewardSelected), filter: m => m.GetParameters().Last().ParameterType == typeof(Reward));
         Patch(typeof(RewardsSetSynchronizer), "SkipRewardsSet", nameof(RewardSkipped));
+#if STS2_0113
+        Patch(typeof(MerchantSynchronizer), "PurchaseEntry", nameof(PurchaseById));
+#else
         Patch(typeof(MerchantEntry), "OnTryPurchaseWrapper", nameof(Purchase));
         Patch(typeof(MerchantCardRemovalEntry), "OnTryPurchaseWrapper", nameof(PurchaseRemoval), filter: m => m.DeclaringType == typeof(MerchantCardRemovalEntry));
+#endif
         Patch(typeof(RewardSynchronizer), "HandleRewardObtainedMessage", nameof(Obtained));
         Patch(typeof(RewardSynchronizer), "HandleGoldLostMessage", nameof(GoldLost));
         Patch(typeof(RewardSynchronizer), "HandleCardRemovedMessage", nameof(CardRemoved));
+#if !STS2_0113
         Patch(typeof(OneOffSynchronizer), "HandleMerchantCardRemoval", nameof(MerchantRemoval));
+#endif
         Patch(typeof(OneOffSynchronizer), "DoTreasureRoomRewards", nameof(TreasureGold));
         Patch(typeof(NTreasureRoom), "OpenChest", nameof(OpenChest));
         Patch(typeof(RunManager), "ProceedFromTerminalRewardsScreen", nameof(Proceed));
@@ -143,6 +151,7 @@ internal static partial class MultiplayerNoncombat
     private static void SharedEnded() => _sharedDepth--;
     private static void EventVote(Player __0, uint __1, uint __2) => Add("eventVote", __0.NetId, __1 + ":" + __2);
     private static bool SourceDecisionOnly() => !Replica;
+#if !STS2_0113
     private static void MapVotePresented(MapSelectionSynchronizer __instance, Player player)
     {
         // The original local map click normally paints our vote before its
@@ -152,6 +161,7 @@ internal static partial class MultiplayerNoncombat
         var previous = map.PlayerVoteDictionary.TryGetValue(player, out var coord) ? coord : null;
         Invoke(map, "OnPlayerVoteChangedInternal", player, previous, __instance.GetVote(player)?.coord);
     }
+#endif
     private static void RestOption(Player __0, int __1) => Add("rest", __0.NetId, __1.ToString());
     internal static void RecordDrawing(ulong player, string kind, string value)
     {
@@ -164,6 +174,9 @@ internal static partial class MultiplayerNoncombat
     private static RewardsSet Set(object state) => (RewardsSet)Read(state, "set")!;
     private static void RewardSelected(object __0, Reward __1) { var set = Set(__0); Add("reward", set.Player.NetId, set.Id + ":" + set.Rewards.IndexOf(__1)); }
     private static void RewardSkipped(object __0) { var set = Set(__0); Add("skipRewards", set.Player.NetId, set.Id.ToString()); }
+#if STS2_0113
+    private static void PurchaseById(Player __0, uint __1) => Add("purchaseById", __0.NetId, __1.ToString());
+#else
     private static void Purchase(MerchantEntry __instance, MerchantInventory? inventory, bool ignoreCost)
     {
         if (!Recording || inventory == null) return;
@@ -176,10 +189,13 @@ internal static partial class MultiplayerNoncombat
         inventory ??= (RunManager.Instance.DebugOnlyGetState()?.CurrentRoom as MerchantRoom)?.Inventories.FirstOrDefault(i => ReferenceEquals(i.CardRemovalEntry, __instance));
         if (inventory != null) Add("purchaseRemoval", inventory.Player.NetId, ignoreCost + ":" + cancelable);
     }
+#endif
     private static void Obtained(RewardObtainedMessage __0, ulong __1) => Add("obtained", __1, payload: MirrorState.Pack(__0));
     private static void GoldLost(GoldLostMessage __0, ulong __1) => Add("goldLost", __1, payload: MirrorState.Pack(__0));
     private static void CardRemoved(CardRemovedMessage __0, ulong __1) => Add("cardRemoved", __1, payload: MirrorState.Pack(__0));
+#if !STS2_0113
     private static void MerchantRemoval(MerchantCardRemovalMessage __0, ulong __1) => Add("merchantRemoval", __1, payload: MirrorState.Pack(__0));
+#endif
     private static void TreasureGold(Player __0) { if (!LocalContext.IsMe(__0)) Add("treasureGold", __0.NetId); }
     private static void OpenChest() => Add("chest");
     private static void Proceed() => Add("proceed");
@@ -258,6 +274,10 @@ internal static partial class MultiplayerNoncombat
                     Invoke(rewardsScreen, "OnProceedButtonPressed", Read(rewardsScreen, "_proceedButton"));
                 else m.RewardsSetSynchronizer.HandleRewardSetSkippedMessage(new() { location = state.RunLocation, setId = int.Parse(op.Value) }, id);
                 break;
+#if STS2_0113
+            case "purchaseById":
+                return m.MerchantSynchronizer.GetInventoryFor(player!).TryPurchaseEntryWithIdUnsynchronized(uint.Parse(op.Value));
+#else
             case "purchase":
                 var inventory = ((MerchantRoom)state.CurrentRoom!).Inventories[state.GetPlayerSlotIndex(player!)];
                 if (LocalContext.IsMe(player) && !bool.Parse(values[1]))
@@ -271,13 +291,20 @@ internal static partial class MultiplayerNoncombat
                 if (LocalContext.IsMe(player) && !bool.Parse(values[0]) && bool.Parse(values[1]))
                     return (Task)Invoke(LocalSpectatorSource.Descendants<NMerchantSlot>(NRun.Instance.MerchantRoom).First(s => ReferenceEquals(s.Entry, removalInventory.CardRemovalEntry)), "OnSelected")!;
                 return removalInventory.CardRemovalEntry!.OnTryPurchaseWrapper(removalInventory, bool.Parse(values[0]), bool.Parse(values[1]));
+#endif
             case "obtained": Invoke(m.RewardSynchronizer, "HandleRewardObtainedMessage", UnpackMessage<RewardObtainedMessage>(op.Payload), id); break;
             case "goldLost": Invoke(m.RewardSynchronizer, "HandleGoldLostMessage", UnpackMessage<GoldLostMessage>(op.Payload), id); break;
             case "cardRemoved": Invoke(m.RewardSynchronizer, "HandleCardRemovedMessage", MirrorState.Unpack<CardRemovedMessage>(op.Payload), id); break;
+#if !STS2_0113
             case "merchantRemoval": Invoke(m.OneOffSynchronizer, "HandleMerchantCardRemoval", MirrorState.Unpack<MerchantCardRemovalMessage>(op.Payload), id); break;
+#endif
             case "treasureGold": return (Task)Invoke(m.OneOffSynchronizer, "DoTreasureRoomRewards", player)!;
             case "chest": return (Task)Invoke(NRun.Instance.TreasureRoom, "OpenChest")!;
+#if STS2_0113
+            case "proceed": return m.ProceedFromTerminalRewardsScreenAsync();
+#else
             case "proceed": return m.ProceedFromTerminalRewardsScreen();
+#endif
             case "crystalCell": case "crystalTool": return ApplyCrystal(op, state);
             case "crystalRewards": Invoke(m.OneOffSynchronizer, "HandleCrystalSphereRewardsMessage", MirrorState.Unpack<CrystalSphereRewardsMessage>(op.Payload), id); break;
             default: throw new InvalidOperationException("Unknown noncombat operation: " + op.Kind);

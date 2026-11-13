@@ -1,9 +1,9 @@
 {
   "id": "RMPStable",
   "name": "RMP Stable",
-  "version": "0.4.5",
+  "version": "0.4.6",
   "author": "灰灰神教！",
-  "description": "支持16人联机、快速SL及原生观战/操控窗口。v0.4.5新增F4占卜灰雾预览并记住偏好，实况F4/F5控制当前来源，地图原生笔迹即时显示与精准定位。兼容v0.107.1、v0.111.0。",
+  "description": "支持16人联机、快速SL及原生观战/操控窗口。副本按需启动。包含v0.107.1、v0.111.0、v0.113.0的兼容程序集。",
   "dependencies": [],
   "has_pck": true,
   "has_dll": true,

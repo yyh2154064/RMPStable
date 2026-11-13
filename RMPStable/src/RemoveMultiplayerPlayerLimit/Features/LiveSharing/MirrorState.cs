@@ -36,8 +36,8 @@ internal static class MirrorState
         // presentation discoveries can differ without changing the run.
         foreach (var player in saved.Players)
         {
-            player.DiscoveredCards.Clear(); player.DiscoveredEnemies.Clear(); player.DiscoveredEpochs.Clear();
-            player.DiscoveredPotions.Clear(); player.DiscoveredRelics.Clear();
+            player.DiscoveredCards?.Clear(); player.DiscoveredEnemies?.Clear(); player.DiscoveredEpochs?.Clear();
+            player.DiscoveredPotions?.Clear(); player.DiscoveredRelics?.Clear();
         }
         // The engine keeps the last combat's phase/energy/RNG objects after
         // leaving it. A fresh noncombat checkpoint has no such transient state.

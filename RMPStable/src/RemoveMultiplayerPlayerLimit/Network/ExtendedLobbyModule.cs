@@ -4,6 +4,12 @@ using System.ComponentModel;
 using System.Linq;
 using System.Reflection;
 using Godot;
+#if STS2_0113
+using MegaCrit.Sts2.Core.Runs;
+using MegaCrit.Sts2.Core.Multiplayer.Serialization;
+using MegaCrit.Sts2.Core.Timeline;
+using MegaCrit.Sts2.Core.Timeline.Epochs;
+#endif
 using Godot.Bridge;
 using Godot.NativeInterop;
 using MegaCrit.Sts2.Core.Entities.Multiplayer;
@@ -216,7 +222,21 @@ public class ExtendedLobbyModule : IRMPModule
 			}
 			try
 			{
-#if STS2_0111
+#if STS2_0113
+				var unlocked = message.unlockState.UnlockedEpochs;
+				if (lobby.GameMode == GameMode.Blitz && !unlocked.Contains(EpochModel.GetId<BlitzEpoch>()))
+				{
+					netHostGameService.DisconnectClient(senderId, NetError.BlitzNotUnlocked);
+					return;
+				}
+				if (lobby.GameMode == GameMode.Dread && !lobby.IsCustom && !unlocked.Contains(EpochModel.GetId<DreadEpoch>()))
+				{
+					netHostGameService.DisconnectClient(senderId, NetError.DreadNotUnlocked);
+					return;
+				}
+				bool isModded = netHostGameService.GetVersionInfoForPeer(senderId)?.IsModded() == true;
+				LobbyPlayer? lobbyPlayer = (LobbyPlayer?)TryAddPlayerMethod?.Invoke(lobby, new object[] { message.unlockState, message.maxStandardAscension, message.maxBlitzAscension, isModded, senderId });
+#elif STS2_0111
 				bool isModded = netHostGameService.GetVersionInfoForPeer(senderId)?.IsModded() == true;
 				LobbyPlayer? lobbyPlayer = (LobbyPlayer?)TryAddPlayerMethod?.Invoke(lobby, new object[4] { message.unlockState, message.maxAscensionUnlocked, isModded, senderId });
 #else
@@ -227,8 +247,18 @@ public class ExtendedLobbyModule : IRMPModule
 					netHostGameService.DisconnectClient(senderId, NetError.InternalError);
 					return;
 				}
-				UpdateMaxAscensionMethod?.Invoke(lobby, null);
+				UpdateMaxAscensionMethod?.Invoke(lobby,
+#if STS2_0113
+					new object[] { true }
+#else
+					null
+#endif
+				);
 				ClientLobbyJoinResponseMessage clientLobbyJoinResponseMessage = default(ClientLobbyJoinResponseMessage);
+#if STS2_0113
+				clientLobbyJoinResponseMessage.gameMode = lobby.GameMode;
+				clientLobbyJoinResponseMessage.isCustom = lobby.IsCustom;
+#endif
 				clientLobbyJoinResponseMessage.playersInLobby = BuildJoinResponsePlayers(lobby.Players, senderId);
 				clientLobbyJoinResponseMessage.ascension = lobby.Ascension;
 				clientLobbyJoinResponseMessage.dailyTime = lobby.DailyTime;
@@ -722,7 +752,13 @@ public class ExtendedLobbyModule : IRMPModule
 
 	private static readonly System.Reflection.MethodInfo? TryAddPlayerMethod = typeof(StartRunLobby).GetMethod("TryAddPlayerInFirstAvailableSlot", BindingFlags.Instance | BindingFlags.NonPublic);
 
-	private static readonly System.Reflection.MethodInfo? UpdateMaxAscensionMethod = typeof(StartRunLobby).GetMethod("UpdateMaxMultiplayerAscension", BindingFlags.Instance | BindingFlags.NonPublic);
+	private static readonly System.Reflection.MethodInfo? UpdateMaxAscensionMethod = typeof(StartRunLobby).GetMethod(
+#if STS2_0113
+		"UpdateMaxSharedAscension",
+#else
+		"UpdateMaxMultiplayerAscension",
+#endif
+		BindingFlags.Instance | BindingFlags.NonPublic);
 
 	private static readonly System.Reflection.MethodInfo? RemoveConnectingPlayerMethod = typeof(StartRunLobby).GetMethod("RemoveConnectingPlayer", BindingFlags.Instance | BindingFlags.NonPublic);
 
@@ -731,6 +767,15 @@ public class ExtendedLobbyModule : IRMPModule
 	private static readonly System.Reflection.MethodInfo? GetRandomActListMethod = typeof(ActModel).GetMethods(BindingFlags.Static | BindingFlags.Public).FirstOrDefault((System.Reflection.MethodInfo method) => method.Name == "GetRandomList" && method.GetParameters().Length == 3);
 
 	private static readonly System.Reflection.MethodInfo? GenericActMethod = typeof(ModelDb).GetMethod("Act", BindingFlags.Static | BindingFlags.Public);
+#if STS2_0113
+	private static readonly System.Reflection.MethodInfo BeginRunLocallyMethod = typeof(StartRunLobby).GetMethod("BeginRunLocally", BindingFlags.Instance | BindingFlags.NonPublic)!;
+	private static readonly System.Reflection.MethodInfo UpdatePreferredAscensionMethod = typeof(StartRunLobby).GetMethod("UpdatePreferredAscension", BindingFlags.Instance | BindingFlags.NonPublic)!;
+	internal static void BeginExtendedRunLocally(StartRunLobby lobby, string seed, string act1, List<ModifierModel> modifiers)
+	{
+		lobby.Act1 = act1;
+		BeginRunLocallyMethod.Invoke(lobby, new object[] { seed, modifiers });
+	}
+#endif
 
 	private static readonly FieldInfo? DailyRunLobbyField = typeof(NDailyRunScreen).GetField("_lobby", BindingFlags.Instance | BindingFlags.NonPublic);
 
@@ -742,7 +787,39 @@ public class ExtendedLobbyModule : IRMPModule
 
 	public void Initialize(ConfigManager config, ReflectionCache cache)
 	{
+#if STS2_0113
+		var harmony = new HarmonyLib.Harmony("RMPStable.ExtendedNativeLobby");
+		harmony.Patch(typeof(StartRunLobby).GetMethod("BeginRunForAllPlayers", BindingFlags.Instance | BindingFlags.NonPublic)!,
+			prefix: new HarmonyLib.HarmonyMethod(typeof(ExtendedLobbyModule).GetMethod(nameof(UseNativeBeginRun), BindingFlags.Static | BindingFlags.NonPublic)));
+		foreach (string method in new[] { nameof(LobbyPlayer.Serialize), nameof(LobbyPlayer.Deserialize) })
+		{
+			harmony.Patch(typeof(LobbyPlayer).GetMethod(method)!, transpiler: new HarmonyLib.HarmonyMethod(
+				typeof(ExtendedLobbyModule).GetMethod(nameof(UseExtendedSlotWidth), BindingFlags.Static | BindingFlags.NonPublic)));
+		}
+#endif
 	}
+
+#if STS2_0113
+	private static bool UseNativeBeginRun(StartRunLobby __instance) => !TryBeginExtendedRun(__instance);
+
+	private static IEnumerable<HarmonyLib.CodeInstruction> UseExtendedSlotWidth(IEnumerable<HarmonyLib.CodeInstruction> instructions)
+	{
+		var code = instructions.ToList();
+		for (int i = 0; i + 2 < code.Count; i++)
+		{
+			if (code[i + 1].opcode != System.Reflection.Emit.OpCodes.Ldc_I4_2) continue;
+			bool writesSlot = code[i].operand is FieldInfo field && field.DeclaringType == typeof(LobbyPlayer) && field.Name == nameof(LobbyPlayer.slotId)
+				&& code[i + 2].operand is System.Reflection.MethodInfo write && write.DeclaringType == typeof(PacketWriter) && write.Name == nameof(PacketWriter.WriteInt);
+			bool readsSlot = i + 3 < code.Count && code[i + 2].operand is System.Reflection.MethodInfo read && read.DeclaringType == typeof(PacketReader) && read.Name == nameof(PacketReader.ReadInt)
+				&& code[i + 3].operand is FieldInfo destination && destination.DeclaringType == typeof(LobbyPlayer) && destination.Name == nameof(LobbyPlayer.slotId);
+			if (!writesSlot && !readsSlot) continue;
+			code[i + 1].opcode = System.Reflection.Emit.OpCodes.Ldc_I4;
+			code[i + 1].operand = RmpLobbyPlayerState.SlotBits;
+			return code;
+		}
+		throw new InvalidOperationException("The v0.113.0 native lobby slot width could not be located.");
+	}
+#endif
 
 	public Node? CreateNode()
 	{
@@ -821,11 +898,17 @@ public class ExtendedLobbyModule : IRMPModule
 		try
 		{
 			string seed = NGame.Instance?.DebugSeedOverride ?? (string.IsNullOrWhiteSpace(lobby.Seed) ? SeedHelper.GetRandomSeed() : SeedHelper.CanonicalizeSeed(lobby.Seed));
-			NormalizeRandomCharacters(lobby, seed);
 			List<ModifierModel> modifiers = lobby.Modifiers.ToList();
+#if STS2_0113
+			UpdatePreferredAscensionMethod.Invoke(lobby, null);
+			RmpProtocol.BroadcastExtendedBeginRun(lobby.Players, seed, lobby.Act1, modifiers);
+			BeginExtendedRunLocally(lobby, seed, lobby.Act1, modifiers);
+#else
+			NormalizeRandomCharacters(lobby, seed);
 			List<ActModel> acts = BuildActsForBeginRun(seed, lobby.Act1, lobby, lobby.Players);
 			RmpProtocol.BroadcastExtendedBeginRun(lobby.Players, seed, lobby.Act1, modifiers);
 			lobby.LobbyListener.BeginRun(seed, acts, modifiers);
+#endif
 			if (lobby.NetService is NetHostGameService netHostGameService)
 			{
 				netHostGameService.NetHost?.SetHostIsClosed(isClosed: true);

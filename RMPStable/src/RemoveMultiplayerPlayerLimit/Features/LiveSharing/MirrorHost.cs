@@ -59,7 +59,7 @@ internal sealed class MirrorHost : IDisposable
         Process.Phase = "当前房间：" + room + " · 等待来源房间检查点";
     }
     internal MirrorHost(ulong source, bool multiplayer = false) { Multiplayer = multiplayer; _viewSource = source; Process = new MirrorProcess(source); }
-    internal bool CanReuse => Multiplayer && Error.Length == 0 && Process.Authenticated && !Process.Child.HasExited && Process.Wire.Connected && Process.Wire.Error.Length == 0;
+    internal bool CanReuse => Multiplayer && Error.Length == 0 && Process.Authenticated && Process.Child is { HasExited: false } && Process.Wire.Connected && Process.Wire.Error.Length == 0;
     internal void SwitchMultiplayerSource(ulong source)
     {
         if (!CanReuse) throw new InvalidOperationException("Replica is not reusable");
@@ -155,7 +155,11 @@ internal sealed class MirrorHost : IDisposable
     internal void Tick(RunState? state, double delta)
     {
         Verified = false;
-        if (Process.Child.HasExited) { Error = "独立游戏进程已退出"; return; }
+        if (_parked && Process.Child == null) return;
+        Process.CompleteStartup();
+        if (Process.StartupError.Length > 0) { Error = Process.StartupError; return; }
+        if (Process.Child is not { } child) return;
+        if (child.HasExited) { Error = "独立游戏进程已退出"; return; }
         if (Process.Wire.Error.Length > 0) { Error = Process.Wire.Error; return; }
         if (!Multiplayer && Process.Authenticated && _crystalFogPreview != CrystalFog.Enabled)
         {
@@ -166,9 +170,9 @@ internal sealed class MirrorHost : IDisposable
         {
             if (!Process.Authenticated)
             {
-                if (message.Kind != "hello" || message.Process != Process.Child.Id || message.Build != MirrorState.Build)
+                if (message.Kind != "hello" || message.Process != child.Id || message.Build != MirrorState.Build)
                 { Error = "独立进程身份或游戏版本不一致"; Process.Dispose(); return; }
-                if (DisplayServer.GetName() != "headless") MirrorWin32.RequireOwned((nint)message.Window, Process.Child.Id);
+                if (DisplayServer.GetName() != "headless") MirrorWin32.RequireOwned((nint)message.Window, child.Id);
                 Process.Window = message.Window;
                 Process.Authenticated = true;
                 GD.Print("[RMP:Mirror:Window] authenticated pid=" + message.Process + " hwnd=" + message.Window);
@@ -312,7 +316,7 @@ internal sealed class MirrorHost : IDisposable
     internal void AttachWindow()
     {
         if (Window != null || DisplayServer.GetName() == "headless" || !Process.Authenticated) return;
-        Window = new MirrorWindowHost((nint)Process.Window, Process.Child.Id);
+        Window = new MirrorWindowHost((nint)Process.Window, Process.Child!.Id);
         Window.SendClip = message => { _ = Process.Wire.Send(message); };
         GD.Print("[RMP:Mirror:Window] ownership requested source=" + (long)Window.OwnerWindow);
         _ = Process.Wire.Send(new MirrorMessage { Kind = "attach", Window = (long)Window.OwnerWindow, Process = System.Environment.ProcessId });

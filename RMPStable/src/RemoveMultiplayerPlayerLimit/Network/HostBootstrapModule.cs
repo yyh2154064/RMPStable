@@ -19,6 +19,10 @@ using MegaCrit.Sts2.Core.Nodes.Screens.CharacterSelect;
 using MegaCrit.Sts2.Core.Nodes.Screens.CustomRun;
 using MegaCrit.Sts2.Core.Nodes.Screens.DailyRun;
 using MegaCrit.Sts2.Core.Nodes.Screens.MainMenu;
+#if STS2_0113
+using MegaCrit.Sts2.Core.Nodes.Screens.Blitz;
+using MegaCrit.Sts2.Core.Nodes.Screens.Dread;
+#endif
 using MegaCrit.Sts2.Core.Platform;
 using MegaCrit.Sts2.Core.Platform.Steam;
 using MegaCrit.Sts2.Core.Runs;
@@ -41,6 +45,12 @@ public class HostBootstrapModule : IRMPModule
 
 	private class HostBootstrapNode : Node
 	{
+#if STS2_0113
+		// 0.113 represents Custom as a separate flag; None is the native menu's custom entry.
+		private const GameMode CustomMenuMode = GameMode.None;
+#else
+		private const GameMode CustomMenuMode = GameMode.Custom;
+#endif
 		public new class MethodName : Node.MethodName
 		{
 			public new static readonly StringName _Process = "_Process";
@@ -123,9 +133,9 @@ public class HostBootstrapModule : IRMPModule
 			ulong instanceId = submenu2.GetInstanceId();
 			if (!_patchedHostSubmenus.Contains(instanceId))
 			{
-				NButton nodeOrNull = submenu2.GetNodeOrNull<NButton>("StandardButton");
-				NButton nodeOrNull2 = submenu2.GetNodeOrNull<NButton>("DailyButton");
-				NButton nodeOrNull3 = submenu2.GetNodeOrNull<NButton>("CustomRunButton");
+				NButton nodeOrNull = submenu2.GetNodeOrNull<NButton>("%StandardButton") ?? submenu2.GetNodeOrNull<NButton>("StandardButton");
+				NButton nodeOrNull2 = submenu2.GetNodeOrNull<NButton>("%DailyButton") ?? submenu2.GetNodeOrNull<NButton>("DailyButton");
+				NButton nodeOrNull3 = submenu2.GetNodeOrNull<NButton>("%CustomRunButton") ?? submenu2.GetNodeOrNull<NButton>("CustomRunButton");
 				if (nodeOrNull != null && nodeOrNull2 != null && nodeOrNull3 != null && ReplaceReleasedHandler(nodeOrNull, submenu2, "OnStandardPressed", delegate
 				{
 					OnHostSubmenuPressed(submenu2, GameMode.Standard);
@@ -134,9 +144,15 @@ public class HostBootstrapModule : IRMPModule
 					OnHostSubmenuPressed(submenu2, GameMode.Daily);
 				}) && ReplaceReleasedHandler(nodeOrNull3, submenu2, "OnCustomPressed", delegate
 				{
-					OnHostSubmenuPressed(submenu2, GameMode.Custom);
+					OnHostSubmenuPressed(submenu2, CustomMenuMode);
 				}))
 				{
+#if STS2_0113
+					if (typeof(NMultiplayerHostSubmenu).GetField("_blitzButton", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(submenu2) is NButton blitz)
+						ReplaceReleasedHandler(blitz, submenu2, "OnBlitzPressed", _ => OnHostSubmenuPressed(submenu2, GameMode.Blitz));
+					if (typeof(NMultiplayerHostSubmenu).GetField("_dreadButton", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(submenu2) is NButton dread)
+						ReplaceReleasedHandler(dread, submenu2, "OnDreadPressed", _ => OnHostSubmenuPressed(submenu2, GameMode.Dread));
+#endif
 					_patchedHostSubmenus.Add(instanceId);
 					Log.Info("[RMP:HostBootstrap] Patched NMultiplayerHostSubmenu handlers.");
 				}
@@ -270,6 +286,22 @@ public class HostBootstrapModule : IRMPModule
 					stack.Push(submenuType2);
 					break;
 				}
+#if STS2_0113
+				case GameMode.Blitz:
+				{
+					var screen = stack.GetSubmenuType<NBlitzScreen>();
+					screen.InitializeMultiplayerAsHost(netService, hostCapacity);
+					stack.Push(screen);
+					break;
+				}
+				case GameMode.Dread:
+				{
+					var screen = stack.GetSubmenuType<NDreadScreen>();
+					screen.InitializeMultiplayerAsHost(netService, hostCapacity);
+					stack.Push(screen);
+					break;
+				}
+#endif
 				default:
 				{
 					NCustomRunScreen submenuType = stack.GetSubmenuType<NCustomRunScreen>();
@@ -315,7 +347,7 @@ public class HostBootstrapModule : IRMPModule
 					stack.Push(submenuType3);
 					break;
 				}
-				case GameMode.Custom:
+				case CustomMenuMode:
 				{
 					NCustomRunLoadScreen submenuType2 = stack.GetSubmenuType<NCustomRunLoadScreen>();
 					submenuType2.InitializeAsHost(netService, run);
@@ -379,6 +411,9 @@ public class HostBootstrapModule : IRMPModule
 
 		private static GameMode ResolveGameMode(SerializableRun run)
 		{
+#if STS2_0113
+			return run.IsCustomGame ? CustomMenuMode : run.GameMode;
+#else
 			object obj = SerializableRunGameModeProperty?.GetValue(run);
 			if (obj is GameMode)
 			{
@@ -397,7 +432,8 @@ public class HostBootstrapModule : IRMPModule
 			{
 				return GameMode.Standard;
 			}
-			return GameMode.Custom;
+			return CustomMenuMode;
+#endif
 		}
 
 		[EditorBrowsable(EditorBrowsableState.Never)]

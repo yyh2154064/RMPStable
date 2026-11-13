@@ -46,4 +46,14 @@ internal static class PayloadMessageRegistration
 		_registered = true;
 		Log.Info("[RMP] Embedded payload network messages registered.");
 	}
+
+#if STS2_0113
+	internal static void AttachPayloadDuringModLoad()
+	{
+		// ModManager marks this mod Loaded only after its initializer returns.
+		// Populate its assembly list now so the game's initial maps see the payload.
+		var mod = MegaCrit.Sts2.Core.Modding.ModManager.Mods.Single(entry => entry.manifest?.id == "RMPStable" && entry.state == MegaCrit.Sts2.Core.Modding.ModLoadState.None);
+		mod.assemblies.Add(typeof(PayloadMessageRegistration).Assembly);
+	}
+#endif
 }

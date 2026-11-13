@@ -65,10 +65,13 @@ internal static partial class MirrorJournal
     internal static void Initialize()
     {
         if (_installed) return;
-        MirrorFastRestore.Initialize();
-        MirrorCursor.Initialize();
+        if (MirrorRenderer.IsRenderer)
+        {
+            MirrorFastRestore.Initialize();
+            MirrorCursor.Initialize();
+            MirrorRenderer.InstallMultiplayerPotionGate();
+        }
         MultiplayerPersonalUi.Initialize();
-        MirrorRenderer.InstallMultiplayerPotionGate();
         MultiplayerMirrorSession.InstallBattleInputTracking();
         MultiplayerNoncombat.Initialize();
         var harmony = new Harmony("RMPStable.NativeMirrorJournal");
@@ -85,18 +88,22 @@ internal static partial class MirrorJournal
         Patch(typeof(MegaCrit.Sts2.Core.Nodes.Events.Custom.CrystalSphere.NCrystalSphereScreen).GetMethod("OnCellClicked", Any)!, nameof(CrystalCellClicked), finalizer: nameof(EndUi));
         Patch(typeof(GodotObject).GetMethod("EmitSignal", new[] { typeof(StringName), typeof(Variant[]) })!, nameof(SignalEmitted), finalizer: nameof(EndUi));
         Patch(typeof(NMerchantSlot).GetMethod("OnSelected", Any)!, nameof(MerchantSelected), finalizer: nameof(EndUi));
-        Patch(typeof(NetReplayGameService).GetProperty("Type")!.GetMethod!, postfix: nameof(ReplicaServiceType));
-        Patch(typeof(NetReplayGameService).GetConstructor(new[] { typeof(ulong) })!, prefix: nameof(ReplicaSource));
-        Patch(typeof(RunManager).GetProperty("ShouldSave")!.GetMethod!, postfix: nameof(ReplicaShouldSave));
-        Patch(typeof(NCardPlay).GetMethod("TryPlayCard", Any)!, prefix: nameof(ReplicaCardPlay));
-        Patch(typeof(Viewport).GetMethod("GetMousePosition")!, postfix: nameof(ReplicaMousePosition));
+        if (MirrorRenderer.IsRenderer)
+        {
+            Patch(typeof(NetReplayGameService).GetProperty("Type")!.GetMethod!, postfix: nameof(ReplicaServiceType));
+            Patch(typeof(NetReplayGameService).GetConstructor(new[] { typeof(ulong) })!, prefix: nameof(ReplicaSource));
+            Patch(typeof(RunManager).GetProperty("ShouldSave")!.GetMethod!, postfix: nameof(ReplicaShouldSave));
+            Patch(typeof(NCardPlay).GetMethod("TryPlayCard", Any)!, prefix: nameof(ReplicaCardPlay));
+            Patch(typeof(Viewport).GetMethod("GetMousePosition")!, postfix: nameof(ReplicaMousePosition));
+            Patch(typeof(MegaCrit.Sts2.Core.Nodes.CommonUi.NAbandonRunConfirmPopup).GetMethod("OnYesButtonPressed", Any)!, prefix: nameof(ReplicaAbandon));
+            Patch(typeof(MegaCrit.Sts2.Core.Nodes.Screens.GameOverScreen.NGameOverScreen).GetMethod("SaveBadgesToProgress", Any)!, prefix: nameof(ReplicaBadgeSave));
+            Patch(typeof(MegaCrit.Sts2.Core.Nodes.TopBar.NRunTimer).GetMethod("OnTimerTimeout", Any)!, prefix: nameof(ReplicaTimerTick));
+        }
         Patch(typeof(NTargetManager).GetMethod("FinishTargeting", Any)!, prefix: nameof(TargetFinished), finalizer: nameof(EndUi));
         Patch(typeof(NPotionHolder).GetMethod("UsePotion", Any)!, prefix: nameof(PotionUsed), finalizer: nameof(EndUi));
         Patch(typeof(NPotionPopup).GetMethod("Remove", Any)!, prefix: nameof(PopupRemoved), finalizer: nameof(EndUi));
         Patch(typeof(NMerchantInventory).GetMethod("Open", Any)!, prefix: nameof(ShopOpened), finalizer: nameof(EndUi));
-        Patch(typeof(MegaCrit.Sts2.Core.Nodes.CommonUi.NAbandonRunConfirmPopup).GetMethod("OnYesButtonPressed", Any)!, prefix: nameof(ReplicaAbandon));
         Patch(typeof(MegaCrit.Sts2.Core.Nodes.NRun).GetMethod("ShowGameOverScreen", Any)!, prefix: nameof(RunEnded));
-        Patch(typeof(MegaCrit.Sts2.Core.Nodes.Screens.GameOverScreen.NGameOverScreen).GetMethod("SaveBadgesToProgress", Any)!, prefix: nameof(ReplicaBadgeSave));
         Patch(typeof(RunManager).GetMethod("EnterRoom", Any)!, prefix: nameof(VictoryRoomEntered));
         Patch(typeof(NMapScreen).GetMethod("ProcessScrollEvent", Any)!, prefix: nameof(ScrollInput));
         Patch(typeof(NScrollableContainer).GetMethod("ProcessScrollEvent", Any)!, prefix: nameof(ScrollInput));
@@ -110,7 +117,6 @@ internal static partial class MirrorJournal
         Patch(typeof(NMapScreen).GetMethod("_GuiInput", Any)!, prefix: nameof(ReplicaDrawingInput));
         Patch(typeof(NMapScreen).GetMethod("ProcessMouseDrawingEvent", Any)!, prefix: nameof(ReplicaDrawingInput));
         Patch(typeof(CardReward).GetMethod("Populate", Any)!, prefix: nameof(RewardPopulating), postfix: nameof(RewardPopulated));
-        Patch(typeof(MegaCrit.Sts2.Core.Nodes.TopBar.NRunTimer).GetMethod("OnTimerTimeout", Any)!, prefix: nameof(ReplicaTimerTick));
         _installed = true;
     }
     private static void ReplicaServiceType(ref NetGameType __result)

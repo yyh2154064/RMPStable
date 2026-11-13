@@ -11,6 +11,7 @@
     <NoWarn>$(NoWarn);CA1416;SYSLIB0003</NoWarn>
     <DefaultItemExcludes>$(DefaultItemExcludes);bin/**;obj/**;.compat-work/**</DefaultItemExcludes>
     <DefineConstants Condition="'$(GameCompatibility)' == 'beta'">$(DefineConstants);STS2_0111</DefineConstants>
+    <DefineConstants Condition="'$(GameCompatibility)' == 'v0113'">$(DefineConstants);STS2_0111;STS2_0113</DefineConstants>
   </PropertyGroup>
 
   <!--

@@ -253,11 +253,7 @@ internal static class QuickSlController
 
 	private static void PatchPauseMenu()
 	{
-		NPauseMenu? pause = SceneMonitor.FindNodeOfType<NPauseMenu>(SceneMonitor.GetRoot());
-		if (pause == null)
-		{
-			return;
-		}
+		if (NRun.Instance?.GlobalUi?.SubmenuStack?.Stack?.Peek() is not NPauseMenu pause) return;
 		if (ReferenceEquals(pause, _patchedPauseMenu))
 		{
 			NPauseMenuButton? existing = pause.GetNodeOrNull<Control>("%ButtonContainer")?.GetNodeOrNull<NPauseMenuButton>("RmpQuickSl");

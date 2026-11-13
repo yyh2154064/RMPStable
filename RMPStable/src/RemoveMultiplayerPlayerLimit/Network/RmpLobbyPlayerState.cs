@@ -7,6 +7,7 @@ namespace RemoveMultiplayerPlayerLimit.Network;
 
 public struct RmpLobbyPlayerState : IPacketSerializable
 {
+	internal const int SlotBits = 4;
 	public ulong id;
 
 	public int slotId;
@@ -16,6 +17,10 @@ public struct RmpLobbyPlayerState : IPacketSerializable
 	public SerializableUnlockState unlockState;
 
 	public int maxMultiplayerAscensionUnlocked;
+#if STS2_0113
+	public int maxBlitzAscension;
+	public bool isRotatingDread;
+#endif
 
 	public bool isReady;
 
@@ -30,7 +35,13 @@ public struct RmpLobbyPlayerState : IPacketSerializable
 		result.slotId = slotId;
 		result.character = character;
 		result.unlockState = unlockState;
+#if STS2_0113
+		result.maxStandardAscension = maxMultiplayerAscensionUnlocked;
+		result.maxBlitzAscension = maxBlitzAscension;
+		result.isRotatingDread = isRotatingDread;
+#else
 		result.maxMultiplayerAscensionUnlocked = maxMultiplayerAscensionUnlocked;
+#endif
 		result.isReady = isReady;
 #if STS2_0111
 		result.isModded = isModded;
@@ -45,7 +56,13 @@ public struct RmpLobbyPlayerState : IPacketSerializable
 		result.slotId = lobbyPlayer.slotId;
 		result.character = lobbyPlayer.character;
 		result.unlockState = lobbyPlayer.unlockState;
+#if STS2_0113
+		result.maxMultiplayerAscensionUnlocked = lobbyPlayer.maxStandardAscension;
+		result.maxBlitzAscension = lobbyPlayer.maxBlitzAscension;
+		result.isRotatingDread = lobbyPlayer.isRotatingDread;
+#else
 		result.maxMultiplayerAscensionUnlocked = lobbyPlayer.maxMultiplayerAscensionUnlocked;
+#endif
 		result.isReady = lobbyPlayer.isReady;
 #if STS2_0111
 		result.isModded = lobbyPlayer.isModded;
@@ -56,10 +73,14 @@ public struct RmpLobbyPlayerState : IPacketSerializable
 	public readonly void Serialize(PacketWriter writer)
 	{
 		writer.WriteULong(id);
-		writer.WriteInt(slotId, 4);
+		writer.WriteInt(slotId, SlotBits);
 		writer.WriteModel(character);
 		writer.Write(unlockState);
 		writer.WriteInt(maxMultiplayerAscensionUnlocked);
+#if STS2_0113
+		writer.WriteInt(maxBlitzAscension);
+		writer.WriteBool(isRotatingDread);
+#endif
 		writer.WriteBool(isReady);
 #if STS2_0111
 		writer.WriteBool(isModded);
@@ -69,10 +90,14 @@ public struct RmpLobbyPlayerState : IPacketSerializable
 	public void Deserialize(PacketReader reader)
 	{
 		id = reader.ReadULong();
-		slotId = reader.ReadInt(4);
+		slotId = reader.ReadInt(SlotBits);
 		character = reader.ReadModel<CharacterModel>();
 		unlockState = reader.Read<SerializableUnlockState>();
 		maxMultiplayerAscensionUnlocked = reader.ReadInt();
+#if STS2_0113
+		maxBlitzAscension = reader.ReadInt();
+		isRotatingDread = reader.ReadBool();
+#endif
 		isReady = reader.ReadBool();
 #if STS2_0111
 		isModded = reader.ReadBool();

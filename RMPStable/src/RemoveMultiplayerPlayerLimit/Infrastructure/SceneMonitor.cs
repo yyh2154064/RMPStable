@@ -1,6 +1,11 @@
 using System;
 using System.Reflection;
 using Godot;
+using MegaCrit.Sts2.Core.Nodes;
+#if STS2_0113
+using MegaCrit.Sts2.Core.Nodes.Screens.Blitz;
+using MegaCrit.Sts2.Core.Nodes.Screens.Dread;
+#endif
 using MegaCrit.Sts2.Core.Multiplayer.Game.Lobby;
 using MegaCrit.Sts2.Core.Nodes.Rooms;
 using MegaCrit.Sts2.Core.Nodes.Screens.CharacterSelect;
@@ -149,85 +154,30 @@ public static class SceneMonitor
 
 	public static StartRunLobby? FindActiveStartRunLobby()
 	{
-		try
+		var active = NGame.Instance?.MainMenu?.SubmenuStack?.Peek();
+		return active switch
 		{
-			NCharacterSelectScreen nCharacterSelectScreen = SceneRegistry.Instance?.CharacterSelectScreen;
-			if (nCharacterSelectScreen?.Lobby != null)
-			{
-				return nCharacterSelectScreen.Lobby;
-			}
-			NCustomRunScreen nCustomRunScreen = SceneRegistry.Instance?.CustomRunScreen;
-			if (nCustomRunScreen?.Lobby != null)
-			{
-				return nCustomRunScreen.Lobby;
-			}
-			if (DailyRunLobbyField?.GetValue(SceneRegistry.Instance?.DailyRunScreen) is StartRunLobby result)
-			{
-				return result;
-			}
-			Node root = GetRoot();
-			nCharacterSelectScreen = FindNodeOfType<NCharacterSelectScreen>(root);
-			if (nCharacterSelectScreen?.Lobby != null)
-			{
-				return nCharacterSelectScreen.Lobby;
-			}
-			nCustomRunScreen = FindNodeOfType<NCustomRunScreen>(root);
-			if (nCustomRunScreen?.Lobby != null)
-			{
-				return nCustomRunScreen.Lobby;
-			}
-			if (DailyRunLobbyField != null)
-			{
-				Node node = FindNode(root, (Node n) => n.GetType().FullName == "MegaCrit.Sts2.Core.Nodes.Screens.DailyRun.NDailyRunScreen");
-				if (node != null && DailyRunLobbyField.GetValue(node) is StartRunLobby result2)
-				{
-					return result2;
-				}
-			}
-		}
-		catch
-		{
-		}
-		return null;
+			NCharacterSelectScreen character => character.Lobby,
+			NCustomRunScreen custom => custom.Lobby,
+			NDailyRunScreen daily => DailyRunLobbyField?.GetValue(daily) as StartRunLobby,
+#if STS2_0113
+			NBlitzScreen blitz => blitz.Lobby,
+			NDreadScreen dread => dread.Lobby,
+#endif
+			_ => null
+		};
 	}
 
 	public static LoadRunLobby? FindActiveLoadRunLobby()
 	{
-		try
+		var active = NGame.Instance?.MainMenu?.SubmenuStack?.Peek();
+		return active switch
 		{
-			if (MultiplayerLoadLobbyField?.GetValue(SceneRegistry.Instance?.MultiplayerLoadGameScreen) is LoadRunLobby result)
-			{
-				return result;
-			}
-			if (CustomRunLoadLobbyField?.GetValue(SceneRegistry.Instance?.CustomRunLoadScreen) is LoadRunLobby result2)
-			{
-				return result2;
-			}
-			if (DailyRunLoadLobbyField?.GetValue(SceneRegistry.Instance?.DailyRunLoadScreen) is LoadRunLobby result3)
-			{
-				return result3;
-			}
-			Node root = GetRoot();
-			NMultiplayerLoadGameScreen nMultiplayerLoadGameScreen = FindNodeOfType<NMultiplayerLoadGameScreen>(root);
-			if (nMultiplayerLoadGameScreen != null && MultiplayerLoadLobbyField?.GetValue(nMultiplayerLoadGameScreen) is LoadRunLobby result4)
-			{
-				return result4;
-			}
-			NCustomRunLoadScreen nCustomRunLoadScreen = FindNodeOfType<NCustomRunLoadScreen>(root);
-			if (nCustomRunLoadScreen != null && CustomRunLoadLobbyField?.GetValue(nCustomRunLoadScreen) is LoadRunLobby result5)
-			{
-				return result5;
-			}
-			NDailyRunLoadScreen nDailyRunLoadScreen = FindNodeOfType<NDailyRunLoadScreen>(root);
-			if (nDailyRunLoadScreen != null && DailyRunLoadLobbyField?.GetValue(nDailyRunLoadScreen) is LoadRunLobby result6)
-			{
-				return result6;
-			}
-		}
-		catch
-		{
-		}
-		return null;
+			NMultiplayerLoadGameScreen standard => MultiplayerLoadLobbyField?.GetValue(standard) as LoadRunLobby,
+			NCustomRunLoadScreen custom => CustomRunLoadLobbyField?.GetValue(custom) as LoadRunLobby,
+			NDailyRunLoadScreen daily => DailyRunLoadLobbyField?.GetValue(daily) as LoadRunLobby,
+			_ => null
+		};
 	}
 
 	public static string? GetActiveLoadLobbyScreenName()

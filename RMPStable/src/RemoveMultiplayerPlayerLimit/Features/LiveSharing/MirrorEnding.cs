@@ -19,6 +19,12 @@ internal sealed class MirrorFinalMetadata
 {
     public string History { get; set; } = "";
     public string Progress { get; set; } = "";
+#if STS2_0113
+    public bool ProgressUpdated { get; set; }
+    public bool Singleplayer { get; set; }
+    public int OldMaxAscension { get; set; }
+    public int NewMaxAscension { get; set; }
+#endif
 }
 
 internal static partial class MirrorJournal
@@ -30,7 +36,11 @@ internal static partial class MirrorJournal
     private static bool ReplicaBadgeSave() => !MirrorRenderer.IsRenderer;
     internal static string? EndHash(RunState state) => ReferenceEquals(state, _endedState) && _ending != null ?
         Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(_ending.Payload.Concat(System.Text.Encoding.UTF8.GetBytes(_ending.Value)).ToArray())) : null;
+#if STS2_0113
+    private static bool RunEnded(MegaCrit.Sts2.Core.Entities.Save.PostRunProgressUpdateResult __0)
+#else
     private static bool RunEnded(SerializableRun serializableRun)
+#endif
     {
         // Native lethal actions can also request an ending during replay. Only
         // the authority's immutable final record may create that overlay; a
@@ -42,13 +52,21 @@ internal static partial class MirrorJournal
         if (state == null || !multiplayer && Checkpoint == null || ReferenceEquals(_endedState, state)) return true;
         // The original final record is immutable presentation data. It includes
         // the authoritative score/history; no replica achievements are awarded.
+#if STS2_0113
+        var serializableRun = __0.run;
+#endif
         var saved = MirrorState.Unpack<SerializableRun>(MirrorState.Pack(serializableRun));
         saved.PreFinishedRoom = state.CurrentRoom?.ToSerializable();
         _endedState = state;
         _ending = new MirrorOperation { Kind = "ended", Payload = MirrorState.Pack(saved),
             Value = System.Text.Json.JsonSerializer.Serialize(new MirrorFinalMetadata {
                 History = RunManager.Instance.History == null ? "" : JsonSerializationUtility.ToJson(RunManager.Instance.History),
-                Progress = JsonSerializationUtility.ToJson(SaveManager.Instance.Progress.ToSerializable()) }) };
+                Progress = JsonSerializationUtility.ToJson(SaveManager.Instance.Progress.ToSerializable()),
+#if STS2_0113
+                ProgressUpdated = __0.success, Singleplayer = __0.isSingleplayer,
+                OldMaxAscension = __0.oldMaxAscension, NewMaxAscension = __0.newMaxAscension,
+#endif
+            }) };
         if (multiplayer) MultiplayerMirrorSession.RecordFinal(_ending, state);
         else Operations.Add(_ending);
         GD.Print("[RMP:Mirror:Ending] authoritative native results recorded");
@@ -96,7 +114,15 @@ internal sealed partial class MirrorRenderer
         CancelDrag(); _pendingCards.Clear(); _pressedAction = null; _pressedUi = null;
         NGame.Instance.InspectCardScreen?.Close(); NGame.Instance.InspectRelicScreen?.Close();
         NCapstoneContainer.Instance.Close(); NMapScreen.Instance.Close(false); NOverlayStack.Instance.Clear();
+#if STS2_0113
+        NOverlayStack.Instance.Push(NGameOverScreen.Create(presentationState, new()
+        {
+            run = _finalSave, success = metadata.ProgressUpdated, isSingleplayer = metadata.Singleplayer,
+            oldMaxAscension = metadata.OldMaxAscension, newMaxAscension = metadata.NewMaxAscension
+        }));
+#else
         NOverlayStack.Instance.Push(NGameOverScreen.Create(presentationState, _finalSave));
+#endif
         _finalHash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(ending.Payload.Concat(System.Text.Encoding.UTF8.GetBytes(ending.Value)).ToArray()));
         _waitingForAuthority = false; _sceneReady = true;
         await NGame.Instance.Transition.FadeIn(.03f);

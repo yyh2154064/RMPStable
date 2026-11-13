@@ -205,14 +205,15 @@ if (-not (Test-Path -LiteralPath $releaseInfoPath -PathType Leaf)) {
     throw "缺少游戏版本文件：$releaseInfoPath"
 }
 $currentGameVersion = [string]((Get-Content -Raw -LiteralPath $releaseInfoPath | ConvertFrom-Json).version)
-if ($currentGameVersion -notin @('v0.107.1', 'v0.111.0')) {
-    throw "当前游戏版本 $currentGameVersion 不在 RMP Stable 0.3.9 的兼容列表中。"
+$gameVersions = @('v0.107.1', 'v0.111.0', 'v0.113.0')
+if ($currentGameVersion -notin $gameVersions) {
+    throw "当前游戏版本 $currentGameVersion 不在 RMP Stable $safeVersion 的兼容列表中。"
 }
 $currentReferenceDir = Join-Path $referenceRoot $currentGameVersion
 New-Item -ItemType Directory -Path $currentReferenceDir -Force | Out-Null
 Get-ChildItem -LiteralPath $gameManagedDir -Filter '*.dll' -File |
     Copy-Item -Destination $currentReferenceDir -Force
-foreach ($version in @('v0.107.1', 'v0.111.0')) {
+foreach ($version in $gameVersions) {
     $requiredReference = Join-Path (Join-Path $referenceRoot $version) 'sts2.dll'
     if (-not (Test-Path -LiteralPath $requiredReference -PathType Leaf)) {
         throw "缺少 $version 的游戏程序集快照。请先将 Steam 切换到该版本并运行一次打包器以保存程序集，然后切回所需版本重新打包。缺少：$requiredReference"
@@ -237,12 +238,12 @@ $packageModDir = Join-Path $packageRoot $modId
 New-Item -ItemType Directory -Force -Path $assetWorkDir, $packageModDir, $outputDir | Out-Null
 
 try {
-    foreach ($version in @('v0.107.1', 'v0.111.0')) {
-        $compatibility = if ($version -eq 'v0.111.0') { 'beta' } else { 'stable' }
+    foreach ($version in $gameVersions) {
+        $compatibility = switch ($version) { 'v0.107.1' { 'stable' } 'v0.111.0' { 'beta' } 'v0.113.0' { 'v0113' } }
         $referenceDir = Join-Path $referenceRoot $version
         $managedOutputDir = Join-Path $workDir "managed\$version"
         $intermediateOutputDir = Join-Path $workDir "obj\$version"
-        $payloadName = if ($version -eq 'v0.111.0') { 'RMPStablePayload_v0111' } else { 'RMPStablePayload_v0107' }
+        $payloadName = 'RMPStablePayload_' + (($version -replace '\.\d+$', '') -replace '\.', '')
         New-Item -ItemType Directory -Force -Path $managedOutputDir | Out-Null
         Write-Step "构建 $version 专用 RMPStable.dll"
         Invoke-Native $dotnet.Source @(
@@ -273,6 +274,7 @@ try {
 
     $stablePayload = Join-Path $workDir 'managed\v0.107.1\RMPStablePayload_v0107.dll'
     $betaPayload = Join-Path $workDir 'managed\v0.111.0\RMPStablePayload_v0111.dll'
+    $v0113Payload = Join-Path $workDir 'managed\v0.113.0\RMPStablePayload_v0113.dll'
     $bootstrapOutputDir = Join-Path $workDir 'bootstrap'
     $bootstrapObjDir = Join-Path $workDir 'obj\bootstrap'
     Write-Step '构建自动选择游戏版本的 RMPStable.dll'
@@ -282,6 +284,7 @@ try {
         "-p:GameManagedDir=$(Join-Path $referenceRoot 'v0.107.1')",
         "-p:StablePayloadPath=$stablePayload",
         "-p:BetaPayloadPath=$betaPayload",
+        "-p:V0113PayloadPath=$v0113Payload",
         "-p:BaseIntermediateOutputPath=$bootstrapObjDir\",
         '--nologo'
     ) '引导 DLL 项目还原失败'
@@ -293,6 +296,7 @@ try {
         "-p:GameManagedDir=$(Join-Path $referenceRoot 'v0.107.1')",
         "-p:StablePayloadPath=$stablePayload",
         "-p:BetaPayloadPath=$betaPayload",
+        "-p:V0113PayloadPath=$v0113Payload",
         "-p:BaseIntermediateOutputPath=$bootstrapObjDir\",
         '--nologo'
     ) '引导 DLL 构建失败'
@@ -348,6 +352,7 @@ try {
         "RMPStable/RMPStable.dll",
         "RMPStable/RMPStable.pck",
         "RMPStable/RMPStable.json",
+        "RMPStable/README-multiInstance.md",
         "RMPStable/update.cmd"
     )
     foreach ($entry in $expectedEntries) {
@@ -356,7 +361,7 @@ try {
         }
     }
     if ($entries.Count -ne $expectedEntries.Count) {
-        throw "ZIP 校验失败：应包含预期的 4 个文件，实际包含 $($entries.Count) 个文件。"
+        throw "ZIP 校验失败：应包含 $($expectedEntries.Count) 个文件，实际包含 $($entries.Count) 个文件。"
     }
 
     $zip = Get-Item -LiteralPath $zipPath

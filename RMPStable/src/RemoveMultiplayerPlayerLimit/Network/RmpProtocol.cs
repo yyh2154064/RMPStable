@@ -10,13 +10,16 @@ using MegaCrit.Sts2.Core.Multiplayer.Game.Lobby;
 using MegaCrit.Sts2.Core.Multiplayer.Game.PeerInput;
 using MegaCrit.Sts2.Core.Nodes;
 using MegaCrit.Sts2.Core.Nodes.Multiplayer;
+using MegaCrit.Sts2.Core.Runs;
 using RemoveMultiplayerPlayerLimit.Infrastructure;
 
 namespace RemoveMultiplayerPlayerLimit.Network;
 
 public static class RmpProtocol
 {
-#if STS2_0111
+#if STS2_0113
+	public const int ProtocolVersion = 5;
+#elif STS2_0111
 	public const int ProtocolVersion = 4;
 #else
 	public const int ProtocolVersion = 3;
@@ -141,24 +144,22 @@ public static class RmpProtocol
 
 	private static void HandleSyncRequest(RmpSyncRequestMessage message, ulong senderId)
 	{
-		if (_netService == null || _netService.Type != NetGameType.Host)
+		if (_netService == null || _netService.Type != NetGameType.Host || RunManager.Instance.IsInProgress)
 		{
 			return;
 		}
+		var lobby = SceneMonitor.FindActiveStartRunLobby();
+		if (lobby == null || !ReferenceEquals(lobby.NetService, _netService)) return;
 		ReadyPeerIds.Add(senderId);
 		_netService.SendMessage(new RmpConfigSyncMessage
 		{
 			ProtocolVersion = ProtocolVersion,
 			MaxPlayerLimit = 16
 		}, senderId);
-		StartRunLobby startRunLobby = SceneMonitor.FindActiveStartRunLobby();
-		if (startRunLobby != null)
+		_netService.SendMessage(new RmpLobbySnapshotMessage
 		{
-			_netService.SendMessage(new RmpLobbySnapshotMessage
-			{
-				players = startRunLobby.Players.Select(RmpLobbyPlayerState.FromLobbyPlayer).ToList()
-			}, senderId);
-		}
+			players = lobby.Players.Select(RmpLobbyPlayerState.FromLobbyPlayer).ToList()
+		}, senderId);
 		Log.Info($"[RMP] Initial sync completed for peer {senderId}.");
 	}
 
@@ -201,8 +202,12 @@ public static class RmpProtocol
 		{
 			ApplyLobbySnapshot(startRunLobby, message.players);
 			List<ModifierModel> modifiers = message.modifiers.Select(ModifierModel.FromSerializable).ToList();
+#if STS2_0113
+			ExtendedLobbyModule.BeginExtendedRunLocally(startRunLobby, message.seed, message.act1, modifiers);
+#else
 			List<ActModel> acts = ExtendedLobbyModule.BuildActsForBeginRun(message.seed, message.act1, startRunLobby, message.players.Select((RmpLobbyPlayerState player) => player.ToLobbyPlayer()).ToList());
 			startRunLobby.LobbyListener.BeginRun(message.seed, acts, modifiers);
+#endif
 		}
 	}
 
@@ -279,7 +284,12 @@ public static class RmpProtocol
 
 	private static bool LobbyPlayersEqual(LobbyPlayer a, LobbyPlayer b)
 	{
+#if STS2_0113
+		if (a.maxStandardAscension != b.maxStandardAscension || a.maxBlitzAscension != b.maxBlitzAscension || a.isRotatingDread != b.isRotatingDread || a.isModded != b.isModded) return false;
+		if (a.id == b.id && a.slotId == b.slotId && a.character == b.character)
+#else
 		if (a.id == b.id && a.slotId == b.slotId && a.character == b.character && a.maxMultiplayerAscensionUnlocked == b.maxMultiplayerAscensionUnlocked)
+#endif
 		{
 			return a.isReady == b.isReady;
 		}

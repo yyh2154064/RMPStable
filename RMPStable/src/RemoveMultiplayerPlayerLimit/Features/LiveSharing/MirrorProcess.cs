@@ -5,6 +5,7 @@ using System.IO;
 using System.IO.Pipes;
 using System.Linq;
 using System.Security.Cryptography;
+using System.Threading.Tasks;
 using Godot;
 using MegaCrit.Sts2.Core.Saves;
 using MegaCrit.Sts2.Core.Modding;
@@ -15,7 +16,7 @@ internal sealed class MirrorProcess : IDisposable
 {
     internal readonly MirrorWire Wire;
     internal readonly string DirectoryPath;
-    internal Process Child { get; }
+    internal Process? Child { get; private set; }
     internal bool Authenticated { get; set; }
     internal string LastHash = "";
     internal string LastDrawingHash = "";
@@ -34,6 +35,10 @@ internal sealed class MirrorProcess : IDisposable
     internal System.Collections.Generic.List<MirrorHit> LastHits = new();
     private bool _disposed;
     private nint _startupParent;
+    private readonly Task _profilePreparation;
+    private readonly ProcessStartInfo _start;
+    private readonly bool _requiresStartupWindow;
+    internal string StartupError { get; private set; } = "";
     internal MirrorProcess(ulong source)
     {
         string executable = OS.GetExecutablePath();
@@ -49,12 +54,10 @@ internal sealed class MirrorProcess : IDisposable
         string root = Path.GetFullPath(Path.Combine(OS.GetUserDataDir(), "rmp-multi-instance"));
         DirectoryPath = Path.GetFullPath(Path.Combine(root, session));
         if (!DirectoryPath.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)) throw new IOException("Invalid child profile path");
-        Directory.CreateDirectory(DirectoryPath);
         // Copy only non-run preferences/unlocks into a newly owned profile.
         // Run saves, histories, Quick SL data and spectator auto-open settings
         // are deliberately excluded. Replica saves can never reach the source.
         string account = Path.Combine(DirectoryPath, "Roaming", "SlayTheSpire2", "default", "1");
-        Directory.CreateDirectory(account);
         bool diagnosticTest = Environment.GetEnvironmentVariable("RMP_MULTI_TEST") == "1";
         var settings = new SettingsSave
         {
@@ -79,18 +82,10 @@ internal sealed class MirrorProcess : IDisposable
             if (input.GetType().GetField(mapField, System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)?.GetValue(input) is System.Collections.Generic.Dictionary<StringName,Key> keys)
                 settings.KeyboardMapping = keys.ToDictionary(k => k.Key.ToString(), k => k.Value.ToString());
         }
-        File.WriteAllText(Path.Combine(account, "settings.save"), JsonSerializationUtility.ToJson(settings));
-        foreach (string relative in new[] { "saves/progress.save", "saves/prefs.save" })
-        {
-            string original = ProjectSettings.GlobalizePath(SaveManager.Instance.GetProfileScopedPath(relative));
-            foreach (string profile in new[] { "profile1", "modded/profile1" })
-            {
-                string destination = Path.Combine(account, profile, relative);
-                Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
-                if (File.Exists(original)) File.Copy(original, destination, overwrite: false);
-            }
-        }
-        var start = new ProcessStartInfo(executable) { UseShellExecute = false, CreateNoWindow = true, WindowStyle = ProcessWindowStyle.Hidden,
+        string settingsJson = JsonSerializationUtility.ToJson(settings);
+        var profileFiles = new[] { "saves/progress.save", "saves/prefs.save" }.Select(relative =>
+            (Relative: relative, Source: ProjectSettings.GlobalizePath(SaveManager.Instance.GetProfileScopedPath(relative)))).ToArray();
+        var start = _start = new ProcessStartInfo(executable) { UseShellExecute = false, CreateNoWindow = true, WindowStyle = ProcessWindowStyle.Hidden,
             RedirectStandardOutput = true, RedirectStandardError = true, WorkingDirectory = Path.GetDirectoryName(executable)! };
         foreach (string key in new System.Collections.Generic.List<string>(start.Environment.Keys))
             if (key.StartsWith("RMP_SMOKE", StringComparison.Ordinal) || key.StartsWith("RMP_MULTI", StringComparison.Ordinal)) start.Environment.Remove(key);
@@ -104,32 +99,52 @@ internal sealed class MirrorProcess : IDisposable
         // outside the copied executable directory, so preserve --main-pack.
         start.ArgumentList.Add("--main-pack"); start.ArgumentList.Add(mainPack);
         string renderingMethod = DisplayServer.GetName() == "headless" ? "gl_compatibility" : RenderingServer.GetCurrentRenderingMethod();
-        foreach (string value in new[] { "--force-steam", "off", "--windowed", "--position", "-30000,-30000", "--resolution", "1280x720", "--max-fps", "120", "--rendering-method", renderingMethod, "--log-file", Path.Combine(DirectoryPath, "renderer.log") }) start.ArgumentList.Add(value);
+        foreach (string value in new[] { "--force-steam", "off", "--windowed", "--position", "-30000,-30000", "--resolution", "1280x720", "--max-fps", "30", "--rendering-method", renderingMethod, "--log-file", Path.Combine(DirectoryPath, "renderer.log") }) start.ArgumentList.Add(value);
         if (DisplayServer.GetName() != "headless")
         {
             start.ArgumentList.Add("--rendering-driver"); start.ArgumentList.Add(RenderingServer.GetCurrentRenderingDriverName());
         }
         if (Environment.GetEnvironmentVariable("RMP_MULTI_HEADLESS") == "1") start.ArgumentList.Add("--headless");
-        else if (DisplayServer.GetName() != "headless")
+        else _requiresStartupWindow = DisplayServer.GetName() != "headless";
+
+        _profilePreparation = Task.Run(() =>
         {
-            // The game's offscreen safeguard moves a new window to (8,48).
-            // Keep that native window under an invisible parent until the
-            // authenticated renderer detaches and exposes its owned popup.
-            _startupParent = MirrorWin32.Create(0x08000080, "STATIC", "RMP replica startup", (uint)MirrorWin32.Popup,
-                -30000, -30000, 1280, 720, 0, 0, 0, 0);
-            if (_startupParent == 0) { Wire.Dispose(); throw new System.ComponentModel.Win32Exception(); }
-            start.ArgumentList.Add("--wid"); start.ArgumentList.Add(_startupParent.ToString());
+            Directory.CreateDirectory(account);
+            File.WriteAllText(Path.Combine(account, "settings.save"), settingsJson);
+            foreach (var file in profileFiles)
+                foreach (string profile in new[] { "profile1", "modded/profile1" })
+                {
+                    string destination = Path.Combine(account, profile, file.Relative);
+                    Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+                    if (File.Exists(file.Source)) File.Copy(file.Source, destination, overwrite: false);
+                }
+        });
+    }
+
+    internal void CompleteStartup()
+    {
+        if (_disposed || Child != null || StartupError.Length != 0 || !_profilePreparation.IsCompleted) return;
+        try
+        {
+            _profilePreparation.GetAwaiter().GetResult();
+            if (_requiresStartupWindow)
+            {
+                // This window belongs to the main thread's Win32 message pump.
+                _startupParent = MirrorWin32.Create(0x08000080, "STATIC", "RMP replica startup", (uint)MirrorWin32.Popup,
+                    -30000, -30000, 1280, 720, 0, 0, 0, 0);
+                if (_startupParent == 0) throw new System.ComponentModel.Win32Exception();
+                _start.ArgumentList.Add("--wid"); _start.ArgumentList.Add(_startupParent.ToString());
+            }
+            Child = Process.Start(_start) ?? throw new IOException("Renderer process did not start");
+            Child.OutputDataReceived += (_, _) => { }; Child.ErrorDataReceived += (_, _) => { };
+            Child.BeginOutputReadLine(); Child.BeginErrorReadLine();
+            _ = Wire.ConnectAsync();
         }
-        try { Child = Process.Start(start) ?? throw new IOException("Renderer process did not start"); }
-        catch { if (_startupParent != 0) MirrorWin32.DestroyWindow(_startupParent); Wire.Dispose(); throw; }
-        // Drain redirected handles without retaining output in RAM. Godot's
-        // original --log-file remains the persistent diagnostic source.
-        Child.OutputDataReceived += (_, _) => { }; Child.ErrorDataReceived += (_, _) => { };
-        Child.BeginOutputReadLine(); Child.BeginErrorReadLine();
-        // The renderer participates in interactive input. Artificially lowering
-        // its scheduling priority causes avoidable latency under source load.
-        try { Child.PriorityClass = Environment.GetEnvironmentVariable("RMP_PHASE1_TEST") == "1" || Environment.GetEnvironmentVariable("RMP_PHASE2_TEST") == "1" || Environment.GetEnvironmentVariable("RMP_PHASE3_TEST") == "1" || Environment.GetEnvironmentVariable("RMP_PHASE4_TEST") == "1" ? ProcessPriorityClass.BelowNormal : ProcessPriorityClass.Normal; } catch { }
-        _ = Wire.ConnectAsync();
+        catch (Exception error)
+        {
+            StartupError = "独立游戏进程启动失败：" + error.Message;
+            Dispose();
+        }
     }
     public void Dispose()
     {
@@ -137,8 +152,9 @@ internal sealed class MirrorProcess : IDisposable
         // Only the exact child Process object created for this session is owned.
         // Never enumerate or terminate games by executable name.
         Wire.Dispose();
-        try { if (!Child.HasExited) Child.Kill(entireProcessTree: false); } catch { }
-        Child.Dispose();
+        try { if (Child is { HasExited: false }) Child.Kill(entireProcessTree: false); } catch { }
+        Child?.Dispose();
+        Child = null;
         if (_startupParent != 0) { MirrorWin32.DestroyWindow(_startupParent); _startupParent = 0; }
     }
 }

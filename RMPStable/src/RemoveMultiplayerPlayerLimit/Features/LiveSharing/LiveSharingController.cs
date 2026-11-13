@@ -61,8 +61,6 @@ internal static partial class LiveSharingController
         if (SourceMenuOpen && !_sourceMenuStarting && (state == null || NCapstoneContainer.Instance?.CurrentCapstoneScreen == null && NModalContainer.Instance?.OpenModal == null)) SourceMenuOpen = false;
         var service = RunManager.Instance.NetService;
         MultiplayerMirrorSession.Tick(delta);
-        if (!MultiplayerMirrorSession.IsRestoring && !RunManager.Instance.IsInProgress && SaveManager.Instance.IsProfileInitialized && NGame.Instance?.MainMenu?.IsNodeReady() == true &&
-            service?.Type is not NetGameType.Host and not NetGameType.Client) EnsureMirror(1);
         bool local = RunManager.Instance.IsInProgress && state?.Players.Count == 1 && NRun.Instance?.IsNodeReady() == true && service != null && service.Type != NetGameType.Host && service.Type != NetGameType.Client;
         if (service?.Type is NetGameType.Host or NetGameType.Client)
         {
@@ -73,20 +71,20 @@ internal static partial class LiveSharingController
         if (!local || _restoring)
         {
             if (_restoring && _restorePrepared) PublishRestoreCheckpoint();
-            if (!_restoring && _session != 0) { HideView(); _mirror?.Invalidate(); _session = 0; }
+            if (!_restoring && _session != 0) { Suspend(); }
             _mirror?.Tick(null, delta);
             return;
         }
-        EnsureMirror(state!);
         ulong session = NRun.Instance.GetInstanceId();
         if (session != _session)
         {
-            HideView(); _source?.Dispose(); _source = new LocalSpectatorSource(); _session = session;
+            HideView(); _source?.Dispose(); _source = null; _session = session;
         }
         bool settings = SceneMonitor.FindSettingsScreen()?.IsVisibleInTree() == true;
         if (pressed && !settings && _view != null) { Close(); return; }
         if (pressed) _openFailed = false;
         if (_view == null && !settings && !_openFailed && (pressed || SpectatorPreferences.Current.Open)) Open(state!);
+        if (_mirror != null) _source ??= new LocalSpectatorSource();
         if (_source == null || _mirror == null) return;
         bool wasVerified = _mirror.Verified;
         _mirror.Tick(state!, delta); _captureTimer -= delta;
@@ -131,7 +129,6 @@ internal static partial class LiveSharingController
         if (_openFailed) return;
         if (_mirror != null && (_mirror.ViewSource != source || _mirror.Multiplayer)) Suspend();
         if (_mirror != null) return;
-        // Prewarm when a singleplayer run is ready, before the first F8.
         _mirror = MirrorResident.Acquire(source, multiplayer: false);
         _mirror.Intent = message =>
         {

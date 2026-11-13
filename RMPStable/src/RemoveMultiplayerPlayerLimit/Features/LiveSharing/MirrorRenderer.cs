@@ -86,7 +86,7 @@ internal sealed partial class MirrorRenderer : IDisposable
     private readonly bool _startupOffscreen, _startupConsole;
     private long _drawFrames;
     private double _diagnosticTimer;
-    internal static bool IsRenderer => Environment.GetEnvironmentVariable("RMP_MULTI_ROLE") == "renderer";
+    internal static bool IsRenderer { get; } = Environment.GetEnvironmentVariable("RMP_MULTI_ROLE") == "renderer";
     internal static bool Diagnostic => Environment.GetEnvironmentVariable("RMP_MULTI_TEST") == "1" || Environment.GetEnvironmentVariable("RMP_MULTI_RENDERER_TEST") == "1";
     private static string Env(string name) => Environment.GetEnvironmentVariable("RMP_MULTI_" + name) ?? throw new InvalidDataException("Missing renderer identity");
     internal MirrorRenderer()
@@ -105,7 +105,7 @@ internal sealed partial class MirrorRenderer : IDisposable
         _ = _wire.ConnectAsync();
         AudioServer.SetBusMute(0, true);
         if (DisplayServer.GetName() != "headless") DisplayServer.WindowSetFlag(DisplayServer.WindowFlags.NoFocus, true);
-        Engine.MaxFps = Environment.GetEnvironmentVariable("RMP_PHASE1_TEST") == "1" || Environment.GetEnvironmentVariable("RMP_PHASE2_TEST") == "1" || Environment.GetEnvironmentVariable("RMP_PHASE3_TEST") == "1" ? 30 : 120;
+        Engine.MaxFps = 30;
         if (DisplayServer.GetName() != "headless")
         {
             MirrorWin32.GetWindowRect(MirrorWin32.OwnWindow, out var startupRect);
@@ -282,6 +282,8 @@ internal sealed partial class MirrorRenderer : IDisposable
             timer.SetTextAutoSize(_timerText);
         bool idle = NativeIdle;
         bool windowVisible = DisplayServer.GetName() != "headless" && MirrorWin32.IsWindowVisible(MirrorWin32.OwnWindow);
+        int frameLimit = windowVisible || _busy ? 120 : 30;
+        if (Engine.MaxFps != frameLimit) Engine.MaxFps = frameLimit;
         if (windowVisible != _lastWindowVisible)
         {
             _lastWindowVisible = windowVisible; _statusTimer = 0;
@@ -353,7 +355,8 @@ internal sealed partial class MirrorRenderer : IDisposable
             " threshold=" + (transition.Material is ShaderMaterial material ? material.GetShaderParameter("threshold").AsSingle() : -1));
     }
     private float _presentationWheelScale = 1;
-    private bool NativeIdle => !_multiplayerRoomWaiting && !_busy && _generation == _desiredGeneration && _error.Length == 0 && _state != null && _replay != null && (_finalSave != null || (Multiplayer ? MultiplayerMirrorSession.Settled : MirrorHost.SourceIdle));
+    private bool NativeIdle => !_multiplayerRoomWaiting && !_busy && _generation == _desiredGeneration && _error.Length == 0 && _state != null && _replay != null &&
+        (_finalSave != null || ReferenceEquals(_state, RunManager.Instance.DebugOnlyGetState()) && (Multiplayer ? MultiplayerMirrorSession.Settled : MirrorHost.SourceIdle));
     private bool InterceptInput(uint message, nuint key, nint data)
     {
         if (MirrorWin32.Keyboard(message))

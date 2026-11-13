@@ -118,7 +118,7 @@ internal static partial class MultiplayerMirrorSession
             _nextPreferredControlRequest = Time.GetTicksMsec() + 1000;
             RequestControl(true);
         }
-        if (_selected != 0 && Mirror is { } mirror && mirror.MultiplayerAuthority?.Granted == true && !mirror.Process.Child.HasExited && mirror.Error.Length == 0 && Time.GetTicksMsec() >= _nextControlHeartbeat)
+        if (_selected != 0 && Mirror is { } mirror && mirror.MultiplayerAuthority?.Granted == true && mirror.Process.Child is { HasExited: false } && mirror.Error.Length == 0 && Time.GetTicksMsec() >= _nextControlHeartbeat)
         {
             _nextControlHeartbeat = Time.GetTicksMsec() + 1000;
             Send(_selected, _token, new() { Kind = "control-heartbeat", Build = MirrorState.Build, Session = _remoteSession, Generation = _receivedGeneration, Request = new() { Epoch = mirror.ControlEpoch } });

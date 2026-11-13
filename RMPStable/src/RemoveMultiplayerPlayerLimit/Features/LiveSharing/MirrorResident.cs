@@ -10,7 +10,7 @@ internal static class MirrorResident
     internal static MirrorHost? Host => _host;
     internal static MirrorHost Acquire(ulong source, bool multiplayer)
     {
-        if (_host?.Process.Child.HasExited == true)
+        if (_host != null && (_host.Process.Child?.HasExited == true || _host.Process.StartupError.Length > 0))
         { _host.Dispose(); _host = null; }
         if (_host == null) _host = new MirrorHost(source, multiplayer);
         else
