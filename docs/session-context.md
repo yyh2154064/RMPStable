@@ -1,18 +1,19 @@
 # RMPStable 会话上下文
 
-## v0.4.7 已完成本地交付，等待发布选择与手动验收（2026-11-14）
+## 当前正式版本 v0.4.7，等待手动验收（2026-11-14）
 
-- 用户批准修复掉线重连后 F8 无法打开实况，并要求项目交接只维护仓库内三份文档，后续 GitHub 提交使用简洁中文。在现有 `multiInstanceTest` 从 `659ea99` 快进至 `039867f` 后实施。当前正式发布仍为 v0.4.6。
+- 用户批准修复掉线重连后 F8 无法打开实况，并要求项目交接只维护仓库内三份文档，后续 GitHub 提交使用简洁中文。在现有 `multiInstanceTest` 从 `659ea99` 快进至 `039867f` 后实施，按用户选择整合到 `main` 并发布。
 - 正式游戏日志显示 Steam 连接超时后，v0.4.6 实况向离线好友发送取消订阅和释放控制消息，异常打断清理。重连后旧副本本机管道已报告接收积压溢出，F8 仍尝试复用。v0.4.7 先清理本地订阅与控制，避开离线对端，F8 可替换通信失效的副本并重新订阅。日志未确定 Steam 掉线起因。
 - 本轮独立入口 [Test-ReconnectF8.ps1](../tools/Test-ReconnectF8.ps1) 在 v0.113.0 隔离双端以原版 localhost ENet 和原版存档载入通过 11 项断言。测试将第二个大厅切到另一回环端口。房主和重连端均可用 F8 显示好友实况。暂停房主读取副本消息触发了真实管道积压，按一次 F8 成功替换副本、重新同步，旧控制授权失效。v0.107.1 和 v0.111.0 完成编译。真实 Steam 跨机重连待手动复测。
-- Mod 文件夹与 ZIP 位于 F 盘开发根 `build/v047/package/`。专项记录为 `evidence/reconnect-f8-20261113-165509-745/result.json`。DLL SHA-256 为 `9D8133538D2CDCEDAFC42C866A5F02E998D8E8AE0927FE437928E70B670DD4CD`。默认待选发布目标 `main` 和 `v0.4.7` 正式 Latest，见 [v0.4.7 Release 文案](release-v0.4.7.md)。
+- [RMP Stable v0.4.7](https://github.com/yyh2154064/RMPStable/releases/tag/v0.4.7) 为公开 Latest，`v0.4.7` 指向已进入 `main` 的源码提交 `3878b3764e1082af4bbbb93a516513cadad40f4e`。用公开 v0.4.6 包内的 `update.cmd` 实测联网升级，三个安装文件哈希与 0.4.7 候选一致，重复运行正确跳过。
+- Mod 文件夹与 ZIP 位于 F 盘开发根 `build/v047/package/`。专项记录为 `evidence/reconnect-f8-20261113-165509-745/result.json`，在线升级记录为 `evidence/release-v047-online-update/result.json`。DLL SHA-256 为 `9D8133538D2CDCEDAFC42C866A5F02E998D8E8AE0927FE437928E70B670DD4CD`。发布文案见 [v0.4.7 Release 文案](release-v0.4.7.md)。
 
-## 当前正式版本 v0.4.6（2026-11-13）
+## v0.4.6 历史正式发布与待验收项目（2026-11-13）
 
 - 用户通过版本输入批准 STS2 v0.113.0 兼容和启动性能方案。在现有 `multiInstanceTest` 快进到 `f7540b2` 后实施，纳入已要求的项目流程 Skill 与三份维护文档。
 - 兼容包包含三个版本。新版适配建房、扩容消息、商店购买、选牌、宝箱、结算及实况。启动和选角期间禁止预热副本，首次打开实况时在对局内按需创建。大厅与暂停菜单改用原版栈查询。
 - v0.113.0 隔离专项通过 The Fool、单人 Quick SL、Standard／Blitz／Dread 双端联机和启动对照。最终三组对照的进程到主菜单中位数为 7.17 秒与 7.75 秒，选角 P95 为 12.84 ms 与 13.24 ms。已覆盖第 16 席位封包往返，实际 16 人和 Steam 跨机待验。
-- 用户选择由助手发布。`main` 已包含源码提交 `14e0c91ea0ac39b0f5b91bd1df6ca5c7ac283e8a`，标签 `v0.4.6` 指向该提交。[RMP Stable v0.4.6](https://github.com/yyh2154064/RMPStable/releases/tag/v0.4.6) 为公开 Latest。实际运行公开 v0.4.5 包内的 `update.cmd` 已在线升级到 0.4.6，三个安装文件的 SHA-256 一致，重复运行正确跳过。
+- 用户选择由助手发布。`main` 已包含源码提交 `14e0c91ea0ac39b0f5b91bd1df6ca5c7ac283e8a`，标签 `v0.4.6` 指向该提交。[RMP Stable v0.4.6](https://github.com/yyh2154064/RMPStable/releases/tag/v0.4.6) 已正式发布。实际运行公开 v0.4.5 包内的 `update.cmd` 已在线升级到 0.4.6，三个安装文件的 SHA-256 一致，重复运行正确跳过。
 - 本轮独立入口为 [Test-Beta113Startup.ps1](../tools/Test-Beta113Startup.ps1)。Mod 文件夹与 ZIP 位于批准的 F 盘开发根 `build/v046/package/`。手动验收待确认。发布文案见 [v0.4.6 Release 文案](release-v0.4.6.md)，专项证据及剩余覆盖面见 [v0.4.6 专项记录](beta113-v046-validation.md)。
 - 当前待手动验收包括 v0.4.6 兼容和启动改动，以及 v0.4.5 遗留的占卜、实况快捷键和地图绘画。
 
