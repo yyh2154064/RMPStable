@@ -1,18 +1,19 @@
 # RMPStable 会话上下文
 
-## v0.4.8 本地交付，等待手动验收与发布选择（2026-11-15）
+## 当前正式版本 v0.4.8，等待手动验收（2026-11-15）
 
-- 用户通过版本输入批准 v0.113.1 DLL 初始化修复。在现有 `multiInstanceTest` 从 `659ea99` 快进到正式版基线 `966e302`，在该分支完成本地开发，预计发布到 `main`。
+- 用户通过版本输入批准 v0.113.1 DLL 初始化修复。在现有 `multiInstanceTest` 从 `659ea99` 快进到正式版基线 `966e302` 开发，按用户选择整合至 `main` 发布。测试分支的本地引用已回到各自远端位置。
 - 正式游戏日志显示 v0.4.7 在 STS2 v0.113.0 成功加载，随后在 v0.113.1 的引导阶段抛出 `NotSupportedException`。正式安装的 DLL、PCK、清单与 v0.4.7 候选一致。v0.4.8 新增按 v0.113.1 游戏引用独立编译的嵌入程序集，保留既有三个精确版本映射及未知版本检查。
 - 独立专项 [Test-Beta1131Load.ps1](../tools/Test-Beta1131Load.ps1) 使用 F 盘隔离的 v0.113.1 原版运行环境与匹配的只读游戏 PCK。双端共 28 项断言通过，覆盖初始化、四个版本映射、未知版本拒绝、原版大厅 Harmony 补丁与消息注册、双端 ENet 建房进局和两端 F8 副本。两份本体日志与两份副本日志均确认加载 v0.4.8。其他三个游戏版本完成编译和嵌入校验，启动未复测。Steam 跨机及用户手动验收待确认。
 - 可用 Mod 文件夹与 ZIP 位于 F 盘开发根 `build/v048/package/`。DLL SHA-256 为 `0136E1C27376DD5E372CD370AE18A8544E7AEDDD9AE5A7B7F6C7F1A243736F8B`。专项记录为 `evidence/beta1131-load-20261115-085145-929/result.json`，发布文案见 [v0.4.8 Release 文案](release-v0.4.8.md)。
+- [RMP Stable v0.4.8](https://github.com/yyh2154064/RMPStable/releases/tag/v0.4.8) 为公开 Latest，标签指向已进入 `main` 的源码提交 `a608e8c7e201c6a87b19c18c6cd7d1cd910cafcf`。用公开 v0.4.7 包内的 `update.cmd` 实测联网升级，三个安装文件哈希与交付一致，重复运行正确跳过。记录为 `evidence/release-v048-online-update/result.json`。
 
-## 当前正式版本 v0.4.7，等待手动验收（2026-11-14）
+## v0.4.7 历史正式发布与待验收项目（2026-11-14）
 
 - 用户批准修复掉线重连后 F8 无法打开实况，并要求项目交接只维护仓库内三份文档，后续 GitHub 提交使用简洁中文。在现有 `multiInstanceTest` 从 `659ea99` 快进至 `039867f` 后实施，按用户选择整合到 `main` 并发布。
 - 正式游戏日志显示 Steam 连接超时后，v0.4.6 实况向离线好友发送取消订阅和释放控制消息，异常打断清理。重连后旧副本本机管道已报告接收积压溢出，F8 仍尝试复用。v0.4.7 先清理本地订阅与控制，避开离线对端，F8 可替换通信失效的副本并重新订阅。日志未确定 Steam 掉线起因。
 - 本轮独立入口 [Test-ReconnectF8.ps1](../tools/Test-ReconnectF8.ps1) 在 v0.113.0 隔离双端以原版 localhost ENet 和原版存档载入通过 11 项断言。测试将第二个大厅切到另一回环端口。房主和重连端均可用 F8 显示好友实况。暂停房主读取副本消息触发了真实管道积压，按一次 F8 成功替换副本、重新同步，旧控制授权失效。v0.107.1 和 v0.111.0 完成编译。真实 Steam 跨机重连待手动复测。
-- [RMP Stable v0.4.7](https://github.com/yyh2154064/RMPStable/releases/tag/v0.4.7) 为公开 Latest，`v0.4.7` 指向已进入 `main` 的源码提交 `3878b3764e1082af4bbbb93a516513cadad40f4e`。用公开 v0.4.6 包内的 `update.cmd` 实测联网升级，三个安装文件哈希与 0.4.7 候选一致，重复运行正确跳过。
+- [RMP Stable v0.4.7](https://github.com/yyh2154064/RMPStable/releases/tag/v0.4.7) 发布时为公开 Latest，`v0.4.7` 指向已进入 `main` 的源码提交 `3878b3764e1082af4bbbb93a516513cadad40f4e`。用公开 v0.4.6 包内的 `update.cmd` 实测联网升级，三个安装文件哈希与 0.4.7 候选一致，重复运行正确跳过。
 - Mod 文件夹与 ZIP 位于 F 盘开发根 `build/v047/package/`。专项记录为 `evidence/reconnect-f8-20261113-165509-745/result.json`，在线升级记录为 `evidence/release-v047-online-update/result.json`。DLL SHA-256 为 `9D8133538D2CDCEDAFC42C866A5F02E998D8E8AE0927FE437928E70B670DD4CD`。发布文案见 [v0.4.7 Release 文案](release-v0.4.7.md)。
 
 ## v0.4.6 历史正式发布与待验收项目（2026-11-13）
