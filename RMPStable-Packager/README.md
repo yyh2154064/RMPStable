@@ -3,10 +3,10 @@
 Double-click `BuildPackager.cmd` to build a distributable ZIP from the sibling
 `RMPStable` source directory. ZIP files are written to `output` beside this
 script. The package contains one DLL with embedded implementations for v0.107.1,
-v0.111.0, and v0.113.0 Public Beta.
-Run the packager once while each game branch is installed to save its DLL
+v0.111.0, v0.113.0, and v0.113.1.
+Run the packager once with each game version installed to save its DLL
 references under the ignored `tools/game-references` directory. The first run
-may stop after saving the current branch. Run it again after all three snapshots exist.
+may stop after saving the current version. Run it again after all four snapshots exist.
 
 The script auto-detects common Steam library locations. Optional command-line
 overrides are available when needed:

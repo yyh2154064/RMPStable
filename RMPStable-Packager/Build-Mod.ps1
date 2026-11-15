@@ -205,15 +205,20 @@ if (-not (Test-Path -LiteralPath $releaseInfoPath -PathType Leaf)) {
     throw "缺少游戏版本文件：$releaseInfoPath"
 }
 $currentGameVersion = [string]((Get-Content -Raw -LiteralPath $releaseInfoPath | ConvertFrom-Json).version)
-$gameVersions = @('v0.107.1', 'v0.111.0', 'v0.113.0')
-if ($currentGameVersion -notin $gameVersions) {
+$gameVersions = [ordered]@{
+    'v0.107.1' = @{ Compatibility = 'stable'; Payload = 'RMPStablePayload_v0107' }
+    'v0.111.0' = @{ Compatibility = 'beta'; Payload = 'RMPStablePayload_v0111' }
+    'v0.113.0' = @{ Compatibility = 'v0113'; Payload = 'RMPStablePayload_v0113' }
+    'v0.113.1' = @{ Compatibility = 'v0113'; Payload = 'RMPStablePayload_v01131' }
+}
+if (!$gameVersions.Contains($currentGameVersion)) {
     throw "当前游戏版本 $currentGameVersion 不在 RMP Stable $safeVersion 的兼容列表中。"
 }
 $currentReferenceDir = Join-Path $referenceRoot $currentGameVersion
 New-Item -ItemType Directory -Path $currentReferenceDir -Force | Out-Null
 Get-ChildItem -LiteralPath $gameManagedDir -Filter '*.dll' -File |
     Copy-Item -Destination $currentReferenceDir -Force
-foreach ($version in $gameVersions) {
+foreach ($version in $gameVersions.Keys) {
     $requiredReference = Join-Path (Join-Path $referenceRoot $version) 'sts2.dll'
     if (-not (Test-Path -LiteralPath $requiredReference -PathType Leaf)) {
         throw "缺少 $version 的游戏程序集快照。请先将 Steam 切换到该版本并运行一次打包器以保存程序集，然后切回所需版本重新打包。缺少：$requiredReference"
@@ -238,12 +243,12 @@ $packageModDir = Join-Path $packageRoot $modId
 New-Item -ItemType Directory -Force -Path $assetWorkDir, $packageModDir, $outputDir | Out-Null
 
 try {
-    foreach ($version in $gameVersions) {
-        $compatibility = switch ($version) { 'v0.107.1' { 'stable' } 'v0.111.0' { 'beta' } 'v0.113.0' { 'v0113' } }
+    foreach ($version in $gameVersions.Keys) {
+        $compatibility = $gameVersions[$version].Compatibility
         $referenceDir = Join-Path $referenceRoot $version
         $managedOutputDir = Join-Path $workDir "managed\$version"
         $intermediateOutputDir = Join-Path $workDir "obj\$version"
-        $payloadName = 'RMPStablePayload_' + (($version -replace '\.\d+$', '') -replace '\.', '')
+        $payloadName = $gameVersions[$version].Payload
         New-Item -ItemType Directory -Force -Path $managedOutputDir | Out-Null
         Write-Step "构建 $version 专用 RMPStable.dll"
         Invoke-Native $dotnet.Source @(
@@ -275,6 +280,7 @@ try {
     $stablePayload = Join-Path $workDir 'managed\v0.107.1\RMPStablePayload_v0107.dll'
     $betaPayload = Join-Path $workDir 'managed\v0.111.0\RMPStablePayload_v0111.dll'
     $v0113Payload = Join-Path $workDir 'managed\v0.113.0\RMPStablePayload_v0113.dll'
+    $v01131Payload = Join-Path $workDir 'managed\v0.113.1\RMPStablePayload_v01131.dll'
     $bootstrapOutputDir = Join-Path $workDir 'bootstrap'
     $bootstrapObjDir = Join-Path $workDir 'obj\bootstrap'
     Write-Step '构建自动选择游戏版本的 RMPStable.dll'
@@ -285,6 +291,7 @@ try {
         "-p:StablePayloadPath=$stablePayload",
         "-p:BetaPayloadPath=$betaPayload",
         "-p:V0113PayloadPath=$v0113Payload",
+        "-p:V01131PayloadPath=$v01131Payload",
         "-p:BaseIntermediateOutputPath=$bootstrapObjDir\",
         '--nologo'
     ) '引导 DLL 项目还原失败'
@@ -297,6 +304,7 @@ try {
         "-p:StablePayloadPath=$stablePayload",
         "-p:BetaPayloadPath=$betaPayload",
         "-p:V0113PayloadPath=$v0113Payload",
+        "-p:V01131PayloadPath=$v01131Payload",
         "-p:BaseIntermediateOutputPath=$bootstrapObjDir\",
         '--nologo'
     ) '引导 DLL 构建失败'

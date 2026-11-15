@@ -1,5 +1,9 @@
 # RMP Stable source repository
 
+## v0.4.8
+
+新增 STS2 v0.113.1 兼容程序集，修复游戏更新后模组 DLL 初始化失败。
+
 ## v0.4.6
 
 新增 STS2 v0.113.0 兼容程序集。实况副本在对局内按需启动，避免主菜单和选角阶段自动预热。使用说明见 [窗口说明](docs/README-multiInstance.md)。
@@ -16,7 +20,7 @@ This repository stores the editable source code for RMP Stable. Compiled mod
 artifacts are deliberately not kept under `RMPStable`.
 
 - `RMPStable/src`: C# source and project file.
-- `RMPStable-Bootstrap`: version-detecting loader that embeds both compiled implementations.
+- `RMPStable-Bootstrap`: version-detecting loader that embeds the compiled implementations.
 - `RMPStable/doc`: Godot source project for the icon and localization.
 - `RMPStable/RMPStable.json`: source manifest used by the packager.
 - `RMPStable-Packager`: double-clickable Windows release packager.
@@ -25,6 +29,6 @@ artifacts are deliberately not kept under `RMPStable`.
 On Windows, double-click `RMPStable-Packager/BuildPackager.cmd`. The packager builds
 the version-aware DLL and PCK from source and creates a versioned ZIP
 containing the `RMPStable` mod directory. The packager needs local game assembly
-snapshots for v0.107.1, v0.111.0, and v0.113.0 (saved under its ignored `tools`
+snapshots for v0.107.1, v0.111.0, v0.113.0, and v0.113.1 (saved under its ignored `tools`
 directory when each version is active). If Godot 4.5 is not installed, the first run
 downloads and verifies the official portable Godot 4.5.1 build automatically.

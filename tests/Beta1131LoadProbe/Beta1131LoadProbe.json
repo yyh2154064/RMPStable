@@ -1,0 +1,1 @@
+{"id":"Beta1131LoadProbe","name":"Beta 0.113.1 compatibility probe","author":"RMP Stable Contributors","version":"0.1.0","description":"Isolated v0.113.1 startup, lobby and F8 probe.","has_dll":true,"has_pck":false,"affects_gameplay":false,"min_game_version":"0.113.1","dependencies":[]}
