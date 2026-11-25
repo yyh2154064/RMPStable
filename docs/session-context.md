@@ -1,13 +1,14 @@
 # RMPStable 会话上下文
 
-## v0.4.9 已完成本地交付，等待发布选择和手动验收（2026-11-25）
+## 当前正式版本 v0.4.9，等待手动验收（2026-11-25）
 
-- 用户输入 `0.4.9` 批准适配 Steam `public-beta` v0.114.0，Build `26909018`，游戏提交 `a7b9a9c0`。在现有 `multiInstanceTest` 从 `659ea99` 快进到正式基线 `78e79e0` 后开发，预计发布目标为 `main`。
+- 用户输入 `0.4.9` 批准适配 Steam `public-beta` v0.114.0，Build `26909018`，游戏提交 `a7b9a9c0`。在现有 `multiInstanceTest` 从 `659ea99` 快进到正式基线 `78e79e0` 后开发，并按用户选择整合至 `main` 发布。
 - 新增 v0.114.0 独立兼容程序集，保留四个旧目标及未知版本检查。新版宝箱通过原版动作处理轮次和迟到的投票，实况副本等待原版遗物选项就绪再重放。卡牌预览按新版原版接口处理模型副本，原始预览可清除副本上的多次升级。专项验证了 F5、F8 在暂停菜单和错误弹窗附近的原有行为。
 - [Test-Beta114Compatibility.ps1](../tools/Test-Beta114Compatibility.ps1) 在 F 盘独立档案用原版 ENet 双端运行 Blitz，主客各 28 项断言通过。覆盖初始化、消息和大厅补丁、双端进局、F8 副本、实况预览、Dingy Dagger 多次升级、快捷键、宝箱两轮选取与跳过、迟到票丢弃，以及隐藏副本与来源的最终状态哈希一致。另四个目标完成编译和嵌入校验。Steam 跨机、实际 16 人及用户手动验收待确认。
 - 交付位于 F 盘开发根 `build/v049/package/`。DLL SHA-256 为 `3CCFCC44EFFE7FCBF47BCD217FB51F9E9D6ED4673BCD125CD36F2D79DE05941A`。专项记录为 `evidence/beta114-compatibility-20261125-042656-685/result.json`。发布文案见 [v0.4.9 Release 文案](release-v0.4.9.md)。
+- [RMP Stable v0.4.9](https://github.com/yyh2154064/RMPStable/releases/tag/v0.4.9) 已设为公开 Latest，标签指向 `main` 源码提交 `52c6acef3dbdcdd717ad4fb9219760538d241581`。公开 ZIP 与交付包的 SHA-256 一致。用公开 v0.4.8 包内的 `update.cmd` 在 F 盘隔离副本完成联网升级，三个安装文件的 SHA-256 与交付一致，重复运行正确跳过。记录为 `evidence/release-v049-online-update/result.json`。
 
-## 当前正式版本 v0.4.8，等待手动验收（2026-11-15）
+## v0.4.8 历史正式发布与待验收项目（2026-11-15）
 
 - 用户通过版本输入批准 v0.113.1 DLL 初始化修复。在现有 `multiInstanceTest` 从 `659ea99` 快进到正式版基线 `966e302` 开发，按用户选择整合至 `main` 发布。测试分支的本地引用已回到各自远端位置。
 - 正式游戏日志显示 v0.4.7 在 STS2 v0.113.0 成功加载，随后在 v0.113.1 的引导阶段抛出 `NotSupportedException`。正式安装的 DLL、PCK、清单与 v0.4.7 候选一致。v0.4.8 新增按 v0.113.1 游戏引用独立编译的嵌入程序集，保留既有三个精确版本映射及未知版本检查。
