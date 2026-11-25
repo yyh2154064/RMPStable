@@ -12,7 +12,7 @@ namespace RMPStable.Bootstrap;
 [ModInitializer("Initialize")]
 public static class ModEntry
 {
-    private const string Version = "0.4.8";
+    private const string Version = "0.4.9";
 
     public static void Initialize()
     {
@@ -55,6 +55,7 @@ public static class ModEntry
         "v0.111.0" => "RMPStable.Payload.v0111.dll",
         "v0.113.0" => "RMPStable.Payload.v0113.dll",
         "v0.113.1" => "RMPStable.Payload.v01131.dll",
+        "v0.114.0" => "RMPStable.Payload.v0114.dll",
         _ => throw new NotSupportedException($"RMP Stable {Version} does not support STS2 {gameVersion}.")
     };
 

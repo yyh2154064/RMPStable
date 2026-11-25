@@ -22,6 +22,7 @@
     <EmbeddedResource Include="$(BetaPayloadPath)" LogicalName="RMPStable.Payload.v0111.dll" />
     <EmbeddedResource Include="$(V0113PayloadPath)" LogicalName="RMPStable.Payload.v0113.dll" />
     <EmbeddedResource Include="$(V01131PayloadPath)" LogicalName="RMPStable.Payload.v01131.dll" />
+    <EmbeddedResource Include="$(V0114PayloadPath)" LogicalName="RMPStable.Payload.v0114.dll" />
   </ItemGroup>
   <Target Name="ValidateInputs" BeforeTargets="ResolveAssemblyReferences">
     <Error Condition="!Exists('$(GameManagedDir)\sts2.dll')" Text="GameManagedDir must contain sts2.dll." />
@@ -29,5 +30,6 @@
     <Error Condition="!Exists('$(BetaPayloadPath)')" Text="BetaPayloadPath does not exist." />
     <Error Condition="!Exists('$(V0113PayloadPath)')" Text="V0113PayloadPath does not exist." />
     <Error Condition="!Exists('$(V01131PayloadPath)')" Text="V01131PayloadPath does not exist." />
+    <Error Condition="!Exists('$(V0114PayloadPath)')" Text="V0114PayloadPath does not exist." />
   </Target>
 </Project>

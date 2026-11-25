@@ -1,3 +1,4 @@
+#if !STS2_0114
 using System.Threading.Tasks;
 using MegaCrit.Sts2.Core.Entities.Multiplayer;
 using MegaCrit.Sts2.Core.Entities.Players;
@@ -36,3 +37,4 @@ public class RmpSkipRelicGameAction : GameAction
 		return $"RmpSkipRelicAction for player {_player.NetId}";
 	}
 }
+#endif

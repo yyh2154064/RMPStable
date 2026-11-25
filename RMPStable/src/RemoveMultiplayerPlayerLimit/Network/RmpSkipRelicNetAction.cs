@@ -1,3 +1,4 @@
+#if !STS2_0114
 using System.Runtime.InteropServices;
 using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.GameActions;
@@ -27,3 +28,4 @@ public struct RmpSkipRelicNetAction : INetAction, IPacketSerializable
 		return "RmpSkipRelicNetAction";
 	}
 }
+#endif

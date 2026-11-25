@@ -1,0 +1,1 @@
+{"id":"Beta114CompatibilityProbe","name":"STS2 v0.114.0 compatibility probe","author":"RMP Stable Contributors","version":"0.1.0","description":"Isolated v0.114.0 compatibility verification.","has_dll":true,"has_pck":false,"affects_gameplay":false,"min_game_version":"0.114.0","dependencies":[]}

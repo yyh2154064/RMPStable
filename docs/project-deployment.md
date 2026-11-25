@@ -6,6 +6,8 @@
 - `origin` 为公开仓库 [yyh2154064/RMPStable](https://github.com/yyh2154064/RMPStable)，默认分支 `main`。既有 `liveSharingTest` 为本地模拟，`multiInstanceTest` 为原生多实例。开发和发布授权见 [AGENTS.md](../AGENTS.md) 及 [开发流程 Skill](../.agents/skills/rmpstable-development/SKILL.md)。每轮检查当前工作区、远端目标、分支引用及版本标签。
 - 2026-11-15 发布并核对 [RMP Stable v0.4.8](https://github.com/yyh2154064/RMPStable/releases/tag/v0.4.8) 为公开 Latest，标签指向已进入 `main` 的源码提交 `a608e8c7e201c6a87b19c18c6cd7d1cd910cafcf`。此前发布的 [v0.4.7](https://github.com/yyh2154064/RMPStable/releases/tag/v0.4.7) 指向源码提交 `3878b3764e1082af4bbbb93a516513cadad40f4e`。
 - 当前开发资源在 `F:/projectFile/RMPStable-development`。构建输出 `build/package/RMPStable/`，同级存放发布 ZIP。引用、runtime、profile seed 和证据目录详见 [开发资源](development-resources.md)。以实际路径与候选文件哈希为准。
+- v0.4.9 本地候选位于 `build/v049/package/`。ZIP 为 3,434,032 字节，SHA-256 为 `93167F4B489C6F7014611DD50834B5E9D9350CF194384E2DB6BD20C25CA9AC25`。五个文件均与候选文件夹哈希相同，PCK 复用 v0.4.8。预计发布目标为 `main`，等待上传方式确认。
+- v0.114.0 隔离环境位于 `runtime/v0.114.0`。复用 212 个哈希相同的 F 盘运行文件，独立保留新版发行信息、游戏 DLL 和 XML 文档，游戏 PCK 从匹配的 Steam 安装只读加载。候选包只包含模组文件。
 - v0.4.8 交付位于 `build/v048/package/`，复用 v0.4.7 的 Mod PCK。[公开附件](https://github.com/yyh2154064/RMPStable/releases/download/v0.4.8/RMPStable-v0.4.8.zip) 与本地 ZIP 均为 3,159,299 字节，SHA-256 为 `1784FE00921CFC9D3EEB34179DA906ABCDEB26C4C31A2CFC07C6D83866DC3B45`。从公开 v0.4.7 包解压出的 `update.cmd` 实际联网更新到 0.4.8，DLL、PCK 和清单哈希与交付一致，重复运行正确跳过。
 - v0.113.1 隔离环境仅复用哈希相同的 F 盘旧运行文件，差异文件独立保存，游戏 PCK 从 Steam 安装只读加载。
 - v0.4.6 使用 `build/v046/package/` 保存候选文件夹和 ZIP。`runtime/v0.113.0` 复用 F 盘隔离环境，匹配游戏 PCK 从 Steam 安装只读加载。游戏程序集、测试探针和隔离档案均在候选包之外。

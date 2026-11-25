@@ -420,7 +420,17 @@ internal sealed partial class LocalSpectatorSource : IDisposable
 				if (!copy.IsUpgraded) copy.UpgradeInternal();
 				var upgraded = CaptureCard(copy, PileType.None, null, preview: true);
 				CardSnapshot? baseCard = null;
-				if (c.IsUpgraded) { var normal = (CardModel)c.MutableClone(); CardCmd.Downgrade(normal); baseCard = CaptureCard(normal, PileType.None, null, preview: true); baseCard.Description = normal.GetDescriptionForPile(PileType.None); }
+				if (c.IsUpgraded)
+				{
+					var normal = (CardModel)c.MutableClone();
+#if STS2_0114
+					CardCmd.RemoveAllUpgrades(normal);
+#else
+					CardCmd.Downgrade(normal);
+#endif
+					baseCard = CaptureCard(normal, PileType.None, null, preview: true);
+					baseCard.Description = normal.GetDescriptionForPile(PileType.None);
+				}
 				cached = (key, upgraded, baseCard); _upgrades[c] = cached;
 			}
 			result.Upgrade = cached.Preview;

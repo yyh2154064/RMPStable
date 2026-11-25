@@ -26,7 +26,7 @@ public static class ModEntry
 
 	public static void Initialize()
 	{
-		Log.Warn("[RMP Stable] Initializing native multi-instance v0.4.8...");
+		Log.Warn("[RMP Stable] Initializing native multi-instance v0.4.9...");
 #if STS2_0113
 		PayloadMessageRegistration.AttachPayloadDuringModLoad();
 #endif

@@ -210,6 +210,7 @@ $gameVersions = [ordered]@{
     'v0.111.0' = @{ Compatibility = 'beta'; Payload = 'RMPStablePayload_v0111' }
     'v0.113.0' = @{ Compatibility = 'v0113'; Payload = 'RMPStablePayload_v0113' }
     'v0.113.1' = @{ Compatibility = 'v0113'; Payload = 'RMPStablePayload_v01131' }
+    'v0.114.0' = @{ Compatibility = 'v0114'; Payload = 'RMPStablePayload_v0114' }
 }
 if (!$gameVersions.Contains($currentGameVersion)) {
     throw "当前游戏版本 $currentGameVersion 不在 RMP Stable $safeVersion 的兼容列表中。"
@@ -281,6 +282,7 @@ try {
     $betaPayload = Join-Path $workDir 'managed\v0.111.0\RMPStablePayload_v0111.dll'
     $v0113Payload = Join-Path $workDir 'managed\v0.113.0\RMPStablePayload_v0113.dll'
     $v01131Payload = Join-Path $workDir 'managed\v0.113.1\RMPStablePayload_v01131.dll'
+    $v0114Payload = Join-Path $workDir 'managed\v0.114.0\RMPStablePayload_v0114.dll'
     $bootstrapOutputDir = Join-Path $workDir 'bootstrap'
     $bootstrapObjDir = Join-Path $workDir 'obj\bootstrap'
     Write-Step '构建自动选择游戏版本的 RMPStable.dll'
@@ -292,6 +294,7 @@ try {
         "-p:BetaPayloadPath=$betaPayload",
         "-p:V0113PayloadPath=$v0113Payload",
         "-p:V01131PayloadPath=$v01131Payload",
+        "-p:V0114PayloadPath=$v0114Payload",
         "-p:BaseIntermediateOutputPath=$bootstrapObjDir\",
         '--nologo'
     ) '引导 DLL 项目还原失败'
@@ -305,6 +308,7 @@ try {
         "-p:BetaPayloadPath=$betaPayload",
         "-p:V0113PayloadPath=$v0113Payload",
         "-p:V01131PayloadPath=$v01131Payload",
+        "-p:V0114PayloadPath=$v0114Payload",
         "-p:BaseIntermediateOutputPath=$bootstrapObjDir\",
         '--nologo'
     ) '引导 DLL 构建失败'

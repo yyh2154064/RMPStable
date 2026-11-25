@@ -4,7 +4,7 @@
 
 ## 技术栈与加载
 
-- Slay the Spire 2 游戏内 Mod。逻辑使用 C# 11、MSBuild/.NET SDK、Godot 4.5 C# API、Harmony 和反射。项目标记 `net7.0`，关闭隐式框架引用，使用 `GameManagedDir` 中对应游戏版本的托管程序集。分别编译 v0.107.1、v0.111.0、v0.113.0 和 v0.113.1。v0.111.0 及之后的目标定义 `STS2_0111`，两个 v0.113 目标同时定义 `STS2_0113`。入口见 [RMPStable.csproj](../RMPStable/src/RMPStable.csproj)。
+- Slay the Spire 2 游戏内 Mod。逻辑使用 C# 11、MSBuild/.NET SDK、Godot 4.5 C# API、Harmony 和反射。项目标记 `net7.0`，关闭隐式框架引用，使用 `GameManagedDir` 中对应游戏版本的托管程序集。分别编译 v0.107.1、v0.111.0、v0.113.0、v0.113.1 和 v0.114.0。v0.111.0 及之后的目标定义 `STS2_0111`，v0.113.0 及之后的目标还定义 `STS2_0113`，v0.114.0 额外定义 `STS2_0114`。入口见 [RMPStable.csproj](../RMPStable/src/RMPStable.csproj)。
 - 游戏加载 Mod 清单、DLL 和 PCK。发行 DLL 是 [Bootstrap](../RMPStable-Bootstrap/ModEntry.cs)。它读游戏 `release_info.json`，按精确游戏版本加载各自的嵌入程序集，注册 Godot 脚本并调用功能入口。未知版本由引导层拒绝。PCK 由 [Godot 资源工程](../RMPStable/doc/project.godot)导出，包含本地化、图标等。
 - [功能入口](../RMPStable/src/RemoveMultiplayerPlayerLimit/Core/ModEntry.cs)初始化配置和模块，挂载 `RMPController` 与场景监听。模块通过 `IRMPModule` 接入。`Infrastructure` 提供场景注册、游戏状态访问、反射缓存与本地化。
 
@@ -27,7 +27,9 @@ v0.4.6 从对局内打开实况时才创建副本。档案文件准备在后台�
 
 v0.4.7 在离线或换局时清空实况订阅和控制状态。实况路由跳过离线对端，并处理 Steam 传输先于游戏名单移除连接的情况。健康副本仍可跨局复用。重新打开实况时若副本已退出或本机管道已失效，则回收原进程，按需启动并认证新副本，再以新订阅同步当前来源。
 
-- 优先使用 [Build-MultiInstance.ps1](../tools/Build-MultiInstance.ps1)，传入已有 `-GameReferences`、`-ModPck`，可分别用 `-V0113References` 和 `-V01131References` 指向 v0.113.0、v0.113.1 的本机程序集目录。它编译四个功能程序集和引导 DLL，再组装文件夹。资源变更时用现有 Godot 工具按 [Build-Mod.ps1](../RMPStable-Packager/Build-Mod.ps1)的导入和导出步骤生成 PCK，工作和缓存路径按 F 盘约束安排。通用打包器仍使用仓库旁的工作路径，开发机用 F 盘构建入口。
+v0.114.0 的宝箱选择与跳过使用携带轮次的原版动作，旧的 Mod 跳过动作仅在旧兼容程序集中编译。实况副本等原版遗物选项完成动画并与当前轮次状态对齐，再提交下一条投票动作。卡牌预览对模型副本调用新版升级接口，原始预览按原版检查界面移除副本上的全部升级。
+
+- 优先使用 [Build-MultiInstance.ps1](../tools/Build-MultiInstance.ps1)，传入已有 `-GameReferences`、`-ModPck`，可分别用 `-V0113References`、`-V01131References` 和 `-V0114References` 指向 v0.113.0、v0.113.1 和 v0.114.0 的本机程序集目录。它编译五个功能程序集和引导 DLL，再组装文件夹。资源变更时用现有 Godot 工具按 [Build-Mod.ps1](../RMPStable-Packager/Build-Mod.ps1)的导入和导出步骤生成 PCK，工作和缓存路径按 F 盘约束安排。通用打包器仍使用仓库旁的工作路径，开发机用 F 盘构建入口。
 - 手动运行将完整 `RMPStable` 文件夹放入游戏 `mods`，关闭游戏后替换，联机队员保持相同 Mod 和游戏版本。操作说明见 [README-multiInstance.md](README-multiInstance.md)。
 - 隔离运行复用既有 runtime、profile seed、PowerShell 启动器与 `tests/` 中的 C# probe 结构。按本轮目标新增独立专项，常见入口为 `tools/Test-<场景>.ps1` 和 `tests/<场景>Probe/`。验收证据记录实际游戏版本、运行方式、结果和未覆盖条件。[开发资源](development-resources.md)中的旧测试命令供定位历史实现，日常入口以当前上下文和 `AGENTS.md` 为准。
 - v0.4.5 专项实际运行 v0.111.0，v0.107.1 完成编译。多人专项使用原版 localhost ENet，Steam 跨电脑发现与重连、全屏和不同 DPI 的覆盖情况以实际证据为准。

@@ -12,6 +12,7 @@
     <DefaultItemExcludes>$(DefaultItemExcludes);bin/**;obj/**;.compat-work/**</DefaultItemExcludes>
     <DefineConstants Condition="'$(GameCompatibility)' == 'beta'">$(DefineConstants);STS2_0111</DefineConstants>
     <DefineConstants Condition="'$(GameCompatibility)' == 'v0113'">$(DefineConstants);STS2_0111;STS2_0113</DefineConstants>
+    <DefineConstants Condition="'$(GameCompatibility)' == 'v0114'">$(DefineConstants);STS2_0111;STS2_0113;STS2_0114</DefineConstants>
   </PropertyGroup>
 
   <!--

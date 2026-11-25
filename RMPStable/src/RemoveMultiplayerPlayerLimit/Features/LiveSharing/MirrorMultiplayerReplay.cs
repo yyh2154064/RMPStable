@@ -16,6 +16,9 @@ using MegaCrit.Sts2.Core.Rooms;
 using MegaCrit.Sts2.Core.Runs;
 using MegaCrit.Sts2.Core.Saves;
 using MegaCrit.Sts2.Core.Settings;
+#if STS2_0114
+using RemoveMultiplayerPlayerLimit.Infrastructure;
+#endif
 namespace RemoveMultiplayerPlayerLimit.Features.LiveSharing;
 
 internal sealed partial class MirrorRenderer
@@ -179,6 +182,10 @@ internal sealed partial class MirrorRenderer
                     var action = item.action!.ToGameAction(_state!.GetPlayer(item.playerId!.Value));
                     if (action.ActionType == GameActionType.CombatPlayPhaseOnly)
                         while (CombatManager.Instance.DebugOnlyGetState().CurrentSide == CombatSide.Enemy) await Frame(_generation);
+#if STS2_0114
+                    if (action is PickRelicAction)
+                        while (manager.ActionExecutor.IsRunning || !RelicVotingReady()) await Frame(_generation);
+#endif
                     manager.ActionQueueSet.EnqueueWithoutSynchronizing(action);
                     break;
                 case CombatReplayEventType.HookAction:
@@ -197,6 +204,19 @@ internal sealed partial class MirrorRenderer
             if (!reconstructing || (_events - message.Index) % 8 == 0) await Frame(_generation);
         }
     }
+#if STS2_0114
+    private static bool RelicVotingReady()
+    {
+        var relics = RunManager.Instance.TreasureRoomRelicSynchronizer.CurrentRelics;
+        if (relics == null) return true;
+
+        // The game advances the vote round before the award animation removes
+        // and reindexes its holders. Replay must wait for the native selection.
+        var collection = SceneMonitor.FindTreasureRoomRelicCollection();
+        return collection?.IsVisibleInTree() == true && collection.HoldersInUse.Count == relics.Count &&
+            collection.HoldersInUse.All(holder => holder.IsEnabled && holder.IsVisibleInTree());
+    }
+#endif
     private async void TrackNoncombatTask(Task task, long generation)
     { try { await task; } catch (Exception e) { if (_generation == generation) { _error = e.ToString(); GD.PrintErr("[RMP:NoncombatReplay] " + e); } } }
     private void ApplyNoncombatPresentation(MirrorMessage message)
